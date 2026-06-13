@@ -11,10 +11,13 @@ import {
   TableSortLabel,
   Tooltip,
 } from '@mui/material';
-import { formatDuration, formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
+import type { SxProps, Theme } from '@mui/material';
+import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
 import type { CourierRow } from '../types';
 import { LocationCell } from './LocationCell';
 import { AttractivityCell } from './AttractivityCell';
+import { DangerCell } from './DangerCell';
+import { RouteCell } from './RouteCell';
 import { useTableSort, type SortValueGetter } from './useTableSort';
 
 interface Column {
@@ -24,10 +27,16 @@ interface Column {
   tooltip?: string;
   render: (row: CourierRow) => ReactNode;
   sortValue: SortValueGetter<CourierRow>;
+  /** Extra styling for the body cells of this column. */
+  cellSx?: SxProps<Theme>;
 }
 
-const jumps = (value: number | null): ReactNode =>
-  value === null ? '—' : `${formatNumber(value, 0)} jumps`;
+// The route column wraps so the square strip can flow under the jump count.
+const ROUTE_CELL_SX: SxProps<Theme> = { whiteSpace: 'normal', verticalAlign: 'top', minWidth: 260 };
+
+// Cap the pickup/dropoff columns; long station names truncate with ellipsis
+// (the full name is available in each cell's tooltip).
+const LOCATION_CELL_SX: SxProps<Theme> = { maxWidth: 190, overflow: 'hidden' };
 
 interface ContractsTableProps {
   rows: CourierRow[];
@@ -44,6 +53,7 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         align: 'left',
         render: (r) => <LocationCell endpoint={r.pickup} />,
         sortValue: (r) => r.pickup.name,
+        cellSx: LOCATION_CELL_SX,
       },
       {
         id: 'dropoff',
@@ -51,6 +61,7 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         align: 'left',
         render: (r) => <LocationCell endpoint={r.dropoff} />,
         sortValue: (r) => r.dropoff.name,
+        cellSx: LOCATION_CELL_SX,
       },
       {
         id: 'volume',
@@ -66,21 +77,24 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         render: (r) => formatIskMillions(r.reward),
         sortValue: (r) => r.reward,
       },
-      showCurrentJumps && {
-        id: 'jumpsFromCurrent',
-        label: 'To pickup',
-        align: 'right',
-        tooltip: 'Jumps from your current station to the pickup location.',
-        render: (r) => jumps(r.jumpsFromCurrent),
-        sortValue: (r) => r.jumpsFromCurrent,
+      {
+        id: 'route',
+        label: 'Route',
+        align: 'left',
+        tooltip: showCurrentJumps
+          ? 'Full journey: current station → pickup (↑) → dropoff (↓). Squares are systems, coloured by EVE security. Jumps shown as "approach + delivery".'
+          : 'Delivery route pickup (↑) → dropoff (↓). Squares are systems, coloured by EVE security.',
+        render: (r) => <RouteCell row={r} />,
+        sortValue: (r) => r.totalJumps,
+        cellSx: ROUTE_CELL_SX,
       },
       {
-        id: 'jumpsToDropoff',
-        label: 'To dropoff',
-        align: 'right',
-        tooltip: 'Jumps from pickup to dropoff (the delivery leg).',
-        render: (r) => jumps(r.jumpsToDropoff),
-        sortValue: (r) => r.jumpsToDropoff,
+        id: 'danger',
+        label: 'Danger',
+        align: 'center',
+        tooltip: 'Danger index 0–100 for the delivery route (low/null-sec + recent kills). Hover a value for the calculation.',
+        render: (r) => <DangerCell score={r.danger} steps={r.dangerSteps} />,
+        sortValue: (r) => r.danger,
       },
       {
         id: 'incomePerJump',
@@ -192,7 +206,11 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
           {pagedRows.map((row) => (
             <TableRow key={row.id} hover>
               {columns.map((col) => (
-                <TableCell key={col.id} align={col.align} sx={{ whiteSpace: 'nowrap' }}>
+                <TableCell
+                  key={col.id}
+                  align={col.align}
+                  sx={{ whiteSpace: 'nowrap', ...col.cellSx }}
+                >
                   {col.render(row)}
                 </TableCell>
               ))}

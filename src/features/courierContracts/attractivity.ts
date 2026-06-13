@@ -32,9 +32,9 @@ export const ATTRACTIVITY_METHODS: AttractivityMethodInfo[] = [
     id: 'riskAdjusted',
     label: 'Risk-adjusted value',
     description:
-      'Blends three factors: ISK per jump (50%), low collateral relative to ' +
-      'reward (30%) and ISK per m³ of cargo (20%). Rewards efficient, ' +
-      'low-risk, high-value-density hauls — favouring contracts that pay well ' +
+      'Blends four factors: ISK per jump (40%), a low danger index for the ' +
+      'route (30%), low collateral relative to reward (20%) and ISK per m³ of ' +
+      'cargo (10%). Favours contracts that pay well per jump along a safe path ' +
       'without forcing you to risk a large collateral on a big load.',
   },
 ];
@@ -100,9 +100,16 @@ function profitPerJumpSteps(row: CourierRow, ipjStats: Stats, u: number, score: 
   ];
 }
 
+interface RiskParts {
+  eff: number;
+  dangerSafety: number;
+  collateralSafety: number;
+  density: number;
+}
+
 function riskAdjustedSteps(
   row: CourierRow,
-  parts: { eff: number; safety: number; density: number },
+  parts: RiskParts,
   raw: { collateralRatio: number; iskPerM3: number },
   score: number,
 ): string[] {
@@ -111,25 +118,32 @@ function riskAdjustedSteps(
       ? 'ISK/jump: no route → 0.00'
       : `ISK/jump = ${formatIsk(row.incomePerJump)} → normalised ${f2(parts.eff)}`;
 
-  const safetyLine = `Collateral ratio = ${formatIsk(row.collateral)} ÷ ${formatIsk(
+  const dangerLine =
+    row.danger === null
+      ? 'Danger: no route → 0.00'
+      : `Danger index = ${row.danger}/100 → normalised (lower is safer) ${f2(parts.dangerSafety)}`;
+
+  const collateralLine = `Collateral ratio = ${formatIsk(row.collateral)} ÷ ${formatIsk(
     row.reward,
-  )} = ${f2(raw.collateralRatio)} → normalised (lower is safer) ${f2(parts.safety)}`;
+  )} = ${f2(raw.collateralRatio)} → normalised (lower is safer) ${f2(parts.collateralSafety)}`;
 
   const densityLine = `ISK per m³ = ${formatIsk(row.reward)} ÷ ${formatNumber(
     row.volume,
     2,
   )} m³ = ${formatIsk(raw.iskPerM3)} → normalised ${f2(parts.density)}`;
 
-  const blended = 0.5 * parts.eff + 0.3 * parts.safety + 0.2 * parts.density;
+  const blended =
+    0.4 * parts.eff + 0.3 * parts.dangerSafety + 0.2 * parts.collateralSafety + 0.1 * parts.density;
 
   return [
-    `1. ${effLine}  ×50%`,
-    `2. ${safetyLine}  ×30%`,
-    `3. ${densityLine}  ×20%`,
-    `4. Blended = 0.5×${f2(parts.eff)} + 0.3×${f2(parts.safety)} + 0.2×${f2(
-      parts.density,
-    )} = ${f2(blended)}`,
-    `5. Score = ${f2(blended)} × 100 = ${score}`,
+    `1. ${effLine}  ×40%`,
+    `2. ${dangerLine}  ×30%`,
+    `3. ${collateralLine}  ×20%`,
+    `4. ${densityLine}  ×10%`,
+    `5. Blended = 0.4×${f2(parts.eff)} + 0.3×${f2(parts.dangerSafety)} + 0.2×${f2(
+      parts.collateralSafety,
+    )} + 0.1×${f2(parts.density)} = ${f2(blended)}`,
+    `6. Score = ${f2(blended)} × 100 = ${score}`,
   ];
 }
 
@@ -155,21 +169,24 @@ export function computeAttractivity(rows: CourierRow[], method: AttractivityMeth
   // riskAdjusted
   const collateralRatio = rows.map((r) => (r.reward > 0 ? r.collateral / r.reward : Infinity));
   const iskPerM3 = rows.map((r) => (r.volume > 0 ? r.reward / r.volume : NaN));
+  const dangerValue = rows.map((r) => (r.danger === null ? NaN : r.danger));
   const ratioStats = stats(collateralRatio);
   const densityStats = stats(iskPerM3);
+  const dangerStats = stats(dangerValue);
 
   return rows.map((r, i) => {
     const eff = unit(incomePerJump[i], ipjStats, true);
-    const safety = unit(collateralRatio[i], ratioStats, false); // lower ratio = safer
+    const dangerSafety = unit(dangerValue[i], dangerStats, false); // lower danger = safer
+    const collateralSafety = unit(collateralRatio[i], ratioStats, false); // lower ratio = safer
     const density = unit(iskPerM3[i], densityStats, true);
-    const blended = 0.5 * eff + 0.3 * safety + 0.2 * density;
+    const blended = 0.4 * eff + 0.3 * dangerSafety + 0.2 * collateralSafety + 0.1 * density;
     const attractivity = Math.round(blended * 100);
     return {
       ...r,
       attractivity,
       attractivitySteps: riskAdjustedSteps(
         r,
-        { eff, safety, density },
+        { eff, dangerSafety, collateralSafety, density },
         { collateralRatio: collateralRatio[i], iskPerM3: iskPerM3[i] },
         attractivity,
       ),
