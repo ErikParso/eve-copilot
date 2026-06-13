@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { fetchAllCourierContracts, type CourierContractsResult } from '@/api/contracts';
+import { fetchAllCourierContracts } from '@/api/contracts';
+import { clearRouteCache } from '@/api/routes';
+import { clearSystemKillsCache } from '@/api/systemKills';
 import { computeAttractivity } from './attractivity';
 import { enrichContracts } from './enrichContracts';
 import {
@@ -10,31 +12,6 @@ import {
   searchResultAtom,
 } from './atoms';
 import { EMPTY_PROGRESS } from './types';
-
-// The all-regions contract fetch is expensive; cache it for the session. The
-// feed itself is cached by CCP (~30 min), so we keep our copy until CCP would
-// serve fresh data (its `expiresAt`), with a short floor/ceiling as a fallback
-// when the header is missing.
-const MIN_TTL_MS = 60 * 1000;
-const MAX_TTL_MS = 30 * 60 * 1000;
-let contractsCache: { staleAt: number; data: CourierContractsResult } | null = null;
-
-async function loadContracts(
-  onProgress: Parameters<typeof fetchAllCourierContracts>[0],
-  signal: AbortSignal,
-): Promise<CourierContractsResult> {
-  if (contractsCache && Date.now() < contractsCache.staleAt) {
-    return contractsCache.data;
-  }
-  const data = await fetchAllCourierContracts(onProgress, signal);
-  const now = Date.now();
-  // Reuse until CCP's snapshot expires, clamped to a sane window.
-  const ttl = data.expiresAt
-    ? Math.min(MAX_TTL_MS, Math.max(MIN_TTL_MS, data.expiresAt - now))
-    : MIN_TTL_MS;
-  contractsCache = { staleAt: now + ttl, data };
-  return data;
-}
 
 /**
  * Orchestrates a courier search: fetch contracts → filter/resolve/route →
@@ -55,6 +32,11 @@ export function useCourierSearch() {
     abortRef.current = controller;
     const { signal } = controller;
 
+    // Fetch everything fresh on each search — drop the per-session caches so
+    // routes and kills are re-requested (in-search de-duplication still applies).
+    clearRouteCache();
+    clearSystemKillsCache();
+
     const filters = draftFilters;
     setProgress({ ...EMPTY_PROGRESS, phase: 'contracts' });
     setResult({
@@ -67,7 +49,8 @@ export function useCourierSearch() {
     });
 
     try {
-      const contracts = await loadContracts(
+      // Always fetch the contracts feed fresh on each Search (no caching).
+      const contracts = await fetchAllCourierContracts(
         (p) =>
           setProgress((prev) => ({
             ...prev,

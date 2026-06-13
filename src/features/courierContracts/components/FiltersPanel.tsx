@@ -3,7 +3,7 @@ import { Box, Button, Grid, InputAdornment, Paper, TextField } from '@mui/materi
 import SearchIcon from '@mui/icons-material/Search';
 import { draftFiltersAtom } from '../atoms';
 import type { RouteType } from '../types';
-import { StationAutocomplete } from './StationAutocomplete';
+import { SystemAutocomplete } from './SystemAutocomplete';
 import { RouteTypeSelect } from './RouteTypeSelect';
 import { AttractivityWeightsControl } from './AttractivityWeightsControl';
 
@@ -58,9 +58,9 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
         </Grid>
 
         <Grid item xs={12} sm={6} md={3}>
-          <StationAutocomplete
-            value={filters.currentStationId}
-            onChange={(currentStationId) => setFilters((f) => ({ ...f, currentStationId }))}
+          <SystemAutocomplete
+            value={filters.currentSystemId}
+            onChange={(currentSystemId) => setFilters((f) => ({ ...f, currentSystemId }))}
           />
         </Grid>
 

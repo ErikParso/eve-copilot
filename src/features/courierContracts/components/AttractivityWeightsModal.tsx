@@ -100,7 +100,10 @@ export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsM
                   <Typography variant="body2" sx={{ fontWeight: 500 }}>
                     {factor.label}
                   </Typography>
-                  <Tooltip title={factor.description} arrow>
+                  <Tooltip
+                    title={`Set how relevant ${factor.label} is (0 = not relevant, 10 = most relevant)`}
+                    arrow
+                  >
                     <InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
                   </Tooltip>
                   <Box sx={{ flexGrow: 1 }} />

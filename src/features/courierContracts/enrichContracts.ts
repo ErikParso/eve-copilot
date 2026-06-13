@@ -96,9 +96,7 @@ export async function enrichContracts(
     (c) => c.collateral <= maxCollateral && c.volume <= maxCargo,
   );
 
-  const currentStation =
-    filters.currentStationId !== null ? getStation(filters.currentStationId) : undefined;
-  const currentSystemId = currentStation?.systemId ?? null;
+  const currentSystemId = filters.currentSystemId;
 
   // Single call for cluster-wide recent kills, used by the danger index.
   const kills = await loadSystemKills(signal);

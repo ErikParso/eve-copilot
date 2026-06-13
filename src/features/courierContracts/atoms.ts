@@ -18,7 +18,7 @@ import {
  * Persisted to localStorage so the user doesn't have to re-enter them.
  */
 export const draftFiltersAtom = atomWithStorage<CourierFilters>(
-  'eve-multitool.courierFilters',
+  'eve-multitool.courierFilters.v2',
   DEFAULT_FILTERS,
   undefined,
   { getOnInit: true },

@@ -66,8 +66,8 @@ export const FACTORS: FactorDef[] = [
     label: 'Jumps to pickup',
     direction: 'lower',
     description:
-      'Jumps from your current station to the pickup. Closer pickups are less ' +
-      'likely to be taken by others before you arrive. (Needs a current station.)',
+      'Jumps from your current system to the pickup. Closer pickups are less ' +
+      'likely to be taken by others before you arrive. (Needs a current system.)',
     value: (r) => r.jumpsFromCurrent,
     format: (v) => `${formatNumber(v, 0)} jumps`,
   },
@@ -139,13 +139,7 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
     id: 'balanced',
     label: 'Balanced',
     description: 'A sensible all-round mix of profit, effort and safety.',
-    weights: makeWeights({
-      totalIncome: 6,
-      totalJumps: 5,
-      danger: 5,
-      collateral: 4,
-      timeRemaining: 3,
-    }),
+    weights: makeWeights({ totalIncome: 5, danger: 5, totalJumps: 5 }),
   },
   {
     id: 'maxIskPerHour',
@@ -165,7 +159,7 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
     id: 'grabNearby',
     label: 'Grab nearby first',
     description:
-      'Prioritise contracts whose pickup is close and that have been listed a while — least likely to be taken before you arrive. Set your current station for this.',
+      'Prioritise contracts whose pickup is close and that have been listed a while — least likely to be taken before you arrive. Set your current system for this.',
     weights: makeWeights({ jumpsToPickup: 10, timeActive: 6, totalIncome: 4, totalJumps: 4 }),
   },
   {
