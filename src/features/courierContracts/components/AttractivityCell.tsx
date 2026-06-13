@@ -1,4 +1,4 @@
-import { Box } from '@mui/material';
+import { Box, Tooltip, Typography } from '@mui/material';
 
 /** Colour from red (0) through amber to green (100). */
 function scoreColor(score: number): string {
@@ -6,9 +6,17 @@ function scoreColor(score: number): string {
   return `hsl(${hue}, 70%, 45%)`;
 }
 
+interface AttractivityCellProps {
+  score: number;
+  /** Step-by-step calculation of this row's score (with real numbers). */
+  steps?: string[];
+}
+
 /** Attractivity index rendered as a colour-coded badge (0–100). */
-export function AttractivityCell({ score }: { score: number }) {
-  return (
+export function AttractivityCell({ score, steps }: AttractivityCellProps) {
+  const hasSteps = !!steps && steps.length > 0;
+
+  const badge = (
     <Box
       sx={{
         display: 'inline-flex',
@@ -22,9 +30,31 @@ export function AttractivityCell({ score }: { score: number }) {
         fontSize: '0.85rem',
         color: '#0d1117',
         bgcolor: scoreColor(score),
+        cursor: hasSteps ? 'help' : 'default',
       }}
     >
       {score}
     </Box>
+  );
+
+  if (!hasSteps) return badge;
+
+  const title = (
+    <Box sx={{ py: 0.5 }}>
+      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+        How this score is calculated
+      </Typography>
+      {steps!.map((step, i) => (
+        <Typography key={i} variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
+          {step}
+        </Typography>
+      ))}
+    </Box>
+  );
+
+  return (
+    <Tooltip title={title} arrow slotProps={{ tooltip: { sx: { maxWidth: 360 } } }}>
+      {badge}
+    </Tooltip>
   );
 }
