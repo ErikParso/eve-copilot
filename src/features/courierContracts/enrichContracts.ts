@@ -122,6 +122,7 @@ export async function enrichContracts(
         remainingSeconds: (expired - now) / 1000,
         daysToComplete: c.days_to_complete,
         attractivity: 0, // filled in by computeAttractivity
+        attractivitySteps: [],
       };
     },
     onRouteProgress,

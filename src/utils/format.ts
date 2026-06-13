@@ -30,6 +30,11 @@ export function formatIsk(value: number): string {
   return `${formatNumber(value, 0)} ISK`;
 }
 
+/** ISK expressed in millions, e.g. 4 314 445 → "4.31 M ISK". */
+export function formatIskMillions(value: number): string {
+  return `${formatNumber(value / 1_000_000, 2)} M ISK`;
+}
+
 /** Cargo volume in cubic metres. */
 export function formatVolume(value: number): string {
   return `${formatNumber(value, 2)} m³`;

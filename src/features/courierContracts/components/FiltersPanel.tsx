@@ -4,7 +4,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import { attractivityMethodAtom, draftFiltersAtom } from '../atoms';
 import type { RouteType } from '../types';
 import { StationAutocomplete } from './StationAutocomplete';
-import { RouteTypeToggle } from './RouteTypeToggle';
+import { RouteTypeSelect } from './RouteTypeSelect';
 import { AttractivityMethodSelect } from './AttractivityMethodSelect';
 
 interface FiltersPanelProps {
@@ -66,7 +66,7 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
         </Grid>
 
         <Grid item xs={12} sm={6} md={3}>
-          <RouteTypeToggle
+          <RouteTypeSelect
             value={filters.routeType}
             onChange={(routeType: RouteType) => setFilters((f) => ({ ...f, routeType }))}
           />

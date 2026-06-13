@@ -58,6 +58,8 @@ export interface CourierRow {
   daysToComplete: number;
   /** Attractivity index 0–100, recomputed per selected method. */
   attractivity: number;
+  /** Step-by-step explanation of how `attractivity` was calculated. */
+  attractivitySteps: string[];
 }
 
 export type SearchStatus = 'idle' | 'loading' | 'success' | 'error';

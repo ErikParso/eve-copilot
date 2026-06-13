@@ -4,6 +4,10 @@
 // metric is min-max normalised across the returned contracts, then combined.
 // This makes the index a good sort key for "best in the current list", which
 // is how it is intended to be used.
+//
+// Alongside the score, each row gets a step-by-step breakdown (with the row's
+// real numbers) so the UI can show exactly how the value was derived.
+import { formatIsk, formatNumber } from '@/utils/format';
 import type { CourierRow } from './types';
 
 export type AttractivityMethod = 'profitPerJump' | 'riskAdjusted';
@@ -37,48 +41,138 @@ export const ATTRACTIVITY_METHODS: AttractivityMethodInfo[] = [
 
 export const DEFAULT_ATTRACTIVITY_METHOD: AttractivityMethod = 'profitPerJump';
 
-/** Min-max normalise to [0,1]; equal values map to 1; non-finite map to 0. */
-function normalize(values: number[], higherIsBetter: boolean): number[] {
-  const finite = values.filter((v) => Number.isFinite(v));
-  if (finite.length === 0) return values.map(() => 0);
+interface Stats {
+  min: number;
+  max: number;
+  range: number;
+}
 
+/** Min/max/range over the finite values only. */
+function stats(values: number[]): Stats {
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length === 0) return { min: NaN, max: NaN, range: 0 };
   const min = Math.min(...finite);
   const max = Math.max(...finite);
-  const range = max - min;
+  return { min, max, range: max - min };
+}
 
-  return values.map((v) => {
-    if (!Number.isFinite(v)) return 0;
-    if (range === 0) return 1;
-    const unit = (v - min) / range;
-    return higherIsBetter ? unit : 1 - unit;
-  });
+/** Normalise one value to [0,1]; equal values → 1; non-finite → 0. */
+function unit(value: number, s: Stats, higherIsBetter: boolean): number {
+  if (!Number.isFinite(value)) return 0;
+  if (s.range === 0) return 1;
+  const u = (value - s.min) / s.range;
+  return higherIsBetter ? u : 1 - u;
 }
 
 function nullToNaN(v: number | null): number {
   return v === null ? NaN : v;
 }
 
-/** Returns a new array of rows with `attractivity` filled in. */
+function f2(n: number): string {
+  return formatNumber(n, 2);
+}
+
+// --- Per-row step builders -----------------------------------------------
+
+function profitPerJumpSteps(row: CourierRow, ipjStats: Stats, u: number, score: number): string[] {
+  if (row.incomePerJump === null) {
+    return ['No route available, so income per jump can’t be computed → score 0.'];
+  }
+
+  const jumpsLabel =
+    row.totalJumps === 0
+      ? 'same-system haul (0 jumps), so income/jump = full reward'
+      : `${formatIsk(row.reward)} ÷ ${formatNumber(row.totalJumps ?? 0, 0)} jumps = ${formatIsk(
+          row.incomePerJump,
+        )}`;
+
+  const normLine =
+    ipjStats.range === 0
+      ? 'All results have the same income/jump → normalised = 1.00'
+      : `Normalised vs all results: (${formatIsk(row.incomePerJump)} − ${formatIsk(
+          ipjStats.min,
+        )}) ÷ (${formatIsk(ipjStats.max)} − ${formatIsk(ipjStats.min)}) = ${f2(u)}`;
+
+  return [
+    `1. Income per jump: ${jumpsLabel}`,
+    `2. ${normLine}`,
+    `3. Score = ${f2(u)} × 100 = ${score}`,
+  ];
+}
+
+function riskAdjustedSteps(
+  row: CourierRow,
+  parts: { eff: number; safety: number; density: number },
+  raw: { collateralRatio: number; iskPerM3: number },
+  score: number,
+): string[] {
+  const effLine =
+    row.incomePerJump === null
+      ? 'ISK/jump: no route → 0.00'
+      : `ISK/jump = ${formatIsk(row.incomePerJump)} → normalised ${f2(parts.eff)}`;
+
+  const safetyLine = `Collateral ratio = ${formatIsk(row.collateral)} ÷ ${formatIsk(
+    row.reward,
+  )} = ${f2(raw.collateralRatio)} → normalised (lower is safer) ${f2(parts.safety)}`;
+
+  const densityLine = `ISK per m³ = ${formatIsk(row.reward)} ÷ ${formatNumber(
+    row.volume,
+    2,
+  )} m³ = ${formatIsk(raw.iskPerM3)} → normalised ${f2(parts.density)}`;
+
+  const blended = 0.5 * parts.eff + 0.3 * parts.safety + 0.2 * parts.density;
+
+  return [
+    `1. ${effLine}  ×50%`,
+    `2. ${safetyLine}  ×30%`,
+    `3. ${densityLine}  ×20%`,
+    `4. Blended = 0.5×${f2(parts.eff)} + 0.3×${f2(parts.safety)} + 0.2×${f2(
+      parts.density,
+    )} = ${f2(blended)}`,
+    `5. Score = ${f2(blended)} × 100 = ${score}`,
+  ];
+}
+
+/** Returns a new array of rows with `attractivity` + `attractivitySteps` filled in. */
 export function computeAttractivity(rows: CourierRow[], method: AttractivityMethod): CourierRow[] {
   if (rows.length === 0) return rows;
 
   const incomePerJump = rows.map((r) => nullToNaN(r.incomePerJump));
+  const ipjStats = stats(incomePerJump);
 
   if (method === 'profitPerJump') {
-    const scores = normalize(incomePerJump, true);
-    return rows.map((r, i) => ({ ...r, attractivity: Math.round(scores[i] * 100) }));
+    return rows.map((r, i) => {
+      const u = unit(incomePerJump[i], ipjStats, true);
+      const attractivity = Math.round(u * 100);
+      return {
+        ...r,
+        attractivity,
+        attractivitySteps: profitPerJumpSteps(r, ipjStats, u, attractivity),
+      };
+    });
   }
 
   // riskAdjusted
   const collateralRatio = rows.map((r) => (r.reward > 0 ? r.collateral / r.reward : Infinity));
   const iskPerM3 = rows.map((r) => (r.volume > 0 ? r.reward / r.volume : NaN));
-
-  const effScore = normalize(incomePerJump, true);
-  const safetyScore = normalize(collateralRatio, false); // lower collateral ratio = safer
-  const densityScore = normalize(iskPerM3, true);
+  const ratioStats = stats(collateralRatio);
+  const densityStats = stats(iskPerM3);
 
   return rows.map((r, i) => {
-    const blended = 0.5 * effScore[i] + 0.3 * safetyScore[i] + 0.2 * densityScore[i];
-    return { ...r, attractivity: Math.round(blended * 100) };
+    const eff = unit(incomePerJump[i], ipjStats, true);
+    const safety = unit(collateralRatio[i], ratioStats, false); // lower ratio = safer
+    const density = unit(iskPerM3[i], densityStats, true);
+    const blended = 0.5 * eff + 0.3 * safety + 0.2 * density;
+    const attractivity = Math.round(blended * 100);
+    return {
+      ...r,
+      attractivity,
+      attractivitySteps: riskAdjustedSteps(
+        r,
+        { eff, safety, density },
+        { collateralRatio: collateralRatio[i], iskPerM3: iskPerM3[i] },
+        attractivity,
+      ),
+    };
   });
 }
