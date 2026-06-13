@@ -1,0 +1,1 @@
+number of kills in high sec system is less relevant if it comes to risk calculation, those are probably not a ganks. Number of kills are more relevant for low sec and real danger in null sec systems (update the danger index calculation)
