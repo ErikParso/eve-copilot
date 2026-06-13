@@ -111,14 +111,20 @@ export async function fetchAllCourierContracts(
     (done, total) => onProgress?.({ regionsDone: done, regionsTotal: total }),
   );
 
-  const maxOf = (pick: (r: RegionResult) => number | null): number | null => {
-    const values = perRegion.map(pick).filter((v): v is number => v !== null);
-    return values.length ? Math.max(...values) : null;
-  };
+  const now = Date.now();
+  const values = (pick: (r: RegionResult) => number | null): number[] =>
+    perRegion.map(pick).filter((v): v is number => v !== null);
+
+  const lm = values((r) => r.lastModified);
+  // Regions refresh on independent, staggered ~30-min cycles, so there is no
+  // single global refresh time. The soonest *upcoming* region expiry is the
+  // next moment CCP serves any fresher data; the latest last-modified is how
+  // recent the freshest part of the snapshot is.
+  const futureExpiries = values((r) => r.expires).filter((v) => v > now);
 
   return {
     contracts: perRegion.flatMap((r) => r.contracts),
-    expiresAt: maxOf((r) => r.expires),
-    lastModifiedAt: maxOf((r) => r.lastModified),
+    expiresAt: futureExpiries.length ? Math.min(...futureExpiries) : null,
+    lastModifiedAt: lm.length ? Math.max(...lm) : null,
   };
 }

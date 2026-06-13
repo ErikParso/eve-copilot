@@ -16,19 +16,16 @@ interface RawSystemKills {
   npc_kills: number;
 }
 
-const TTL_MS = 30 * 60 * 1000;
-let cache: { fetchedAt: number; map: Map<number, SystemKills> } | null = null;
+let cachedMap: Map<number, SystemKills> | null = null;
 let inFlight: Promise<Map<number, SystemKills>> | null = null;
 
 /**
- * Map of systemId → recent kills. Cached for the session (30 min) and
- * de-duplicated while in flight. Systems with no activity are simply absent
- * from the map (treat as zero kills).
+ * Map of systemId → recent kills. Fetched fresh per search (the cache is
+ * cleared by `clearSystemKillsCache`); within one search concurrent calls are
+ * de-duplicated. Systems with no activity are absent (treat as zero kills).
  */
 export function loadSystemKills(signal?: AbortSignal): Promise<Map<number, SystemKills>> {
-  if (cache && Date.now() - cache.fetchedAt < TTL_MS) {
-    return Promise.resolve(cache.map);
-  }
+  if (cachedMap) return Promise.resolve(cachedMap);
   if (inFlight) return inFlight;
 
   inFlight = esiGet<RawSystemKills[]>('/universe/system_kills/', undefined, signal)
@@ -41,7 +38,7 @@ export function loadSystemKills(signal?: AbortSignal): Promise<Map<number, Syste
           npcKills: r.npc_kills,
         });
       }
-      cache = { fetchedAt: Date.now(), map };
+      cachedMap = map;
       return map;
     })
     .finally(() => {
@@ -49,4 +46,9 @@ export function loadSystemKills(signal?: AbortSignal): Promise<Map<number, Syste
     });
 
   return inFlight;
+}
+
+/** Drop the kills cache so the next search fetches fresh activity. */
+export function clearSystemKillsCache(): void {
+  cachedMap = null;
 }

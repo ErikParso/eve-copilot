@@ -14,6 +14,10 @@ const SECURITY_WEIGHT = 0.7;
 const KILL_WEIGHT = 0.3;
 // Ship kills that bring the kill factor to ~0.5 (saturating constant).
 const KILL_SCALE = 15;
+// Per-jump danger contribution by security band. Null-sec is far riskier for a
+// hauler (no CONCORD, gate camps), so it is weighted well above low-sec.
+const LOW_SEC_WEIGHT = 0.5;
+const NULL_SEC_WEIGHT = 2.5;
 
 function f2(n: number): string {
   return formatNumber(n, 2);
@@ -36,7 +40,7 @@ export function computeDanger(route: RouteSystem[]): DangerResult {
   const nHigh = total - nNull - nLow;
   const shipKills = route.reduce((sum, s) => sum + s.shipKills, 0);
 
-  const securityScore = (0.5 * nLow + 1.0 * nNull) / total; // 0..1
+  const securityScore = Math.min(1, (LOW_SEC_WEIGHT * nLow + NULL_SEC_WEIGHT * nNull) / total); // 0..1
   const killScore = 1 - Math.exp(-shipKills / KILL_SCALE); // 0..1, saturating
 
   const blended = Math.min(1, SECURITY_WEIGHT * securityScore + KILL_WEIGHT * killScore);
@@ -44,7 +48,7 @@ export function computeDanger(route: RouteSystem[]): DangerResult {
 
   const steps = [
     `Route: ${total} systems — ${nHigh} high-sec, ${nLow} low-sec, ${nNull} null-sec`,
-    `1. Security exposure: (0.5×${nLow} low + 1.0×${nNull} null) ÷ ${total} = ${f2(securityScore)}`,
+    `1. Security exposure: (${LOW_SEC_WEIGHT}×${nLow} low + ${NULL_SEC_WEIGHT}×${nNull} null) ÷ ${total}, capped at 1 = ${f2(securityScore)}`,
     `2. Recent ship kills on route (last hour): ${formatNumber(shipKills, 0)} → 1 − e^(−${formatNumber(
       shipKills,
       0,

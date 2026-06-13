@@ -10,15 +10,15 @@ export interface CourierFilters {
   /** Maximum cargo volume in m³. */
   maxCargoM3: number | null;
   routeType: RouteType;
-  /** Origin station id for the "jumps from current station" column. */
-  currentStationId: number | null;
+  /** Origin solar-system id for the "jumps to pickup" calculation. */
+  currentSystemId: number | null;
 }
 
 export const DEFAULT_FILTERS: CourierFilters = {
   maxCollateralMillions: null,
   maxCargoM3: null,
   routeType: 'safest',
-  currentStationId: null,
+  currentSystemId: null,
 };
 
 /** One solar system on a route, with the data the danger index needs. */

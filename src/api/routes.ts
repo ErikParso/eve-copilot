@@ -72,3 +72,12 @@ export function getRoute(
 export function jumpsFromRoute(route: number[] | null): number | null {
   return route === null ? null : Math.max(0, route.length - 1);
 }
+
+/**
+ * Drop all cached routes. Called at the start of each search so routes are
+ * fetched fresh; within a single search identical pairs are still de-duplicated
+ * (so we don't fire the same request hundreds of times).
+ */
+export function clearRouteCache(): void {
+  routeCache.clear();
+}

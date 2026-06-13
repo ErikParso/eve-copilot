@@ -40,7 +40,7 @@ const LOCATION_CELL_SX: SxProps<Theme> = { maxWidth: 190, overflow: 'hidden' };
 
 interface ContractsTableProps {
   rows: CourierRow[];
-  /** Whether to show the "jumps from current station" column. */
+  /** Whether to show the approach leg (current system → pickup). */
   showCurrentJumps: boolean;
 }
 
@@ -90,7 +90,7 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         label: 'Route',
         align: 'left',
         tooltip: showCurrentJumps
-          ? 'Full journey: current station → pickup (↑) → dropoff (↓). Squares are systems, coloured by EVE security. Jumps shown as "approach + delivery".'
+          ? 'Full journey: current system → pickup (↑) → dropoff (↓). Squares are systems, coloured by EVE security. Jumps shown as "approach + delivery".'
           : 'Delivery route pickup (↑) → dropoff (↓). Squares are systems, coloured by EVE security.',
         render: (r) => <RouteCell row={r} />,
         sortValue: (r) => r.totalJumps,

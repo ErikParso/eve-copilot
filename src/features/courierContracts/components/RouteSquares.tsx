@@ -20,6 +20,9 @@ interface RouteSquaresProps {
 
 // Uniform square size for every system on the route (markers included).
 const SQUARE = 11;
+// Recent ship kills (last hour) at or above which a system is flagged with a
+// skull — a likely gank/gate-camp hotspot.
+const SKULL_KILL_THRESHOLD = 10;
 
 const MARKER_LABEL: Record<RouteMarker, string> = {
   current: 'Current location — ',
@@ -29,10 +32,11 @@ const MARKER_LABEL: Record<RouteMarker, string> = {
 
 function systemTooltip(system: RouteSystem, marker?: RouteMarker): string {
   const prefix = marker ? MARKER_LABEL[marker] : '';
+  const danger = system.shipKills >= SKULL_KILL_THRESHOLD ? ' ☠ gank risk' : '';
   return `${prefix}${system.name} · sec ${formatNumber(system.security, 1)} · ${formatNumber(
     system.shipKills,
     0,
-  )} kills/h`;
+  )} kills/h${danger}`;
 }
 
 /**

@@ -149,21 +149,22 @@ export function securityBand(security: number): SecurityBand {
   return 'null';
 }
 
-// EVE's security-status colour ramp (blue → green → yellow → orange → red),
-// keyed by security rounded to one decimal, but muted/desaturated so a long
-// row of squares is easy on the eyes.
+// EVE in-game security-status colour ramp, sampled directly from a route
+// planner screenshot (pixel-extracted), keyed by security rounded to one
+// decimal. 0.3 and 0.2 are interpolated (that route had no such systems);
+// everything else is measured. Null-sec (≤ 0.0) is the deepest red.
 const SECURITY_COLORS: Record<string, string> = {
-  '1.0': '#7FB7C9',
-  '0.9': '#7FC4B4',
-  '0.8': '#83C193',
-  '0.7': '#8FC084',
-  '0.6': '#A6C084',
-  '0.5': '#C4BE83',
-  '0.4': '#C4A883',
-  '0.3': '#C49483',
-  '0.2': '#C48783',
-  '0.1': '#BC7E7E',
-  '0.0': '#AE7373',
+  '1.0': '#33CCFF',
+  '0.9': '#5EB3AC',
+  '0.8': '#84BD73',
+  '0.7': '#8CC462',
+  '0.6': '#9CCE6D',
+  '0.5': '#F1FF34',
+  '0.4': '#FFB43B',
+  '0.3': '#E68A33', // interpolated 0.4 → 0.1
+  '0.2': '#CC562D', // interpolated 0.4 → 0.1
+  '0.1': '#BD3528',
+  '0.0': '#B62426',
 };
 
 /** Colour for a security status using EVE's ramp; null-sec (≤0) is deep red. */
@@ -174,21 +175,21 @@ export function securityColor(security: number): string {
 }
 
 /**
- * Case-insensitive substring search over NPC station names.
+ * Case-insensitive substring search over solar-system names.
  * Returns prefix matches first, then other substring matches, capped.
  */
-export function searchStations(query: string, limit = 50): Station[] {
+export function searchSystems(query: string, limit = 50): SolarSystem[] {
   const q = query.trim().toLowerCase();
   if (q.length < 3) return [];
 
-  const prefix: Station[] = [];
-  const contains: Station[] = [];
-  for (const station of stations) {
-    const name = station.name.toLowerCase();
+  const prefix: SolarSystem[] = [];
+  const contains: SolarSystem[] = [];
+  for (const system of systemById.values()) {
+    const name = system.name.toLowerCase();
     if (name.startsWith(q)) {
-      prefix.push(station);
+      prefix.push(system);
     } else if (name.includes(q)) {
-      contains.push(station);
+      contains.push(system);
     }
     if (prefix.length >= limit) break;
   }

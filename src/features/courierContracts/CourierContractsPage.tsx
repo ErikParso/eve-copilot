@@ -4,6 +4,7 @@ import {
   Box,
   LinearProgress,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { searchProgressAtom } from './atoms';
@@ -47,7 +48,7 @@ export function CourierContractsPage() {
   const { run, status, rows, error, appliedFilters, contractsAsOf, contractsExpiresAt } =
     useCourierSearch();
   const loading = status === 'loading';
-  const showCurrentJumps = appliedFilters?.currentStationId != null;
+  const showCurrentJumps = appliedFilters?.currentSystemId != null;
 
   return (
     <Stack spacing={2.5}>
@@ -83,10 +84,15 @@ export function CourierContractsPage() {
               {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
             </Typography>
             {(contractsAsOf || contractsExpiresAt) && (
-              <Typography variant="caption" color="text.secondary">
-                {contractsAsOf && <>EVE data as of {formatTime(contractsAsOf)}</>}
-                {contractsExpiresAt && <> · fresh data ~{formatTime(contractsExpiresAt)}</>}
-              </Typography>
+              <Tooltip
+                title="Each region's contract feed refreshes on its own staggered ~30-min cycle, so there's no single global refresh. “As of” is the freshest data's build time; “next update” is the soonest a region serves newer data — re-search after it."
+                arrow
+              >
+                <Typography variant="caption" color="text.secondary">
+                  {contractsAsOf && <>EVE data as of {formatTime(contractsAsOf)}</>}
+                  {contractsExpiresAt && <> · next update {formatTime(contractsExpiresAt)}</>}
+                </Typography>
+              </Tooltip>
             )}
           </Box>
           {rows.length > 0 ? (
