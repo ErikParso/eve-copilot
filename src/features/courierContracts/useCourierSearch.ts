@@ -84,17 +84,10 @@ export function useCourierSearch() {
         error: err instanceof Error ? err.message : 'Search failed',
       });
     }
-    // `method` intentionally excluded: re-scoring is handled by the effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftFilters, setProgress, setResult]);
+  }, [draftFilters, method, setProgress, setResult]);
 
-  // Re-score existing rows when the attractivity method changes (no re-fetch).
-  useEffect(() => {
-    setResult((prev) => {
-      if (prev.status !== 'success' || prev.rows.length === 0) return prev;
-      return { ...prev, rows: computeAttractivity(prev.rows, method) };
-    });
-  }, [method, setResult]);
+  // The attractivity method (like the other filters) is applied only on the
+  // next Search — `run` reads the current method when invoked.
 
   // Abort any in-flight search on unmount.
   useEffect(() => () => abortRef.current?.abort(), []);

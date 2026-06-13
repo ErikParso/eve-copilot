@@ -16,25 +16,24 @@ const FLAG_BY_TYPE: Record<RouteType, string> = {
 // lookups of the same pair collapse into a single request — important because
 // many contracts route toward the same hubs, and ESI 404s (unreachable systems
 // like Pochven) count against the error rate limit.
-const routeCache = new Map<string, Promise<number | null>>();
+const routeCache = new Map<string, Promise<number[] | null>>();
 
 function cacheKey(origin: number, dest: number, type: RouteType): string {
   return `${origin}:${dest}:${type}`;
 }
 
-async function fetchJumps(
+async function fetchRoute(
   origin: number,
   dest: number,
   type: RouteType,
   signal?: AbortSignal,
-): Promise<number | null> {
+): Promise<number[] | null> {
   try {
-    const systems = await esiGet<number[]>(
+    return await esiGet<number[]>(
       `/route/${origin}/${dest}/`,
       { flag: FLAG_BY_TYPE[type] },
       signal,
     );
-    return Math.max(0, systems.length - 1);
   } catch (err) {
     // A 404 means no gate route exists (wormhole-only / Pochven / isolated) —
     // a stable answer worth caching as "no route".
@@ -44,26 +43,32 @@ async function fetchJumps(
 }
 
 /**
- * Number of jumps between two systems, or `null` when no gate route exists
- * (e.g. wormhole-only systems). Returns 0 for same-system.
+ * The ordered list of solar-system ids on the route between two systems, or
+ * `null` when no gate route exists. For same-system the route is just the one
+ * system. The list includes both endpoints, so jumps = length - 1.
  */
-export function getJumps(
+export function getRoute(
   origin: number,
   dest: number,
   type: RouteType,
   signal?: AbortSignal,
-): Promise<number | null> {
-  if (origin === dest) return Promise.resolve(0);
+): Promise<number[] | null> {
+  if (origin === dest) return Promise.resolve([origin]);
 
   const key = cacheKey(origin, dest, type);
   const cached = routeCache.get(key);
   if (cached) return cached;
 
-  const promise = fetchJumps(origin, dest, type, signal).catch((err) => {
+  const promise = fetchRoute(origin, dest, type, signal).catch((err) => {
     // Don't cache transient failures (network/420/etc.) — drop so it can retry.
     routeCache.delete(key);
     throw err;
   });
   routeCache.set(key, promise);
   return promise;
+}
+
+/** Jump count for a route, or `null` when no route exists. */
+export function jumpsFromRoute(route: number[] | null): number | null {
+  return route === null ? null : Math.max(0, route.length - 1);
 }

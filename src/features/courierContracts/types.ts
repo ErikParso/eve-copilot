@@ -21,6 +21,16 @@ export const DEFAULT_FILTERS: CourierFilters = {
   currentStationId: null,
 };
 
+/** One solar system on a route, with the data the danger index needs. */
+export interface RouteSystem {
+  systemId: number;
+  name: string;
+  security: number;
+  securityBand: SecurityBand;
+  /** Ship kills in this system in the last hour (0 if no recent activity). */
+  shipKills: number;
+}
+
 /** A resolved contract endpoint (station or unresolvable structure). */
 export interface ContractEndpoint {
   locationId: number;
@@ -46,6 +56,10 @@ export interface CourierRow {
   jumpsFromCurrent: number | null;
   /** Jumps from pickup to dropoff; null if no route. */
   jumpsToDropoff: number | null;
+  /** Systems on the current-station → pickup route (null if not applicable). */
+  approachRoute: RouteSystem[] | null;
+  /** Systems on the pickup → dropoff route (null if no route). */
+  deliveryRoute: RouteSystem[] | null;
   /** Sum of approach + delivery jumps used for income-per-jump. */
   totalJumps: number | null;
   /** Reward divided by total jumps (reward itself when totalJumps is 0). */
@@ -56,6 +70,10 @@ export interface CourierRow {
   remainingSeconds: number;
   /** Days the hauler has to complete after accepting. */
   daysToComplete: number;
+  /** Danger index 0–100 for the delivery route (null if no route). */
+  danger: number | null;
+  /** Step-by-step explanation of how `danger` was calculated. */
+  dangerSteps: string[];
   /** Attractivity index 0–100, recomputed per selected method. */
   attractivity: number;
   /** Step-by-step explanation of how `attractivity` was calculated. */

@@ -149,6 +149,30 @@ export function securityBand(security: number): SecurityBand {
   return 'null';
 }
 
+// EVE's security-status colour ramp (blue → green → yellow → orange → red),
+// keyed by security rounded to one decimal, but muted/desaturated so a long
+// row of squares is easy on the eyes.
+const SECURITY_COLORS: Record<string, string> = {
+  '1.0': '#7FB7C9',
+  '0.9': '#7FC4B4',
+  '0.8': '#83C193',
+  '0.7': '#8FC084',
+  '0.6': '#A6C084',
+  '0.5': '#C4BE83',
+  '0.4': '#C4A883',
+  '0.3': '#C49483',
+  '0.2': '#C48783',
+  '0.1': '#BC7E7E',
+  '0.0': '#AE7373',
+};
+
+/** Colour for a security status using EVE's ramp; null-sec (≤0) is deep red. */
+export function securityColor(security: number): string {
+  const clamped = Math.max(0, Math.min(1, security));
+  const key = (Math.round(clamped * 10) / 10).toFixed(1);
+  return SECURITY_COLORS[key] ?? '#F00000';
+}
+
 /**
  * Case-insensitive substring search over NPC station names.
  * Returns prefix matches first, then other substring matches, capped.
