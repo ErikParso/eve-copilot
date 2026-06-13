@@ -39,8 +39,13 @@ function ProgressBar() {
   );
 }
 
+function formatTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 export function CourierContractsPage() {
-  const { run, status, rows, error, appliedFilters } = useCourierSearch();
+  const { run, status, rows, error, appliedFilters, contractsAsOf, contractsExpiresAt } =
+    useCourierSearch();
   const loading = status === 'loading';
   const showCurrentJumps = appliedFilters?.currentStationId != null;
 
@@ -65,9 +70,25 @@ export function CourierContractsPage() {
 
       {status === 'success' && (
         <>
-          <Typography variant="body2" color="text.secondary">
-            {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
-          </Typography>
+          <Box
+            sx={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 1,
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
+            </Typography>
+            {(contractsAsOf || contractsExpiresAt) && (
+              <Typography variant="caption" color="text.secondary">
+                {contractsAsOf && <>EVE data as of {formatTime(contractsAsOf)}</>}
+                {contractsExpiresAt && <> · fresh data ~{formatTime(contractsExpiresAt)}</>}
+              </Typography>
+            )}
+          </Box>
           {rows.length > 0 ? (
             <ContractsTable rows={rows} showCurrentJumps={showCurrentJumps} />
           ) : (

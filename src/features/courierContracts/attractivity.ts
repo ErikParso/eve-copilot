@@ -1,45 +1,184 @@
-// Attractivity index (0–100) for courier contracts.
+// Advanced, user-weighted attractivity index (0–100).
 //
-// Both methods are *relative* to the current result set: each underlying
-// metric is min-max normalised across the returned contracts, then combined.
-// This makes the index a good sort key for "best in the current list", which
-// is how it is intended to be used.
-//
-// Alongside the score, each row gets a step-by-step breakdown (with the row's
-// real numbers) so the UI can show exactly how the value was derived.
-import { formatIsk, formatNumber } from '@/utils/format';
+// Every contract is scored as a weighted average of normalised factors the
+// user chooses. Each factor is min-max normalised across the current result
+// set (and flipped for "lower is better" factors), multiplied by its weight
+// (0–10, where 0 disables it), then averaged by total weight and scaled to
+// 0–100. The score is therefore relative to the current results — a good sort
+// key for "best in this list".
+import { formatDuration, formatIsk, formatNumber, formatVolume } from '@/utils/format';
 import type { CourierRow } from './types';
 
-export type AttractivityMethod = 'profitPerJump' | 'riskAdjusted';
+export type FactorDirection = 'higher' | 'lower';
 
-export interface AttractivityMethodInfo {
-  id: AttractivityMethod;
+export type FactorId =
+  | 'totalIncome'
+  | 'danger'
+  | 'totalJumps'
+  | 'jumpsToPickup'
+  | 'collateral'
+  | 'cargo'
+  | 'timeActive'
+  | 'timeRemaining'
+  | 'daysToComplete';
+
+export interface FactorDef {
+  id: FactorId;
   label: string;
+  direction: FactorDirection;
+  /** What it means / why it matters. */
   description: string;
+  /** Raw value for a row, or null when not applicable. */
+  value: (row: CourierRow) => number | null;
+  /** Format the raw value for the explanation tooltip. */
+  format: (value: number) => string;
 }
 
-export const ATTRACTIVITY_METHODS: AttractivityMethodInfo[] = [
+const days = (n: number) => `${formatNumber(n, 0)} day${n === 1 ? '' : 's'}`;
+
+export const FACTORS: FactorDef[] = [
   {
-    id: 'profitPerJump',
-    label: 'Profit per jump',
-    description:
-      'Ranks purely by reward earned per jump (approach + delivery jumps summed). ' +
-      'The contract with the best ISK/jump in the current results scores 100. ' +
-      'Best when your only concern is maximising income for the flying time. ' +
-      'Contracts with no computable route score 0.',
+    id: 'totalIncome',
+    label: 'Total income',
+    direction: 'higher',
+    description: 'The contract reward. Higher pays more in absolute ISK.',
+    value: (r) => r.reward,
+    format: formatIsk,
   },
   {
-    id: 'riskAdjusted',
-    label: 'Risk-adjusted value',
+    id: 'danger',
+    label: 'Danger index',
+    direction: 'lower',
+    description: 'Route danger (low/null-sec + recent kills). Lower is safer.',
+    value: (r) => r.danger,
+    format: (v) => `${formatNumber(v, 0)}/100`,
+  },
+  {
+    id: 'totalJumps',
+    label: 'Total jumps',
+    direction: 'lower',
+    description: 'Total jumps for the journey. Fewer is quicker.',
+    value: (r) => r.totalJumps,
+    format: (v) => `${formatNumber(v, 0)} jumps`,
+  },
+  {
+    id: 'jumpsToPickup',
+    label: 'Jumps to pickup',
+    direction: 'lower',
     description:
-      'Blends four factors: ISK per jump (40%), a low danger index for the ' +
-      'route (30%), low collateral relative to reward (20%) and ISK per m³ of ' +
-      'cargo (10%). Favours contracts that pay well per jump along a safe path ' +
-      'without forcing you to risk a large collateral on a big load.',
+      'Jumps from your current station to the pickup. Closer pickups are less ' +
+      'likely to be taken by others before you arrive. (Needs a current station.)',
+    value: (r) => r.jumpsFromCurrent,
+    format: (v) => `${formatNumber(v, 0)} jumps`,
+  },
+  {
+    id: 'collateral',
+    label: 'Collateral',
+    direction: 'lower',
+    description: 'ISK you must put up. Lower means less at risk if it goes wrong.',
+    value: (r) => r.collateral,
+    format: formatIsk,
+  },
+  {
+    id: 'cargo',
+    label: 'Cargo volume',
+    direction: 'lower',
+    description: 'Cargo size in m³. Lower fits more ships and is easier to move.',
+    value: (r) => r.volume,
+    format: formatVolume,
+  },
+  {
+    id: 'timeActive',
+    label: 'Time active',
+    direction: 'higher',
+    description:
+      'How long the contract has been listed. Older contracts are less likely ' +
+      'to be snapped up by others while you travel to pick them up.',
+    value: (r) => r.activeDurationSeconds,
+    format: formatDuration,
+  },
+  {
+    id: 'timeRemaining',
+    label: 'Time remaining',
+    direction: 'higher',
+    description:
+      'Time until the contract expires. More buffer means it is less likely to ' +
+      'disappear before you can accept and deliver it.',
+    value: (r) => r.remainingSeconds,
+    format: formatDuration,
+  },
+  {
+    id: 'daysToComplete',
+    label: 'Days to complete',
+    direction: 'higher',
+    description:
+      'Time allowed to deliver after accepting. More is safer for long hauls.',
+    value: (r) => r.daysToComplete,
+    format: days,
   },
 ];
 
-export const DEFAULT_ATTRACTIVITY_METHOD: AttractivityMethod = 'profitPerJump';
+const FACTOR_BY_ID = new Map(FACTORS.map((f) => [f.id, f]));
+
+export type AttractivityWeights = Record<FactorId, number>;
+
+function makeWeights(partial: Partial<AttractivityWeights>): AttractivityWeights {
+  const base = Object.fromEntries(FACTORS.map((f) => [f.id, 0])) as AttractivityWeights;
+  return { ...base, ...partial };
+}
+
+export interface AttractivityPreset {
+  id: string;
+  label: string;
+  description: string;
+  weights: AttractivityWeights;
+}
+
+export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    description: 'A sensible all-round mix of profit, effort and safety.',
+    weights: makeWeights({
+      totalIncome: 6,
+      totalJumps: 5,
+      danger: 5,
+      collateral: 4,
+      timeRemaining: 3,
+    }),
+  },
+  {
+    id: 'maxIskPerHour',
+    label: 'Max ISK / hour',
+    description:
+      'Chase profit for the flying time — high income with as few jumps as possible.',
+    weights: makeWeights({ totalIncome: 8, totalJumps: 8, danger: 2 }),
+  },
+  {
+    id: 'safe',
+    label: 'Safe & steady',
+    description:
+      'Minimise risk: avoid dangerous routes and large collateral, with a modest pull toward decent income on short routes.',
+    weights: makeWeights({ danger: 10, collateral: 8, totalIncome: 3, totalJumps: 3, timeRemaining: 3 }),
+  },
+  {
+    id: 'grabNearby',
+    label: 'Grab nearby first',
+    description:
+      'Prioritise contracts whose pickup is close and that have been listed a while — least likely to be taken before you arrive. Set your current station for this.',
+    weights: makeWeights({ jumpsToPickup: 10, timeActive: 6, totalIncome: 4, totalJumps: 4 }),
+  },
+  {
+    id: 'bigBulk',
+    label: 'Big bulk runs',
+    description: 'Go for the largest payouts (favouring smaller cargo for value density), with mild caution on collateral and danger.',
+    weights: makeWeights({ totalIncome: 10, cargo: 5, collateral: 4, danger: 3 }),
+  },
+];
+
+export const DEFAULT_WEIGHTS: AttractivityWeights = ATTRACTIVITY_PRESETS[0].weights;
+
+// --- Scoring -------------------------------------------------------------
 
 interface Stats {
   min: number;
@@ -47,7 +186,6 @@ interface Stats {
   range: number;
 }
 
-/** Min/max/range over the finite values only. */
 function stats(values: number[]): Stats {
   const finite = values.filter((v) => Number.isFinite(v));
   if (finite.length === 0) return { min: NaN, max: NaN, range: 0 };
@@ -56,7 +194,6 @@ function stats(values: number[]): Stats {
   return { min, max, range: max - min };
 }
 
-/** Normalise one value to [0,1]; equal values → 1; non-finite → 0. */
 function unit(value: number, s: Stats, higherIsBetter: boolean): number {
   if (!Number.isFinite(value)) return 0;
   if (s.range === 0) return 1;
@@ -64,132 +201,69 @@ function unit(value: number, s: Stats, higherIsBetter: boolean): number {
   return higherIsBetter ? u : 1 - u;
 }
 
-function nullToNaN(v: number | null): number {
-  return v === null ? NaN : v;
-}
-
 function f2(n: number): string {
   return formatNumber(n, 2);
 }
 
-// --- Per-row step builders -----------------------------------------------
-
-function profitPerJumpSteps(row: CourierRow, ipjStats: Stats, u: number, score: number): string[] {
-  if (row.incomePerJump === null) {
-    return ['No route available, so income per jump can’t be computed → score 0.'];
-  }
-
-  const jumpsLabel =
-    row.totalJumps === 0
-      ? 'same-system haul (0 jumps), so income/jump = full reward'
-      : `${formatIsk(row.reward)} ÷ ${formatNumber(row.totalJumps ?? 0, 0)} jumps = ${formatIsk(
-          row.incomePerJump,
-        )}`;
-
-  const normLine =
-    ipjStats.range === 0
-      ? 'All results have the same income/jump → normalised = 1.00'
-      : `Normalised vs all results: (${formatIsk(row.incomePerJump)} − ${formatIsk(
-          ipjStats.min,
-        )}) ÷ (${formatIsk(ipjStats.max)} − ${formatIsk(ipjStats.min)}) = ${f2(u)}`;
-
-  return [
-    `1. Income per jump: ${jumpsLabel}`,
-    `2. ${normLine}`,
-    `3. Score = ${f2(u)} × 100 = ${score}`,
-  ];
-}
-
-interface RiskParts {
-  eff: number;
-  dangerSafety: number;
-  collateralSafety: number;
-  density: number;
-}
-
-function riskAdjustedSteps(
-  row: CourierRow,
-  parts: RiskParts,
-  raw: { collateralRatio: number; iskPerM3: number },
-  score: number,
-): string[] {
-  const effLine =
-    row.incomePerJump === null
-      ? 'ISK/jump: no route → 0.00'
-      : `ISK/jump = ${formatIsk(row.incomePerJump)} → normalised ${f2(parts.eff)}`;
-
-  const dangerLine =
-    row.danger === null
-      ? 'Danger: no route → 0.00'
-      : `Danger index = ${row.danger}/100 → normalised (lower is safer) ${f2(parts.dangerSafety)}`;
-
-  const collateralLine = `Collateral ratio = ${formatIsk(row.collateral)} ÷ ${formatIsk(
-    row.reward,
-  )} = ${f2(raw.collateralRatio)} → normalised (lower is safer) ${f2(parts.collateralSafety)}`;
-
-  const densityLine = `ISK per m³ = ${formatIsk(row.reward)} ÷ ${formatNumber(
-    row.volume,
-    2,
-  )} m³ = ${formatIsk(raw.iskPerM3)} → normalised ${f2(parts.density)}`;
-
-  const blended =
-    0.4 * parts.eff + 0.3 * parts.dangerSafety + 0.2 * parts.collateralSafety + 0.1 * parts.density;
-
-  return [
-    `1. ${effLine}  ×40%`,
-    `2. ${dangerLine}  ×30%`,
-    `3. ${collateralLine}  ×20%`,
-    `4. ${densityLine}  ×10%`,
-    `5. Blended = 0.4×${f2(parts.eff)} + 0.3×${f2(parts.dangerSafety)} + 0.2×${f2(
-      parts.collateralSafety,
-    )} + 0.1×${f2(parts.density)} = ${f2(blended)}`,
-    `6. Score = ${f2(blended)} × 100 = ${score}`,
-  ];
+interface ActiveFactor {
+  def: FactorDef;
+  weight: number;
+  values: number[];
+  stats: Stats;
 }
 
 /** Returns a new array of rows with `attractivity` + `attractivitySteps` filled in. */
-export function computeAttractivity(rows: CourierRow[], method: AttractivityMethod): CourierRow[] {
+export function computeAttractivity(rows: CourierRow[], weights: AttractivityWeights): CourierRow[] {
   if (rows.length === 0) return rows;
 
-  const incomePerJump = rows.map((r) => nullToNaN(r.incomePerJump));
-  const ipjStats = stats(incomePerJump);
-
-  if (method === 'profitPerJump') {
-    return rows.map((r, i) => {
-      const u = unit(incomePerJump[i], ipjStats, true);
-      const attractivity = Math.round(u * 100);
-      return {
-        ...r,
-        attractivity,
-        attractivitySteps: profitPerJumpSteps(r, ipjStats, u, attractivity),
-      };
+  // Keep only weighted factors that actually have data in this result set.
+  const active: ActiveFactor[] = [];
+  for (const def of FACTORS) {
+    const weight = weights[def.id] ?? 0;
+    if (weight <= 0) continue;
+    const values = rows.map((r) => {
+      const v = def.value(r);
+      return v === null ? NaN : v;
     });
+    const s = stats(values);
+    if (!Number.isFinite(s.min)) continue; // no usable data → skip entirely
+    active.push({ def, weight, values, stats: s });
   }
 
-  // riskAdjusted
-  const collateralRatio = rows.map((r) => (r.reward > 0 ? r.collateral / r.reward : Infinity));
-  const iskPerM3 = rows.map((r) => (r.volume > 0 ? r.reward / r.volume : NaN));
-  const dangerValue = rows.map((r) => (r.danger === null ? NaN : r.danger));
-  const ratioStats = stats(collateralRatio);
-  const densityStats = stats(iskPerM3);
-  const dangerStats = stats(dangerValue);
+  const totalWeight = active.reduce((sum, a) => sum + a.weight, 0);
 
-  return rows.map((r, i) => {
-    const eff = unit(incomePerJump[i], ipjStats, true);
-    const dangerSafety = unit(dangerValue[i], dangerStats, false); // lower danger = safer
-    const collateralSafety = unit(collateralRatio[i], ratioStats, false); // lower ratio = safer
-    const density = unit(iskPerM3[i], densityStats, true);
-    const blended = 0.4 * eff + 0.3 * dangerSafety + 0.2 * collateralSafety + 0.1 * density;
-    const attractivity = Math.round(blended * 100);
-    return {
-      ...r,
-      attractivity,
-      attractivitySteps: riskAdjustedSteps(
-        r,
-        { eff, dangerSafety, collateralSafety, density },
-        { collateralRatio: collateralRatio[i], iskPerM3: iskPerM3[i] },
-        attractivity,
-      ),
-    };
+  if (totalWeight === 0) {
+    const steps = ['No factors are weighted. Open “Attractivity weights” to configure scoring.'];
+    return rows.map((r) => ({ ...r, attractivity: 0, attractivitySteps: steps }));
+  }
+
+  return rows.map((row, i) => {
+    let contribSum = 0;
+    const lines: string[] = [];
+    for (const a of active) {
+      const norm = unit(a.values[i], a.stats, a.def.direction === 'higher');
+      const contrib = a.weight * norm;
+      contribSum += contrib;
+      const raw = Number.isFinite(a.values[i]) ? a.def.format(a.values[i]) : '—';
+      const arrow = a.def.direction === 'higher' ? '↑' : '↓';
+      lines.push(
+        `• ${a.def.label} ${arrow}: ${raw} → norm ${f2(norm)} × w${a.weight} = ${f2(contrib)}`,
+      );
+    }
+    const avg = contribSum / totalWeight;
+    const attractivity = Math.round(avg * 100);
+
+    const steps = [
+      'Weighted average of your factors (norm 0–1, ↑ higher-better / ↓ lower-better):',
+      ...lines,
+      `Score = ${f2(contribSum)} ÷ ${formatNumber(totalWeight, 0)} (total weight) × 100 = ${attractivity}`,
+    ];
+
+    return { ...row, attractivity, attractivitySteps: steps };
   });
+}
+
+/** Human label for a factor id (used by the weights UI). */
+export function factorLabel(id: FactorId): string {
+  return FACTOR_BY_ID.get(id)?.label ?? id;
 }

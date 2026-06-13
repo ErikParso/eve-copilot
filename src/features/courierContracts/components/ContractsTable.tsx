@@ -109,8 +109,8 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         label: 'ISK / jump',
         align: 'right',
         tooltip: showCurrentJumps
-          ? 'Income divided by total jumps (approach + delivery).'
-          : 'Income divided by delivery jumps.',
+          ? 'Income divided by total journey jumps (to pickup + delivery).'
+          : 'Income divided by the delivery jumps.',
         render: (r) => (r.incomePerJump === null ? '—' : formatIsk(r.incomePerJump)),
         sortValue: (r) => r.incomePerJump,
       },

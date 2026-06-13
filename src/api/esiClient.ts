@@ -38,16 +38,31 @@ export async function esiGet<T>(
   return (await res.json()) as T;
 }
 
+function parseHttpDate(value: string | null): number | null {
+  if (!value) return null;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? t : null;
+}
+
+export interface PagedResponse<T> {
+  data: T;
+  pages: number;
+  /** `Expires` header as epoch ms — when CCP will serve fresh data. */
+  expires: number | null;
+  /** `Last-Modified` header as epoch ms — when this snapshot was built. */
+  lastModified: number | null;
+}
+
 /**
  * GET the first page and report total pages via the `X-Pages` header so the
- * caller can fan out the remaining pages.
+ * caller can fan out the remaining pages. Also surfaces the cache timestamps.
  */
 export async function esiGetPaged<T>(
   path: string,
   page: number,
   params?: Record<string, string | number>,
   signal?: AbortSignal,
-): Promise<{ data: T; pages: number }> {
+): Promise<PagedResponse<T>> {
   const res = await fetch(withParams(path, { ...params, page }), {
     headers: { Accept: 'application/json' },
     signal,
@@ -56,6 +71,8 @@ export async function esiGetPaged<T>(
     throw new EsiError(`ESI ${res.status} for ${path} (page ${page})`, res.status);
   }
   const pages = Number(res.headers.get('X-Pages') ?? '1');
+  const expires = parseHttpDate(res.headers.get('expires'));
+  const lastModified = parseHttpDate(res.headers.get('last-modified'));
   const data = (await res.json()) as T;
-  return { data, pages };
+  return { data, pages, expires, lastModified };
 }

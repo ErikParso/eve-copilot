@@ -35,11 +35,21 @@ export async function fetchRegionIds(signal?: AbortSignal): Promise<number[]> {
   return esiGet<number[]>('/universe/regions/', undefined, signal);
 }
 
+interface RegionResult {
+  contracts: PublicContract[];
+  /** `Expires` of the region's first page (when CCP serves fresh data). */
+  expires: number | null;
+  /** `Last-Modified` of the region's first page (snapshot build time). */
+  lastModified: number | null;
+}
+
 async function fetchRegionCourierContracts(
   regionId: number,
   signal: AbortSignal | undefined,
-): Promise<PublicContract[]> {
+): Promise<RegionResult> {
   const collected: PublicContract[] = [];
+  let expires: number | null = null;
+  let lastModified: number | null = null;
   try {
     const first = await esiGetPaged<PublicContract[]>(
       `/contracts/public/${regionId}/`,
@@ -47,6 +57,8 @@ async function fetchRegionCourierContracts(
       undefined,
       signal,
     );
+    expires = first.expires;
+    lastModified = first.lastModified;
     const keep = (list: PublicContract[]) => {
       for (const c of list) if (c.type === 'courier') collected.push(c);
     };
@@ -69,17 +81,27 @@ async function fetchRegionCourierContracts(
     // A region with no contracts returns 404; treat any region-level failure
     // as "no contracts here" rather than failing the whole search.
   }
-  return collected;
+  return { contracts: collected, expires, lastModified };
+}
+
+export interface CourierContractsResult {
+  contracts: PublicContract[];
+  /** When CCP will next serve fresh data (latest region `Expires`), or null. */
+  expiresAt: number | null;
+  /** When the current snapshot was built (latest region `Last-Modified`). */
+  lastModifiedAt: number | null;
 }
 
 /**
- * Fetch every public courier contract in the cluster.
+ * Fetch every public courier contract in the cluster, along with the feed's
+ * cache timestamps (CCP caches the public contracts feed ~30 min, so the data
+ * is only as fresh as `lastModifiedAt` and refreshes by `expiresAt`).
  * @param onProgress called as regions complete so the UI can show a counter.
  */
 export async function fetchAllCourierContracts(
   onProgress?: (progress: FetchProgress) => void,
   signal?: AbortSignal,
-): Promise<PublicContract[]> {
+): Promise<CourierContractsResult> {
   const regionIds = await fetchRegionIds(signal);
 
   const perRegion = await mapWithConcurrency(
@@ -89,5 +111,14 @@ export async function fetchAllCourierContracts(
     (done, total) => onProgress?.({ regionsDone: done, regionsTotal: total }),
   );
 
-  return perRegion.flat();
+  const maxOf = (pick: (r: RegionResult) => number | null): number | null => {
+    const values = perRegion.map(pick).filter((v): v is number => v !== null);
+    return values.length ? Math.max(...values) : null;
+  };
+
+  return {
+    contracts: perRegion.flatMap((r) => r.contracts),
+    expiresAt: maxOf((r) => r.expires),
+    lastModifiedAt: maxOf((r) => r.lastModified),
+  };
 }
