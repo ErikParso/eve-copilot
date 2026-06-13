@@ -48,6 +48,14 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
   const columns = useMemo<Column[]>(() => {
     const all: (Column | false)[] = [
       {
+        id: 'attractivity',
+        label: 'Attractivity',
+        align: 'center',
+        tooltip: 'Index 0–100 from the selected method. Hover a value to see how it was calculated.',
+        render: (r) => <AttractivityCell score={r.attractivity} steps={r.attractivitySteps} />,
+        sortValue: (r) => r.attractivity,
+      },
+      {
         id: 'pickup',
         label: 'Pickup',
         align: 'left',
@@ -122,14 +130,6 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         render: (r) => formatDuration(r.remainingSeconds),
         sortValue: (r) => r.remainingSeconds,
       },
-      {
-        id: 'attractivity',
-        label: 'Attractivity',
-        align: 'center',
-        tooltip: 'Index 0–100 from the selected method. Hover a value to see how it was calculated.',
-        render: (r) => <AttractivityCell score={r.attractivity} steps={r.attractivitySteps} />,
-        sortValue: (r) => r.attractivity,
-      },
     ];
     return all.filter((c): c is Column => c !== false);
   }, [showCurrentJumps]);
@@ -139,7 +139,10 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
     [columns],
   );
 
-  const { sort, cycleSort, sortedRows } = useTableSort(rows, getters);
+  const { sort, cycleSort, sortedRows } = useTableSort(rows, getters, {
+    columnId: 'attractivity',
+    direction: 'desc',
+  });
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);

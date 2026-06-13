@@ -18,8 +18,9 @@ export type SortValueGetter<T> = (row: T) => number | string | null | undefined;
 export function useTableSort<T>(
   rows: T[],
   getters: Record<string, SortValueGetter<T>>,
+  initialSort: SortState | null = null,
 ) {
-  const [sort, setSort] = useState<SortState | null>(null);
+  const [sort, setSort] = useState<SortState | null>(initialSort);
 
   const cycleSort = (columnId: string) => {
     setSort((prev) => {
