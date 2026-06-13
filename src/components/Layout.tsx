@@ -1,6 +1,7 @@
-import { AppBar, Box, Button, Container, Toolbar, Typography } from '@mui/material';
+import { AppBar, Box, Button, Container, Toolbar, Tooltip, Typography } from '@mui/material';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
+import { useSdeMeta } from '@/data/sdeContext';
 
 interface NavItem {
   label: string;
@@ -12,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [{ label: 'Courier Contracts', to: '/couriers' }];
 /** App shell: top navigation bar + routed page content. */
 export function Layout() {
   const { pathname } = useLocation();
+  const sdeMeta = useSdeMeta();
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -33,6 +35,21 @@ export function Layout() {
               </Button>
             ))}
           </Box>
+
+          <Box sx={{ flexGrow: 1 }} />
+
+          {sdeMeta && (
+            <Tooltip
+              title={`${sdeMeta.stationCount} stations · ${sdeMeta.systemCount} systems${
+                sdeMeta.fromCache ? ' (from local cache)' : ' (fresh)'
+              }`}
+              arrow
+            >
+              <Typography variant="caption" color="text.secondary">
+                SDE: {new Date(sdeMeta.fetchedAt).toLocaleDateString()}
+              </Typography>
+            </Tooltip>
+          )}
         </Toolbar>
       </AppBar>
 

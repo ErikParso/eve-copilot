@@ -9,12 +9,15 @@ import '@fontsource/roboto/700.css';
 
 import { theme } from './theme';
 import { router } from './router';
+import { SdeProvider } from './data/SdeProvider';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <RouterProvider router={router} />
+      <SdeProvider>
+        <RouterProvider router={router} />
+      </SdeProvider>
     </ThemeProvider>
   </React.StrictMode>,
 );
