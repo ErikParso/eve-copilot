@@ -1,11 +1,11 @@
 import { useAtom } from 'jotai';
 import { Box, Button, Grid, InputAdornment, Paper, TextField } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-import { attractivityMethodAtom, draftFiltersAtom } from '../atoms';
+import { draftFiltersAtom } from '../atoms';
 import type { RouteType } from '../types';
 import { StationAutocomplete } from './StationAutocomplete';
 import { RouteTypeSelect } from './RouteTypeSelect';
-import { AttractivityMethodSelect } from './AttractivityMethodSelect';
+import { AttractivityWeightsControl } from './AttractivityWeightsControl';
 
 interface FiltersPanelProps {
   onSearch: () => void;
@@ -21,7 +21,6 @@ function parseOptionalNumber(raw: string): number | null {
 
 export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
   const [filters, setFilters] = useAtom(draftFiltersAtom);
-  const [method, setMethod] = useAtom(attractivityMethodAtom);
 
   return (
     <Paper sx={{ p: 2.5 }} elevation={2}>
@@ -72,8 +71,8 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
           />
         </Grid>
 
-        <Grid item xs={12} md={9}>
-          <AttractivityMethodSelect value={method} onChange={setMethod} />
+        <Grid item xs={12} sm={6} md={3}>
+          <AttractivityWeightsControl />
         </Grid>
 
         <Grid item xs={12} md={3}>

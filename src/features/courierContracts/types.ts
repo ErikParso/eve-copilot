@@ -60,9 +60,9 @@ export interface CourierRow {
   approachRoute: RouteSystem[] | null;
   /** Systems on the pickup → dropoff route (null if no route). */
   deliveryRoute: RouteSystem[] | null;
-  /** Sum of approach + delivery jumps used for income-per-jump. */
+  /** Sum of approach + delivery jumps (the whole journey). */
   totalJumps: number | null;
-  /** Reward divided by total jumps (reward itself when totalJumps is 0). */
+  /** Reward divided by total journey jumps (reward itself when 0 jumps). */
   incomePerJump: number | null;
   /** Total listing lifetime in seconds (issued → expired). */
   activeDurationSeconds: number;

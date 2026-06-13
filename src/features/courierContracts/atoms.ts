@@ -1,11 +1,9 @@
-// Global state for the courier page (jotai). Draft filters + selected method
-// persist across navigation; the last search result is kept so returning to
-// the page does not require re-running the search.
+// Global state for the courier page (jotai). The filter inputs and attractivity
+// weights are persisted to localStorage so they survive reloads; the last
+// search result/progress are transient (kept only for the session).
 import { atom } from 'jotai';
-import {
-  DEFAULT_ATTRACTIVITY_METHOD,
-  type AttractivityMethod,
-} from './attractivity';
+import { atomWithStorage } from 'jotai/utils';
+import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import {
   DEFAULT_FILTERS,
   EMPTY_PROGRESS,
@@ -15,11 +13,24 @@ import {
   type SearchStatus,
 } from './types';
 
-/** Filters bound to the form inputs (the "draft", applied on Search click). */
-export const draftFiltersAtom = atom<CourierFilters>(DEFAULT_FILTERS);
+/**
+ * Filters bound to the form inputs (the "draft", applied on Search click).
+ * Persisted to localStorage so the user doesn't have to re-enter them.
+ */
+export const draftFiltersAtom = atomWithStorage<CourierFilters>(
+  'eve-multitool.courierFilters',
+  DEFAULT_FILTERS,
+  undefined,
+  { getOnInit: true },
+);
 
-/** Attractivity method drives recomputation of the index without re-fetching. */
-export const attractivityMethodAtom = atom<AttractivityMethod>(DEFAULT_ATTRACTIVITY_METHOD);
+/** User-chosen factor weights (0–10 each), persisted to localStorage. */
+export const attractivityWeightsAtom = atomWithStorage<AttractivityWeights>(
+  'eve-multitool.attractivityWeights',
+  DEFAULT_WEIGHTS,
+  undefined,
+  { getOnInit: true },
+);
 
 export interface SearchResult {
   status: SearchStatus;
@@ -27,6 +38,10 @@ export interface SearchResult {
   /** Filters that produced the current rows (snapshot at Search time). */
   appliedFilters: CourierFilters | null;
   error: string | null;
+  /** When the contracts snapshot was built by CCP (epoch ms), or null. */
+  contractsAsOf: number | null;
+  /** When CCP will next serve fresh contracts (epoch ms), or null. */
+  contractsExpiresAt: number | null;
 }
 
 export const searchResultAtom = atom<SearchResult>({
@@ -34,6 +49,8 @@ export const searchResultAtom = atom<SearchResult>({
   rows: [],
   appliedFilters: null,
   error: null,
+  contractsAsOf: null,
+  contractsExpiresAt: null,
 });
 
 export const searchProgressAtom = atom<SearchProgress>(EMPTY_PROGRESS);
