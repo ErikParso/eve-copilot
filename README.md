@@ -2,8 +2,8 @@
 
 A helper toolkit for [EVE Online](https://www.eveonline.com/), built with **React + TypeScript + MUI**.
 It talks to the public [EVE ESI API](https://esi.evetech.net/) (no login required for the
-current features) and ships a trimmed copy of the EVE Static Data Export (SDE) for
-fast, offline station/system lookups.
+current features) and loads the EVE Static Data Export (SDE) station/system codelists
+at startup so they stay fresh without redeploying the app.
 
 ## Features
 
@@ -40,6 +40,12 @@ Both normalise their inputs across the current result set, so the index is a rel
   every region's paginated public-contracts feed (concurrency-limited, with progress) and
   keeps only courier contracts. Jump counts come from the ESI `/route` endpoint and are
   cached per session.
+- **Static data (codelists)**: NPC stations and solar systems come from the
+  [Fuzzwork SDE CSV mirror](https://www.fuzzwork.co.uk/dump/latest/csv/) (itself derived
+  from CCP's official SDE). They are fetched and parsed in the browser at startup, then
+  cached in **IndexedDB** for 12 hours — so the lists stay fresh automatically (no app
+  rebuild) while repeat loads are instant and work offline once cached. See
+  [src/data/sde.ts](src/data/sde.ts).
 - **Player structures (citadels)** can't be resolved without an authenticated login, so
   contracts to/from them show as _Unknown structure_ and have no jump count.
 
@@ -53,12 +59,5 @@ npm run typecheck  # type-only check
 npm run lint
 ```
 
-### Regenerating the bundled SDE data
-
-`src/data/stations.json` and `src/data/systems.json` are generated from the
-[Fuzzwork SDE CSV dumps](https://www.fuzzwork.co.uk/dump/latest/csv/):
-
-```bash
-# download staStations.csv and mapSolarSystems.csv, then:
-node scripts/generate-sde.mjs <staStations.csv> <mapSolarSystems.csv>
-```
+The SDE codelists are loaded at runtime (see above), so there is no data
+generation/build step — the lists refresh themselves from the Fuzzwork mirror.

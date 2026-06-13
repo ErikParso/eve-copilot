@@ -1,0 +1,60 @@
+// Minimal RFC-4180-ish CSV parser used to read the Fuzzwork SDE dumps in the
+// browser. Handles quoted fields containing commas, quotes and newlines.
+
+export interface ParsedCsv {
+  /** Data rows (header excluded). */
+  rows: string[][];
+  /** Column name -> index, derived from the header row. */
+  idx: Record<string, number>;
+}
+
+function parseRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field);
+      field = '';
+    } else if (c === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (c !== '\r') {
+      field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+export function parseCsv(text: string): ParsedCsv {
+  // Strip a leading UTF-8 BOM (U+FEFF) if present.
+  const rows = parseRows(text.replace(/^\uFEFF/, ''));
+  const header = rows[0] ?? [];
+  const idx: Record<string, number> = {};
+  header.forEach((name, i) => {
+    idx[name] = i;
+  });
+  return { rows: rows.slice(1).filter((r) => r.length > 1), idx };
+}
