@@ -152,6 +152,7 @@ export async function enrichContracts(
         // Income per jump over the whole journey (approach + delivery).
         incomePerJump: incomePerJump(c.reward, totalJumps),
         activeDurationSeconds: (expired - issued) / 1000,
+        ageSeconds: (now - issued) / 1000,
         remainingSeconds: (expired - now) / 1000,
         daysToComplete: c.days_to_complete,
         danger: danger ? danger.index : null,
