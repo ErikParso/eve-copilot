@@ -1,7 +1,7 @@
 import { Box, Card, CardContent, Divider, Stack, Typography } from '@mui/material';
-import SouthIcon from '@mui/icons-material/South';
 import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
 import type { CourierRow } from '../types';
+import type { ContractEndpoint } from '../types';
 import { LocationCell } from './LocationCell';
 import { AttractivityCell } from './AttractivityCell';
 import { DangerText } from './DangerCell';
@@ -16,6 +16,23 @@ function Stat({ label, value }: { label: string; value: string }) {
       <Typography variant="caption" sx={{ fontWeight: 600, textAlign: 'right' }}>
         {value}
       </Typography>
+    </Box>
+  );
+}
+
+function Endpoint({ label, endpoint }: { label: string; endpoint: ContractEndpoint }) {
+  return (
+    <Box sx={{ display: 'flex', gap: 1 }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ width: 28, flexShrink: 0, mt: 0.25 }}
+      >
+        {label}
+      </Typography>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <LocationCell endpoint={endpoint} />
+      </Box>
     </Box>
   );
 }
@@ -42,19 +59,26 @@ export function ContractCard({ row }: { row: CourierRow }) {
       <CardContent
         sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, flex: 1, minWidth: 0 }}
       >
-        {/* Keep the pickup line clear of the bubble */}
+        {/* Total income headline (kept clear of the bubble) */}
         <Box sx={{ pr: 4.5, minWidth: 0 }}>
-          <LocationCell endpoint={row.pickup} />
+          <Typography variant="caption" color="text.secondary">
+            Reward
+          </Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: 'primary.main' }}>
+            {formatIskMillions(row.reward)}
+          </Typography>
         </Box>
-        <SouthIcon sx={{ fontSize: 16, color: 'text.disabled', alignSelf: 'center', my: -0.5 }} />
-        <LocationCell endpoint={row.dropoff} />
+
+        <Divider />
+
+        <Endpoint label="From" endpoint={row.pickup} />
+        <Endpoint label="To" endpoint={row.dropoff} />
 
         <RouteCell row={row} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
 
         <Divider />
 
         <Stack spacing={0.5}>
-          <Stat label="Income" value={formatIskMillions(row.reward)} />
           <Stat label="Collateral" value={formatIskMillions(row.collateral)} />
           <Stat label="Cargo" value={formatVolume(row.volume)} />
           <Stat

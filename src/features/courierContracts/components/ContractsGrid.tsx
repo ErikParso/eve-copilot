@@ -7,9 +7,8 @@ import { ContractCard } from './ContractCard';
 const PAGE_SIZE = 12;
 
 /**
- * Responsive MUI grid of contract cards (xl 4 / lg 3 / md 3 / sm 2 / xs 1) with
- * a "load more" button that reveals another 12 at a time. Grid v2 is gap-based
- * (no negative margins), so card edges line up flush with the page.
+ * Nested MUI grid of contract cards (item size xs 12 / sm 12 / md 6 / lg 4 /
+ * xl 3) with a "load more" button that reveals another 12 at a time.
  */
 export function ContractsGrid({ rows }: { rows: CourierRow[] }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
@@ -24,9 +23,9 @@ export function ContractsGrid({ rows }: { rows: CourierRow[] }) {
   return (
     <Box>
       {/* pt leaves room for the cards' pop-out attractivity bubbles */}
-      <Grid container spacing={2} sx={{ pt: '12px' }}>
+      <Grid container spacing={2} sx={{ pt: '10px' }}>
         {shown.map((row) => (
-          <Grid key={row.id} xs={12} sm={6} md={4} lg={4} xl={3}>
+          <Grid key={row.id} xs={12} sm={12} md={6} lg={4}>
             <ContractCard row={row} />
           </Grid>
         ))}
