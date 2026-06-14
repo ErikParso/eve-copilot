@@ -39,7 +39,7 @@ function formatTime(epochMs: number): string {
 }
 
 export function CourierContractsPage() {
-  const { run, status, rows, error, contractsAsOf, contractsExpiresAt } = useCourierSearch();
+  const { run, status, rows, error, contractsAsOf } = useCourierSearch();
   const loading = status === 'loading';
 
   return (
@@ -81,14 +81,13 @@ export function CourierContractsPage() {
                 <Typography variant="body2" color="text.secondary">
                   {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
                 </Typography>
-                {(contractsAsOf || contractsExpiresAt) && (
+                {contractsAsOf && (
                   <Tooltip
-                    title="Each region's contract feed refreshes on its own staggered ~30-min cycle, so there's no single global refresh. “As of” is the freshest data's build time; “next update” is the soonest a region serves newer data — re-search after it."
+                    title="Contracts come from CCP's public feed, which is rebuilt on a ~30-min cycle. The list can therefore lag reality by up to ~30 minutes — accepted or expired contracts may still appear until CCP's next rebuild."
                     arrow
                   >
                     <Typography variant="caption" color="text.secondary">
-                      {contractsAsOf && <>EVE data as of {formatTime(contractsAsOf)}</>}
-                      {contractsExpiresAt && <> · next update {formatTime(contractsExpiresAt)}</>}
+                      EVE data as of {formatTime(contractsAsOf)}
                     </Typography>
                   </Tooltip>
                 )}
