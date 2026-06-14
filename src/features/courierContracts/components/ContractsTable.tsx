@@ -72,6 +72,13 @@ export function ContractsTable({ rows, showCurrentJumps }: ContractsTableProps) 
         cellSx: LOCATION_CELL_SX,
       },
       {
+        id: 'collateral',
+        label: 'Collateral',
+        align: 'right',
+        render: (r) => formatIskMillions(r.collateral),
+        sortValue: (r) => r.collateral,
+      },
+      {
         id: 'volume',
         label: 'Cargo',
         align: 'right',
