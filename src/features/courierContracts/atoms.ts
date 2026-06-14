@@ -40,8 +40,6 @@ export interface SearchResult {
   error: string | null;
   /** When the contracts snapshot was built by CCP (epoch ms), or null. */
   contractsAsOf: number | null;
-  /** When CCP will next serve fresh contracts (epoch ms), or null. */
-  contractsExpiresAt: number | null;
 }
 
 export const searchResultAtom = atom<SearchResult>({
@@ -50,7 +48,6 @@ export const searchResultAtom = atom<SearchResult>({
   appliedFilters: null,
   error: null,
   contractsAsOf: null,
-  contractsExpiresAt: null,
 });
 
 export const searchProgressAtom = atom<SearchProgress>(EMPTY_PROGRESS);

@@ -47,15 +47,13 @@ function parseHttpDate(value: string | null): number | null {
 export interface PagedResponse<T> {
   data: T;
   pages: number;
-  /** `Expires` header as epoch ms — when CCP will serve fresh data. */
-  expires: number | null;
   /** `Last-Modified` header as epoch ms — when this snapshot was built. */
   lastModified: number | null;
 }
 
 /**
  * GET the first page and report total pages via the `X-Pages` header so the
- * caller can fan out the remaining pages. Also surfaces the cache timestamps.
+ * caller can fan out the remaining pages. Also surfaces the snapshot time.
  */
 export async function esiGetPaged<T>(
   path: string,
@@ -71,8 +69,7 @@ export async function esiGetPaged<T>(
     throw new EsiError(`ESI ${res.status} for ${path} (page ${page})`, res.status);
   }
   const pages = Number(res.headers.get('X-Pages') ?? '1');
-  const expires = parseHttpDate(res.headers.get('expires'));
   const lastModified = parseHttpDate(res.headers.get('last-modified'));
   const data = (await res.json()) as T;
-  return { data, pages, expires, lastModified };
+  return { data, pages, lastModified };
 }

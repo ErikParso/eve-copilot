@@ -49,7 +49,6 @@ export function useCourierSearch() {
       appliedFilters: filters,
       error: null,
       contractsAsOf: null,
-      contractsExpiresAt: null,
     });
 
     try {
@@ -83,7 +82,6 @@ export function useCourierSearch() {
         appliedFilters: filters,
         error: null,
         contractsAsOf: contracts.lastModifiedAt,
-        contractsExpiresAt: contracts.expiresAt,
       });
     } catch (err) {
       if (signal.aborted) return;
@@ -93,7 +91,6 @@ export function useCourierSearch() {
         appliedFilters: filters,
         error: err instanceof Error ? err.message : 'Search failed',
         contractsAsOf: null,
-        contractsExpiresAt: null,
       });
     }
   }, [store, setProgress, setResult]);

@@ -37,8 +37,6 @@ export async function fetchRegionIds(signal?: AbortSignal): Promise<number[]> {
 
 interface RegionResult {
   contracts: PublicContract[];
-  /** `Expires` of the region's first page (when CCP serves fresh data). */
-  expires: number | null;
   /** `Last-Modified` of the region's first page (snapshot build time). */
   lastModified: number | null;
 }
@@ -48,7 +46,6 @@ async function fetchRegionCourierContracts(
   signal: AbortSignal | undefined,
 ): Promise<RegionResult> {
   const collected: PublicContract[] = [];
-  let expires: number | null = null;
   let lastModified: number | null = null;
   try {
     const first = await esiGetPaged<PublicContract[]>(
@@ -57,7 +54,6 @@ async function fetchRegionCourierContracts(
       undefined,
       signal,
     );
-    expires = first.expires;
     lastModified = first.lastModified;
     const keep = (list: PublicContract[]) => {
       for (const c of list) if (c.type === 'courier') collected.push(c);
@@ -81,21 +77,19 @@ async function fetchRegionCourierContracts(
     // A region with no contracts returns 404; treat any region-level failure
     // as "no contracts here" rather than failing the whole search.
   }
-  return { contracts: collected, expires, lastModified };
+  return { contracts: collected, lastModified };
 }
 
 export interface CourierContractsResult {
   contracts: PublicContract[];
-  /** When CCP will next serve fresh data (latest region `Expires`), or null. */
-  expiresAt: number | null;
   /** When the current snapshot was built (latest region `Last-Modified`). */
   lastModifiedAt: number | null;
 }
 
 /**
  * Fetch every public courier contract in the cluster, along with the feed's
- * cache timestamps (CCP caches the public contracts feed ~30 min, so the data
- * is only as fresh as `lastModifiedAt` and refreshes by `expiresAt`).
+ * build time. CCP caches the public contracts feed ~30 min, so the data is
+ * only as fresh as `lastModifiedAt`.
  * @param onProgress called as regions complete so the UI can show a counter.
  */
 export async function fetchAllCourierContracts(
@@ -111,20 +105,13 @@ export async function fetchAllCourierContracts(
     (done, total) => onProgress?.({ regionsDone: done, regionsTotal: total }),
   );
 
-  const now = Date.now();
-  const values = (pick: (r: RegionResult) => number | null): number[] =>
-    perRegion.map(pick).filter((v): v is number => v !== null);
-
-  const lm = values((r) => r.lastModified);
-  // Regions refresh on independent, staggered ~30-min cycles, so there is no
-  // single global refresh time. The soonest *upcoming* region expiry is the
-  // next moment CCP serves any fresher data; the latest last-modified is how
-  // recent the freshest part of the snapshot is.
-  const futureExpiries = values((r) => r.expires).filter((v) => v > now);
+  const lastModifieds = perRegion
+    .map((r) => r.lastModified)
+    .filter((v): v is number => v !== null);
 
   return {
     contracts: perRegion.flatMap((r) => r.contracts),
-    expiresAt: futureExpiries.length ? Math.min(...futureExpiries) : null,
-    lastModifiedAt: lm.length ? Math.max(...lm) : null,
+    // Freshest region snapshot time (data can lag reality by up to ~30 min).
+    lastModifiedAt: lastModifieds.length ? Math.max(...lastModifieds) : null,
   };
 }
