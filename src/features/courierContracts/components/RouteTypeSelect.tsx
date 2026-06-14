@@ -27,6 +27,7 @@ export function RouteTypeSelect({ value, onChange }: RouteTypeSelectProps) {
     <Box>
       <TextField
         select
+        size="small"
         fullWidth
         label="Route type"
         value={value}

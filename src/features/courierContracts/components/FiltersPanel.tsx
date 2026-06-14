@@ -1,8 +1,9 @@
 import { useAtom } from 'jotai';
-import { Box, Button, Grid, InputAdornment, Paper, TextField } from '@mui/material';
+import { Button, InputAdornment, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { draftFiltersAtom } from '../atoms';
-import type { RouteType } from '../types';
+import type { RouteType, SortOptionId } from '../types';
+import { SORT_OPTIONS } from '../sortContracts';
 import { SystemAutocomplete } from './SystemAutocomplete';
 import { RouteTypeSelect } from './RouteTypeSelect';
 import { AttractivityWeightsControl } from './AttractivityWeightsControl';
@@ -19,77 +20,81 @@ function parseOptionalNumber(raw: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/** Vertical filter sidebar. Everything (incl. sort) is applied on Search. */
 export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
   const [filters, setFilters] = useAtom(draftFiltersAtom);
 
   return (
     <Paper sx={{ p: 2.5 }} elevation={2}>
-      <Grid container spacing={2.5} alignItems="flex-start">
-        <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            label="Max collateral"
-            type="number"
-            fullWidth
-            value={filters.maxCollateralMillions ?? ''}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, maxCollateralMillions: parseOptionalNumber(e.target.value) }))
-            }
-            InputProps={{
-              endAdornment: <InputAdornment position="end">M ISK</InputAdornment>,
-            }}
-            inputProps={{ min: 0 }}
-          />
-        </Grid>
+      <Stack spacing={2.5}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          Filters
+        </Typography>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            label="Max cargo volume"
-            type="number"
-            fullWidth
-            value={filters.maxCargoM3 ?? ''}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, maxCargoM3: parseOptionalNumber(e.target.value) }))
-            }
-            InputProps={{
-              endAdornment: <InputAdornment position="end">m³</InputAdornment>,
-            }}
-            inputProps={{ min: 0 }}
-          />
-        </Grid>
+        <TextField
+          label="Max collateral"
+          type="number"
+          size="small"
+          fullWidth
+          value={filters.maxCollateralMillions ?? ''}
+          onChange={(e) =>
+            setFilters((f) => ({ ...f, maxCollateralMillions: parseOptionalNumber(e.target.value) }))
+          }
+          InputProps={{ endAdornment: <InputAdornment position="end">M ISK</InputAdornment> }}
+          inputProps={{ min: 0 }}
+        />
 
-        <Grid item xs={12} sm={6} md={3}>
-          <SystemAutocomplete
-            value={filters.currentSystemId}
-            onChange={(currentSystemId) => setFilters((f) => ({ ...f, currentSystemId }))}
-          />
-        </Grid>
+        <TextField
+          label="Max cargo volume"
+          type="number"
+          size="small"
+          fullWidth
+          value={filters.maxCargoM3 ?? ''}
+          onChange={(e) =>
+            setFilters((f) => ({ ...f, maxCargoM3: parseOptionalNumber(e.target.value) }))
+          }
+          InputProps={{ endAdornment: <InputAdornment position="end">m³</InputAdornment> }}
+          inputProps={{ min: 0 }}
+        />
 
-        <Grid item xs={12} sm={6} md={3}>
-          <RouteTypeSelect
-            value={filters.routeType}
-            onChange={(routeType: RouteType) => setFilters((f) => ({ ...f, routeType }))}
-          />
-        </Grid>
+        <SystemAutocomplete
+          value={filters.currentSystemId}
+          onChange={(currentSystemId) => setFilters((f) => ({ ...f, currentSystemId }))}
+        />
 
-        <Grid item xs={12} sm={6} md={3}>
-          <AttractivityWeightsControl />
-        </Grid>
+        <RouteTypeSelect
+          value={filters.routeType}
+          onChange={(routeType: RouteType) => setFilters((f) => ({ ...f, routeType }))}
+        />
 
-        <Grid item xs={12} md={3}>
-          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-            <Button
-              variant="contained"
-              size="large"
-              fullWidth
-              startIcon={<SearchIcon />}
-              onClick={onSearch}
-              disabled={loading}
-            >
-              {loading ? 'Searching…' : 'Search'}
-            </Button>
-          </Box>
-        </Grid>
-      </Grid>
+        <TextField
+          select
+          size="small"
+          fullWidth
+          label="Sort by"
+          value={filters.sortBy}
+          onChange={(e) => setFilters((f) => ({ ...f, sortBy: e.target.value as SortOptionId }))}
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <MenuItem key={opt.id} value={opt.id}>
+              {opt.label}
+            </MenuItem>
+          ))}
+        </TextField>
+
+        <AttractivityWeightsControl />
+
+        <Button
+          variant="contained"
+          size="large"
+          fullWidth
+          startIcon={<SearchIcon />}
+          onClick={onSearch}
+          disabled={loading}
+        >
+          {loading ? 'Searching…' : 'Search'}
+        </Button>
+      </Stack>
     </Paper>
   );
 }

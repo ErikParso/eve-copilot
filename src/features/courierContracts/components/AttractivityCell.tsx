@@ -10,10 +10,12 @@ interface AttractivityCellProps {
   score: number;
   /** Step-by-step calculation of this row's score (with real numbers). */
   steps?: string[];
+  /** Render as a round bubble (for the card corner) instead of a pill. */
+  circle?: boolean;
 }
 
 /** Attractivity index rendered as a colour-coded badge (0–100). */
-export function AttractivityCell({ score, steps }: AttractivityCellProps) {
+export function AttractivityCell({ score, steps, circle }: AttractivityCellProps) {
   const hasSteps = !!steps && steps.length > 0;
 
   const badge = (
@@ -22,15 +24,13 @@ export function AttractivityCell({ score, steps }: AttractivityCellProps) {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: 40,
-        px: 1,
-        py: 0.25,
-        borderRadius: 1,
         fontWeight: 700,
-        fontSize: '0.85rem',
         color: '#0d1117',
         bgcolor: scoreColor(score),
         cursor: hasSteps ? 'help' : 'default',
+        ...(circle
+          ? { width: 34, height: 34, borderRadius: '50%', fontSize: '0.8rem', boxShadow: 2 }
+          : { minWidth: 40, px: 1, py: 0.25, borderRadius: 1, fontSize: '0.85rem' }),
       }}
     >
       {score}

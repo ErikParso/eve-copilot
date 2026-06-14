@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Box } from '@mui/material';
 import { formatNumber } from '@/utils/format';
 import type { CourierRow } from '../types';
@@ -7,9 +8,9 @@ import { RouteSquares, type RouteNode } from './RouteSquares';
  * The whole journey as one cell: an optional approach leg (current station →
  * pickup) followed by the delivery leg (pickup → dropoff), drawn as a single
  * strip of security-coloured squares with up/down arrows on the pickup and
- * dropoff systems.
+ * dropoff systems. `trailing` renders to the right of the jump-count line.
  */
-export function RouteCell({ row }: { row: CourierRow }) {
+export function RouteCell({ row, trailing }: { row: CourierRow; trailing?: ReactNode }) {
   const { approachRoute, deliveryRoute, jumpsFromCurrent, jumpsToDropoff } = row;
 
   if (!deliveryRoute) return <>—</>;
@@ -41,8 +42,13 @@ export function RouteCell({ row }: { row: CourierRow }) {
 
   return (
     <Box>
-      <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
-        {label}
+      <Box
+        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
+      >
+        <Box component="span" sx={{ whiteSpace: 'nowrap' }}>
+          {label}
+        </Box>
+        {trailing}
       </Box>
       <RouteSquares nodes={nodes} align="left" />
     </Box>

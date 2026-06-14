@@ -36,6 +36,7 @@ export function SystemAutocomplete({ value, onChange }: SystemAutocompleteProps)
       getOptionLabel={(system) => system.name}
       isOptionEqualToValue={(a, b) => a.id === b.id}
       filterOptions={(opts) => opts}
+      size="small"
       noOptionsText={
         input.trim().length < MIN_CHARS ? 'Type at least 3 characters' : 'No systems found'
       }
@@ -44,7 +45,7 @@ export function SystemAutocomplete({ value, onChange }: SystemAutocompleteProps)
           {...params}
           label="Current system"
           placeholder="Start typing a system name…"
-          helperText={showHelper ? `Type ${MIN_CHARS - input.trim().length} more character(s)` : ' '}
+          helperText={showHelper ? `Type ${MIN_CHARS - input.trim().length} more character(s)` : undefined}
         />
       )}
       renderOption={(props, system) => (

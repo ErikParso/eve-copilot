@@ -7,10 +7,11 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
+import Grid from '@mui/material/Unstable_Grid2';
 import { searchProgressAtom } from './atoms';
 import { useCourierSearch } from './useCourierSearch';
 import { FiltersPanel } from './components/FiltersPanel';
-import { ContractsTable } from './components/ContractsTable';
+import { ContractsGrid } from './components/ContractsGrid';
 
 function ProgressBar() {
   const progress = useAtomValue(searchProgressAtom);
@@ -45,72 +46,83 @@ function formatTime(epochMs: number): string {
 }
 
 export function CourierContractsPage() {
-  const { run, status, rows, error, appliedFilters, contractsAsOf, contractsExpiresAt } =
-    useCourierSearch();
+  const { run, status, rows, error, contractsAsOf, contractsExpiresAt } = useCourierSearch();
   const loading = status === 'loading';
-  const showCurrentJumps = appliedFilters?.currentSystemId != null;
 
   return (
-    <Stack spacing={2.5}>
-      <Box>
-        <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          Courier Contracts
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Find profitable courier hauls across New Eden. Set your filters and hit Search.
-        </Typography>
-      </Box>
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: { xs: 'column', md: 'row' },
+        gap: 2.5,
+        alignItems: 'flex-start',
+      }}
+    >
+        {/* Sticky filter sidebar */}
+        <Box
+          sx={{
+            width: { xs: '100%', md: 300 },
+            flexShrink: 0,
+            position: { md: 'sticky' },
+            top: { md: 80 },
+          }}
+        >
+          <FiltersPanel onSearch={run} loading={loading} />
+        </Box>
 
-      <FiltersPanel onSearch={run} loading={loading} />
+        {/* Results */}
+        <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
+          <Stack spacing={2}>
+            {loading && <ProgressBar />}
 
-      {loading && <ProgressBar />}
-
-      {status === 'error' && (
-        <Alert severity="error">Could not complete the search: {error}</Alert>
-      )}
-
-      {status === 'success' && (
-        <>
-          <Box
-            sx={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 1,
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-            }}
-          >
-            <Typography variant="body2" color="text.secondary">
-              {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
-            </Typography>
-            {(contractsAsOf || contractsExpiresAt) && (
-              <Tooltip
-                title="Each region's contract feed refreshes on its own staggered ~30-min cycle, so there's no single global refresh. “As of” is the freshest data's build time; “next update” is the soonest a region serves newer data — re-search after it."
-                arrow
-              >
-                <Typography variant="caption" color="text.secondary">
-                  {contractsAsOf && <>EVE data as of {formatTime(contractsAsOf)}</>}
-                  {contractsExpiresAt && <> · next update {formatTime(contractsExpiresAt)}</>}
-                </Typography>
-              </Tooltip>
+            {status === 'error' && (
+              <Alert severity="error">Could not complete the search: {error}</Alert>
             )}
-          </Box>
-          {rows.length > 0 ? (
-            <ContractsTable rows={rows} showCurrentJumps={showCurrentJumps} />
-          ) : (
-            <Alert severity="info">
-              No contracts match. Try relaxing the collateral or cargo limits.
-            </Alert>
-          )}
-        </>
-      )}
 
-      {status === 'idle' && (
-        <Alert severity="info">
-          Set your filters above and press <strong>Search</strong> to load current courier contracts.
-          The first search fetches every region and can take a little while.
-        </Alert>
-      )}
-    </Stack>
+            {status === 'success' && (
+              <>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 1,
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
+                  </Typography>
+                  {(contractsAsOf || contractsExpiresAt) && (
+                    <Tooltip
+                      title="Each region's contract feed refreshes on its own staggered ~30-min cycle, so there's no single global refresh. “As of” is the freshest data's build time; “next update” is the soonest a region serves newer data — re-search after it."
+                      arrow
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        {contractsAsOf && <>EVE data as of {formatTime(contractsAsOf)}</>}
+                        {contractsExpiresAt && <> · next update {formatTime(contractsExpiresAt)}</>}
+                      </Typography>
+                    </Tooltip>
+                  )}
+                </Box>
+                {rows.length > 0 ? (
+                  <ContractsGrid rows={rows} />
+                ) : (
+                  <Alert severity="info">
+                    No contracts match. Try relaxing the collateral or cargo limits.
+                  </Alert>
+                )}
+              </>
+            )}
+
+            {status === 'idle' && (
+              <Alert severity="info">
+                Set your filters and press <strong>Search</strong> to load current courier
+                contracts. The first search fetches every region and can take a little while.
+              </Alert>
+            )}
+          </Stack>
+        </Box>
+      </Box>
   );
 }
