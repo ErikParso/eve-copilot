@@ -3,6 +3,18 @@ import type { SecurityBand } from '@/data/sde';
 
 export type { RouteType };
 
+/** How the result cards are ordered (applied on Search). */
+export type SortOptionId =
+  | 'attractivity'
+  | 'danger'
+  | 'income'
+  | 'collateral'
+  | 'cargo'
+  | 'totalJumps'
+  | 'jumpsToPickup'
+  | 'timeRemaining'
+  | 'listedAge';
+
 /** User-editable search filters. `null` means "no limit / not set". */
 export interface CourierFilters {
   /** Maximum collateral in millions of ISK. */
@@ -12,6 +24,8 @@ export interface CourierFilters {
   routeType: RouteType;
   /** Origin solar-system id for the "jumps to pickup" calculation. */
   currentSystemId: number | null;
+  /** Result ordering, applied on Search. */
+  sortBy: SortOptionId;
 }
 
 export const DEFAULT_FILTERS: CourierFilters = {
@@ -19,6 +33,7 @@ export const DEFAULT_FILTERS: CourierFilters = {
   maxCargoM3: null,
   routeType: 'safest',
   currentSystemId: null,
+  sortBy: 'attractivity',
 };
 
 /** One solar system on a route, with the data the danger index needs. */

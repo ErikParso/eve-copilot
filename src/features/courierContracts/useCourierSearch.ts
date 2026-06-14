@@ -5,6 +5,7 @@ import { clearRouteCache } from '@/api/routes';
 import { clearSystemKillsCache } from '@/api/systemKills';
 import { computeAttractivity } from './attractivity';
 import { enrichContracts } from './enrichContracts';
+import { sortRows } from './sortContracts';
 import {
   attractivityWeightsAtom,
   draftFiltersAtom,
@@ -70,7 +71,8 @@ export function useCourierSearch() {
       });
       if (signal.aborted) return;
 
-      const rows = computeAttractivity(enriched, weights);
+      const scored = computeAttractivity(enriched, weights);
+      const rows = sortRows(scored, filters.sortBy);
       setProgress((prev) => ({ ...prev, phase: 'done' }));
       setResult({
         status: 'success',
