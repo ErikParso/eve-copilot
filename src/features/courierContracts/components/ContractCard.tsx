@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Box, Card, CardContent, Divider, Stack, Typography } from '@mui/material';
 import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
 import type { CourierRow } from '../types';
@@ -38,7 +39,7 @@ function Endpoint({ label, endpoint }: { label: string; endpoint: ContractEndpoi
 }
 
 /** One courier contract rendered as a card for the results grid. */
-export function ContractCard({ row }: { row: CourierRow }) {
+export const ContractCard = memo(function ContractCard({ row }: { row: CourierRow }) {
   return (
     <Card
       variant="outlined"
@@ -91,4 +92,4 @@ export function ContractCard({ row }: { row: CourierRow }) {
       </CardContent>
     </Card>
   );
-}
+});

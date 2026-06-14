@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useSetAtom, useStore } from 'jotai';
 import { fetchAllCourierContracts } from '@/api/contracts';
 import { clearRouteCache } from '@/api/routes';
 import { clearSystemKillsCache } from '@/api/systemKills';
@@ -21,8 +21,10 @@ import { EMPTY_PROGRESS } from './types';
  * without re-fetching or re-routing.
  */
 export function useCourierSearch() {
-  const draftFilters = useAtomValue(draftFiltersAtom);
-  const weights = useAtomValue(attractivityWeightsAtom);
+  // Read filters/weights imperatively from the store (only when Search runs),
+  // so typing in the filters does NOT re-render this hook's consumers (the
+  // results grid). Subscribing here would re-render every card on each keystroke.
+  const store = useStore();
   const [result, setResult] = useAtom(searchResultAtom);
   const setProgress = useSetAtom(searchProgressAtom);
   const abortRef = useRef<AbortController | null>(null);
@@ -38,7 +40,8 @@ export function useCourierSearch() {
     clearRouteCache();
     clearSystemKillsCache();
 
-    const filters = draftFilters;
+    const filters = store.get(draftFiltersAtom);
+    const weights = store.get(attractivityWeightsAtom);
     setProgress({ ...EMPTY_PROGRESS, phase: 'contracts' });
     setResult({
       status: 'loading',
@@ -93,10 +96,7 @@ export function useCourierSearch() {
         contractsExpiresAt: null,
       });
     }
-  }, [draftFilters, weights, setProgress, setResult]);
-
-  // The attractivity method (like the other filters) is applied only on the
-  // next Search — `run` reads the current method when invoked.
+  }, [store, setProgress, setResult]);
 
   // Abort any in-flight search on unmount.
   useEffect(() => () => abortRef.current?.abort(), []);
