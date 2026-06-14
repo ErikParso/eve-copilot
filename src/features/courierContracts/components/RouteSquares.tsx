@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react';
 import { Box, Tooltip } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { securityColor } from '@/data/sde';
 import { formatNumber } from '@/utils/format';
+import { isGankRisk } from '../danger';
 import type { RouteSystem } from '../types';
 
 export type RouteMarker = 'current' | 'pickup' | 'dropoff';
@@ -20,10 +22,6 @@ interface RouteSquaresProps {
 
 // Uniform square size for every system on the route (markers included).
 const SQUARE = 11;
-// Recent ship kills (last hour) at or above which a system is flagged with a
-// skull — a likely gank/gate-camp hotspot.
-const SKULL_KILL_THRESHOLD = 10;
-
 const MARKER_LABEL: Record<RouteMarker, string> = {
   current: 'Current location — ',
   pickup: 'Pickup — ',
@@ -32,7 +30,7 @@ const MARKER_LABEL: Record<RouteMarker, string> = {
 
 function systemTooltip(system: RouteSystem, marker?: RouteMarker): string {
   const prefix = marker ? MARKER_LABEL[marker] : '';
-  const danger = system.shipKills >= SKULL_KILL_THRESHOLD ? ' ☠ gank risk' : '';
+  const danger = isGankRisk(system) ? ' ☠ gank risk' : '';
   return `${prefix}${system.name} · sec ${formatNumber(system.security, 1)} · ${formatNumber(
     system.shipKills,
     0,
@@ -62,37 +60,43 @@ export function RouteSquares({ nodes, align = 'left' }: RouteSquaresProps) {
       {nodes.map((node, i) => {
         const color = securityColor(node.system.security);
         const title = systemTooltip(node.system, node.marker);
+        const dangerous = isGankRisk(node.system);
 
-        if (node.marker) {
-          return (
-            <Tooltip key={`${node.system.systemId}-${i}`} arrow title={title}>
-              <Box
-                sx={{
-                  width: SQUARE,
-                  height: SQUARE,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  bgcolor: color,
-                }}
-              >
-                {node.marker === 'current' ? (
-                  <Box
-                    sx={{ width: SQUARE - 6, height: SQUARE - 6, borderRadius: '50%', bgcolor: '#161b22' }}
-                  />
-                ) : node.marker === 'pickup' ? (
-                  <ArrowUpwardIcon sx={{ fontSize: SQUARE - 2, color: '#161b22' }} />
-                ) : (
-                  <ArrowDownwardIcon sx={{ fontSize: SQUARE - 2, color: '#161b22' }} />
-                )}
-              </Box>
-            </Tooltip>
+        // Marker glyph takes priority; otherwise a skull for gank hotspots.
+        let content: ReactNode = null;
+        if (node.marker === 'current') {
+          content = (
+            <Box sx={{ width: SQUARE - 6, height: SQUARE - 6, borderRadius: '50%', bgcolor: '#161b22' }} />
+          );
+        } else if (node.marker === 'pickup') {
+          content = <ArrowUpwardIcon sx={{ fontSize: SQUARE - 2, color: '#161b22' }} />;
+        } else if (node.marker === 'dropoff') {
+          content = <ArrowDownwardIcon sx={{ fontSize: SQUARE - 2, color: '#161b22' }} />;
+        } else if (dangerous) {
+          content = (
+            <Box
+              component="span"
+              sx={{ fontSize: SQUARE, lineHeight: 1, color: '#161b22', fontWeight: 700 }}
+            >
+              ☠
+            </Box>
           );
         }
 
         return (
           <Tooltip key={`${node.system.systemId}-${i}`} arrow title={title}>
-            <Box sx={{ width: SQUARE, height: SQUARE, bgcolor: color }} />
+            <Box
+              sx={{
+                width: SQUARE,
+                height: SQUARE,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: color,
+              }}
+            >
+              {content}
+            </Box>
           </Tooltip>
         );
       })}

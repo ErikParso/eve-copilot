@@ -66,6 +66,8 @@ export interface CourierRow {
   incomePerJump: number | null;
   /** Total listing lifetime in seconds (issued → expired). */
   activeDurationSeconds: number;
+  /** Seconds since the contract was issued (how long it has been listed). */
+  ageSeconds: number;
   /** Seconds until the contract expires (from now). */
   remainingSeconds: number;
   /** Days the hauler has to complete after accepting. */

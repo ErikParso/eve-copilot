@@ -11,6 +11,13 @@ import type { CourierRow } from './types';
 
 export type FactorDirection = 'higher' | 'lower';
 
+/**
+ * How a factor's values are normalised. `log` is for heavy-tailed quantities
+ * (ISK, m³) that span orders of magnitude — it normalises over log1p(value) so
+ * ratios matter and one outlier can't flatten the rest to ~0.
+ */
+export type FactorScale = 'linear' | 'log';
+
 export type FactorId =
   | 'totalIncome'
   | 'danger'
@@ -26,6 +33,8 @@ export interface FactorDef {
   id: FactorId;
   label: string;
   direction: FactorDirection;
+  /** Normalisation scale (default linear). */
+  scale: FactorScale;
   /** What it means / why it matters. */
   description: string;
   /** Raw value for a row, or null when not applicable. */
@@ -41,6 +50,7 @@ export const FACTORS: FactorDef[] = [
     id: 'totalIncome',
     label: 'Total income',
     direction: 'higher',
+    scale: 'log',
     description: 'The contract reward. Higher pays more in absolute ISK.',
     value: (r) => r.reward,
     format: formatIsk,
@@ -49,6 +59,7 @@ export const FACTORS: FactorDef[] = [
     id: 'danger',
     label: 'Danger index',
     direction: 'lower',
+    scale: 'linear',
     description: 'Route danger (low/null-sec + recent kills). Lower is safer.',
     value: (r) => r.danger,
     format: (v) => `${formatNumber(v, 0)}/100`,
@@ -57,6 +68,7 @@ export const FACTORS: FactorDef[] = [
     id: 'totalJumps',
     label: 'Total jumps',
     direction: 'lower',
+    scale: 'linear',
     description: 'Total jumps for the journey. Fewer is quicker.',
     value: (r) => r.totalJumps,
     format: (v) => `${formatNumber(v, 0)} jumps`,
@@ -65,6 +77,7 @@ export const FACTORS: FactorDef[] = [
     id: 'jumpsToPickup',
     label: 'Jumps to pickup',
     direction: 'lower',
+    scale: 'linear',
     description:
       'Jumps from your current system to the pickup. Closer pickups are less ' +
       'likely to be taken by others before you arrive. (Needs a current system.)',
@@ -75,6 +88,7 @@ export const FACTORS: FactorDef[] = [
     id: 'collateral',
     label: 'Collateral',
     direction: 'lower',
+    scale: 'log',
     description: 'ISK you must put up. Lower means less at risk if it goes wrong.',
     value: (r) => r.collateral,
     format: formatIsk,
@@ -83,24 +97,27 @@ export const FACTORS: FactorDef[] = [
     id: 'cargo',
     label: 'Cargo volume',
     direction: 'lower',
+    scale: 'log',
     description: 'Cargo size in m³. Lower fits more ships and is easier to move.',
     value: (r) => r.volume,
     format: formatVolume,
   },
   {
     id: 'timeActive',
-    label: 'Time active',
+    label: 'Listed age',
     direction: 'higher',
+    scale: 'linear',
     description:
-      'How long the contract has been listed. Older contracts are less likely ' +
+      'How long ago the contract was posted. Older contracts are less likely ' +
       'to be snapped up by others while you travel to pick them up.',
-    value: (r) => r.activeDurationSeconds,
+    value: (r) => r.ageSeconds,
     format: formatDuration,
   },
   {
     id: 'timeRemaining',
     label: 'Time remaining',
     direction: 'higher',
+    scale: 'linear',
     description:
       'Time until the contract expires. More buffer means it is less likely to ' +
       'disappear before you can accept and deliver it.',
@@ -111,6 +128,7 @@ export const FACTORS: FactorDef[] = [
     id: 'daysToComplete',
     label: 'Days to complete',
     direction: 'higher',
+    scale: 'linear',
     description:
       'Time allowed to deliver after accepting. More is safer for long hauls.',
     value: (r) => r.daysToComplete,
@@ -202,8 +220,15 @@ function f2(n: number): string {
 interface ActiveFactor {
   def: FactorDef;
   weight: number;
-  values: number[];
+  /** Raw values (for display in the tooltip). */
+  raw: number[];
+  /** Values after the scale transform (used for normalisation). */
+  scaled: number[];
   stats: Stats;
+}
+
+function transformFor(scale: FactorScale): (x: number) => number {
+  return scale === 'log' ? (x) => Math.log1p(x) : (x) => x;
 }
 
 /** Returns a new array of rows with `attractivity` + `attractivitySteps` filled in. */
@@ -215,13 +240,15 @@ export function computeAttractivity(rows: CourierRow[], weights: AttractivityWei
   for (const def of FACTORS) {
     const weight = weights[def.id] ?? 0;
     if (weight <= 0) continue;
-    const values = rows.map((r) => {
+    const raw = rows.map((r) => {
       const v = def.value(r);
       return v === null ? NaN : v;
     });
-    const s = stats(values);
+    const transform = transformFor(def.scale);
+    const scaled = raw.map((v) => (Number.isFinite(v) ? transform(v) : NaN));
+    const s = stats(scaled);
     if (!Number.isFinite(s.min)) continue; // no usable data → skip entirely
-    active.push({ def, weight, values, stats: s });
+    active.push({ def, weight, raw, scaled, stats: s });
   }
 
   const totalWeight = active.reduce((sum, a) => sum + a.weight, 0);
@@ -232,25 +259,28 @@ export function computeAttractivity(rows: CourierRow[], weights: AttractivityWei
   }
 
   return rows.map((row, i) => {
-    let contribSum = 0;
+    const contribs: number[] = [];
     const lines: string[] = [];
     for (const a of active) {
-      const norm = unit(a.values[i], a.stats, a.def.direction === 'higher');
+      const norm = unit(a.scaled[i], a.stats, a.def.direction === 'higher');
       const contrib = a.weight * norm;
-      contribSum += contrib;
-      const raw = Number.isFinite(a.values[i]) ? a.def.format(a.values[i]) : '—';
+      contribs.push(contrib);
+      const raw = Number.isFinite(a.raw[i]) ? a.def.format(a.raw[i]) : '—';
       const arrow = a.def.direction === 'higher' ? '↑' : '↓';
+      const scaleTag = a.def.scale === 'log' ? ' (log)' : '';
+      // subindex = normalised value (0–1) × weight
       lines.push(
-        `• ${a.def.label} ${arrow}: ${raw} → norm ${f2(norm)} × w${a.weight} = ${f2(contrib)}`,
+        `• ${a.def.label} ${arrow}${scaleTag}: ${raw} → norm ${f2(norm)} × weight ${a.weight} = ${f2(contrib)}`,
       );
     }
-    const avg = contribSum / totalWeight;
-    const attractivity = Math.round(avg * 100);
+    const contribSum = contribs.reduce((s, c) => s + c, 0);
+    const attractivity = Math.round((contribSum / totalWeight) * 100);
 
     const steps = [
-      'Weighted average of your factors (norm 0–1, ↑ higher-better / ↓ lower-better):',
+      'Each factor → normalised 0–1 across results (↑ higher-better, ↓ lower-better, log = log-scaled), then × its weight:',
       ...lines,
-      `Score = ${f2(contribSum)} ÷ ${formatNumber(totalWeight, 0)} (total weight) × 100 = ${attractivity}`,
+      `Sum of sub-scores = ${contribs.map(f2).join(' + ')} = ${f2(contribSum)}`,
+      `Attractivity = ${f2(contribSum)} ÷ ${formatNumber(totalWeight, 0)} (total weight) × 100 = ${attractivity}`,
     ];
 
     return { ...row, attractivity, attractivitySteps: steps };
