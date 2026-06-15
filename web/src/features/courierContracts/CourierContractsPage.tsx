@@ -1,35 +1,16 @@
-import { useAtomValue } from 'jotai';
 import { Alert, Box, LinearProgress, Stack, Tooltip, Typography } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
-import { searchProgressAtom } from './atoms';
 import { useCourierSearch } from './useCourierSearch';
 import { FiltersPanel } from './components/FiltersPanel';
 import { ContractsGrid } from './components/ContractsGrid';
 
 function ProgressBar() {
-  const progress = useAtomValue(searchProgressAtom);
-
-  if (progress.phase === 'contracts') {
-    const { regionsDone, regionsTotal } = progress;
-    const value = regionsTotal > 0 ? (regionsDone / regionsTotal) * 100 : undefined;
-    return (
-      <Box>
-        <Typography variant="body2" color="text.secondary" gutterBottom>
-          Fetching public contracts across regions… {regionsDone}/{regionsTotal || '?'}
-        </Typography>
-        <LinearProgress variant={value === undefined ? 'indeterminate' : 'determinate'} value={value} />
-      </Box>
-    );
-  }
-
-  const { routesDone, routesTotal } = progress;
-  const value = routesTotal > 0 ? (routesDone / routesTotal) * 100 : undefined;
   return (
     <Box>
       <Typography variant="body2" color="text.secondary" gutterBottom>
-        Resolving routes & jumps… {routesDone}/{routesTotal || '?'}
+        Loading courier contracts…
       </Typography>
-      <LinearProgress variant={value === undefined ? 'indeterminate' : 'determinate'} value={value} />
+      <LinearProgress />
     </Box>
   );
 }
