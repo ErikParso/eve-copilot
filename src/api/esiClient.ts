@@ -38,6 +38,23 @@ export async function esiGet<T>(
   return (await res.json()) as T;
 }
 
+/** GET an authenticated resource using a character access token. */
+export async function esiGetAuthed<T>(
+  path: string,
+  accessToken: string,
+  params?: Record<string, string | number>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(withParams(path, params), {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+    signal,
+  });
+  if (!res.ok) {
+    throw new EsiError(`ESI ${res.status} for ${path}`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
 function parseHttpDate(value: string | null): number | null {
   if (!value) return null;
   const t = Date.parse(value);
