@@ -6,6 +6,8 @@ import { formatNumber } from '@/utils/format';
 interface SystemAutocompleteProps {
   value: number | null;
   onChange: (systemId: number | null) => void;
+  /** Field label (defaults to "Current system"). */
+  label?: string;
 }
 
 const MIN_CHARS = 3;
@@ -14,7 +16,7 @@ const MIN_CHARS = 3;
  * Solar-system picker for the "current system". Options appear once the user
  * has typed at least 3 characters (substring match over system names).
  */
-export function SystemAutocomplete({ value, onChange }: SystemAutocompleteProps) {
+export function SystemAutocomplete({ value, onChange, label = 'Current system' }: SystemAutocompleteProps) {
   const [input, setInput] = useState('');
 
   const selected = useMemo(() => (value !== null ? getSystem(value) ?? null : null), [value]);
@@ -43,7 +45,7 @@ export function SystemAutocomplete({ value, onChange }: SystemAutocompleteProps)
       renderInput={(params) => (
         <TextField
           {...params}
-          label="Current system"
+          label={label}
           placeholder="Start typing a system name…"
           helperText={showHelper ? `Type ${MIN_CHARS - input.trim().length} more character(s)` : undefined}
         />

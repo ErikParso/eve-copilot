@@ -17,9 +17,16 @@ export interface SolarSystem {
   name: string;
   security: number;
 }
+export interface ItemType {
+  id: number;
+  name: string;
+  /** Volume in m³ (unpackaged). Used to cap haul quantity by cargo. */
+  volume: number;
+}
 
 const stationById = new Map<number, Station>();
 const systemById = new Map<number, SolarSystem>();
+const typeById = new Map<number, ItemType>();
 /** systemId -> neighbouring systemIds (via stargates). */
 const adjacency = new Map<number, number[]>();
 
@@ -31,6 +38,7 @@ export function securityBand(security: number): SecurityBand {
 
 export const getStation = (id: number) => stationById.get(id);
 export const getSystem = (id: number) => systemById.get(id);
+export const getType = (id: number) => typeById.get(id);
 export const neighbors = (id: number) => adjacency.get(id) ?? [];
 
 async function fetchCsv(file: string): Promise<ParsedReturn> {
@@ -44,14 +52,16 @@ export interface SdeMeta {
   stations: number;
   systems: number;
   jumps: number;
+  types: number;
 }
 
-/** Load stations, systems, and the jump graph into memory. */
+/** Load stations, systems, item types, and the jump graph into memory. */
 export async function loadSde(): Promise<SdeMeta> {
-  const [sta, sys, jumps] = await Promise.all([
+  const [sta, sys, jumps, types] = await Promise.all([
     fetchCsv('staStations.csv'),
     fetchCsv('mapSolarSystems.csv'),
     fetchCsv('mapSolarSystemJumps.csv'),
+    fetchCsv('invTypes.csv'),
   ]);
 
   for (const r of sys.rows) {
@@ -79,5 +89,20 @@ export async function loadSde(): Promise<SdeMeta> {
     adjacency.get(from)!.push(to);
   }
 
-  return { stations: stationById.size, systems: systemById.size, jumps: adjacency.size };
+  // Only keep market-relevant types (published, with a non-zero volume) to
+  // keep the map small; that's all arbitrage ever looks up.
+  for (const r of types.rows) {
+    if (r[types.idx.published] !== '1') continue;
+    const id = Number(r[types.idx.typeID]);
+    const volume = Number(r[types.idx.volume]);
+    if (!Number.isFinite(volume) || volume <= 0) continue;
+    typeById.set(id, { id, name: r[types.idx.typeName], volume });
+  }
+
+  return {
+    stations: stationById.size,
+    systems: systemById.size,
+    jumps: adjacency.size,
+    types: typeById.size,
+  };
 }

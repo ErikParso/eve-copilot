@@ -10,7 +10,10 @@ interface NavItem {
   to: string;
 }
 
-const NAV_ITEMS: NavItem[] = [{ label: 'Courier Contracts', to: '/couriers' }];
+const NAV_ITEMS: NavItem[] = [
+  { label: 'Courier Contracts', to: '/couriers' },
+  { label: 'Arbitrage', to: '/arbitrage' },
+];
 
 /** App shell: top navigation bar + routed page content. */
 export function Layout() {
