@@ -4,9 +4,9 @@
 import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
 import { getShipKills } from './kills.js';
 import { getRoute, jumpsFromRoute, type RouteType } from './routing.js';
-import { getStation, getSystem, securityBand } from './sde.js';
+import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import { computeDanger } from './danger.js';
-import type { ContractEndpoint, EnrichedContract, PublicContract, RouteSystem } from './types.js';
+import type { EnrichedContract, PublicContract } from './types.js';
 
 const REFRESH_MS = 10 * 60 * 1000;
 
@@ -53,45 +53,6 @@ async function crawlContracts(): Promise<{ contracts: PublicContract[]; lastModi
 }
 
 // --- Enrichment ----------------------------------------------------------
-
-function resolveEndpoint(locationId: number): ContractEndpoint {
-  const station = getStation(locationId);
-  if (station) {
-    const system = getSystem(station.systemId);
-    return {
-      locationId,
-      name: station.name,
-      systemName: system?.name ?? null,
-      systemId: station.systemId,
-      security: system?.security ?? null,
-      securityBand: system ? securityBand(system.security) : null,
-      resolved: true,
-    };
-  }
-  return {
-    locationId,
-    name: `Structure #${locationId}`,
-    systemName: null,
-    systemId: null,
-    security: null,
-    securityBand: null,
-    resolved: false,
-  };
-}
-
-function toRouteSystems(systemIds: number[], kills: Map<number, number>): RouteSystem[] {
-  return systemIds.map((id) => {
-    const system = getSystem(id);
-    const security = system?.security ?? 0;
-    return {
-      systemId: id,
-      name: system?.name ?? `System ${id}`,
-      security,
-      securityBand: securityBand(security),
-      shipKills: kills.get(id) ?? 0,
-    };
-  });
-}
 
 function incomePerJump(reward: number, totalJumps: number | null): number | null {
   if (totalJumps === null) return null;
