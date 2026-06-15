@@ -6,10 +6,8 @@ import { atomWithStorage } from 'jotai/utils';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import {
   DEFAULT_FILTERS,
-  EMPTY_PROGRESS,
   type CourierFilters,
   type CourierRow,
-  type SearchProgress,
   type SearchStatus,
 } from './types';
 
@@ -50,4 +48,3 @@ export const searchResultAtom = atom<SearchResult>({
   contractsAsOf: null,
 });
 
-export const searchProgressAtom = atom<SearchProgress>(EMPTY_PROGRESS);

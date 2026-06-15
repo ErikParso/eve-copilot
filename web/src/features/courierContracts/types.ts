@@ -1,7 +1,7 @@
-import type { RouteType } from '@/api/routes';
 import type { SecurityBand } from '@/data/sde';
 
-export type { RouteType };
+/** Route preference, mapped server-side to the routing algorithm. */
+export type RouteType = 'safest' | 'shortest';
 
 /** How the result cards are ordered (applied on Search). */
 export type SortOptionId =
@@ -98,19 +98,3 @@ export interface CourierRow {
 }
 
 export type SearchStatus = 'idle' | 'loading' | 'success' | 'error';
-
-export interface SearchProgress {
-  phase: 'contracts' | 'routing' | 'done';
-  regionsDone: number;
-  regionsTotal: number;
-  routesDone: number;
-  routesTotal: number;
-}
-
-export const EMPTY_PROGRESS: SearchProgress = {
-  phase: 'contracts',
-  regionsDone: 0,
-  regionsTotal: 0,
-  routesDone: 0,
-  routesTotal: 0,
-};

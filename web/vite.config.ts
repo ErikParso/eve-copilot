@@ -11,6 +11,10 @@ export default defineConfig({
     // switching to another port if 5177 is taken.
     port: 5177,
     strictPort: true,
+    // Proxy API calls to the Express backend (port 4000) in dev.
+    proxy: {
+      '/api': 'http://localhost:4000',
+    },
   },
   resolve: {
     alias: {

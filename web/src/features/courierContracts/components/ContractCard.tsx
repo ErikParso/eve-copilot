@@ -86,6 +86,7 @@ export const ContractCard = memo(function ContractCard({ row }: { row: CourierRo
             label="ISK / jump"
             value={row.incomePerJump === null ? '—' : formatIsk(row.incomePerJump)}
           />
+          <Stat label="Listed for" value={formatDuration(row.ageSeconds)} />
           <Stat label="Time left" value={formatDuration(row.remainingSeconds)} />
           <Stat label="To complete" value={`${row.daysToComplete} days`} />
         </Stack>
