@@ -1,6 +1,8 @@
-import { useAtom } from 'jotai';
+import { useEffect } from 'react';
+import { useAtom, useAtomValue } from 'jotai';
 import { Button, InputAdornment, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
+import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
 import { draftFiltersAtom } from '../atoms';
 import type { RouteType, SortOptionId } from '../types';
 import { SORT_OPTIONS } from '../sortContracts';
@@ -23,6 +25,15 @@ function parseOptionalNumber(raw: string): number | null {
 /** Vertical filter sidebar. Everything (incl. sort) is applied on Search. */
 export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
   const [filters, setFilters] = useAtom(draftFiltersAtom);
+  const activeCharacter = useAtomValue(activeCharacterAtom);
+  const status = useAtomValue(characterStatusAtom);
+
+  // When logged in, the origin tracks the character's live location.
+  const liveSystemId = activeCharacter ? status?.systemId ?? null : null;
+  useEffect(() => {
+    if (liveSystemId === null) return;
+    setFilters((f) => (f.currentSystemId === liveSystemId ? f : { ...f, currentSystemId: liveSystemId }));
+  }, [liveSystemId, setFilters]);
 
   return (
     <Paper sx={{ p: 2.5 }} elevation={2}>
@@ -57,10 +68,25 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
           inputProps={{ min: 0 }}
         />
 
-        <SystemAutocomplete
-          value={filters.currentSystemId}
-          onChange={(currentSystemId) => setFilters((f) => ({ ...f, currentSystemId }))}
-        />
+        {activeCharacter ? (
+          <TextField
+            label="Current system"
+            size="small"
+            fullWidth
+            disabled
+            value={status?.systemName ?? 'Locating…'}
+            helperText={
+              status
+                ? `from your character · ${Math.max(0, Math.round((Date.now() - status.fetchedAt) / 1000))} s ago`
+                : ' '
+            }
+          />
+        ) : (
+          <SystemAutocomplete
+            value={filters.currentSystemId}
+            onChange={(currentSystemId) => setFilters((f) => ({ ...f, currentSystemId }))}
+          />
+        )}
 
         <RouteTypeSelect
           value={filters.routeType}

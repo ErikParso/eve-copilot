@@ -49,6 +49,26 @@ Both normalise their inputs across the current result set, so the index is a rel
 - **Player structures (citadels)** can't be resolved without an authenticated login, so
   contracts to/from them show as _Unknown structure_ and have no jump count.
 
+## EVE SSO login (optional)
+
+Logging in with a character (OAuth2 PKCE) is **optional** — the courier finder
+works on public data without it. When logged in you get an avatar menu with live
+character status (system, security, ship, online) and the "Current system"
+filter auto-fills from your character's live location.
+
+To enable it, register an app at <https://developers.eveonline.com>:
+
+- **Authentication**: Authorization Code (PKCE — no client secret)
+- **Callback URL**: `http://localhost:5173/auth/callback` (dev) / `https://<domain>/auth/callback` (prod)
+- **Scopes**: `esi-location.read_location.v1`, `esi-location.read_ship_type.v1`,
+  `esi-location.read_online.v1`, `esi-ui.open_window.v1`, `esi-ui.write_waypoint.v1`,
+  `esi-universe.read_structures.v1`
+
+Then copy `.env.example` → `.env.local` and set `VITE_EVE_CLIENT_ID`.
+
+> Tokens (incl. the refresh token) are stored in the browser — fine for local
+> use; a small token-exchange backend would be more secure for a hosted deploy.
+
 ## Getting started
 
 ```bash

@@ -2,6 +2,8 @@ import { AppBar, Box, Button, Container, Toolbar, Tooltip, Typography } from '@m
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
 import { useSdeMeta } from '@/data/sdeContext';
+import { AuthControls } from '@/features/auth/AuthControls';
+import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
 
 interface NavItem {
   label: string;
@@ -14,6 +16,7 @@ const NAV_ITEMS: NavItem[] = [{ label: 'Courier Contracts', to: '/couriers' }];
 export function Layout() {
   const { pathname } = useLocation();
   const sdeMeta = useSdeMeta();
+  useCharacterStatusPoller();
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -45,11 +48,13 @@ export function Layout() {
               }`}
               arrow
             >
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" sx={{ mr: 2 }}>
                 SDE: {new Date(sdeMeta.fetchedAt).toLocaleDateString()}
               </Typography>
             </Tooltip>
           )}
+
+          <AuthControls />
         </Toolbar>
       </AppBar>
 
