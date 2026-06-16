@@ -22,6 +22,8 @@ import { setWaypoint } from '@/api/ui';
 import { getSystem } from '@/data/sde';
 import { combinedResultAtom, draftFiltersAtom } from '@/features/courierContracts/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
+import { AttractivityCell } from '@/features/courierContracts/components/AttractivityCell';
+import { AttractivityWeightsControl } from '@/features/courierContracts/components/AttractivityWeightsControl';
 import { formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import { basketAtom } from './atoms';
 import { usePlan } from './usePlan';
@@ -89,6 +91,12 @@ function PlanSettingsPanel() {
       <SettingRow label="Route" value={route} />
       <Typography variant="caption" color="text.secondary">
         Shared with the Hauling search — change them there.
+      </Typography>
+
+      <Divider />
+      <AttractivityWeightsControl />
+      <Typography variant="caption" color="text.secondary">
+        The plan summary's factors and the suggested additions are ranked by these weights.
       </Typography>
     </Stack>
   );
@@ -313,6 +321,10 @@ function SuggestionsPanel() {
           {status === 'loading' ? 'Finding…' : 'Find additions'}
         </Button>
       </Box>
+      <Typography variant="caption" color="text.secondary">
+        Ranked by the attractivity of the plan each would produce, using your weights. Hover a score
+        for the per-factor breakdown.
+      </Typography>
 
       {!hasResults && (
         <Alert severity="info">
@@ -339,6 +351,7 @@ function SuggestionsPanel() {
               borderColor: 'divider',
             }}
           >
+            <AttractivityCell score={s.attractivity} steps={s.attractivitySteps} />
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.item.label}>
                 {s.item.kind === 'arbitrage' ? s.item.label : 'Courier contract'}
@@ -349,7 +362,7 @@ function SuggestionsPanel() {
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 +{formatIskMillions(s.deltaIncome)} · +{formatNumber(s.deltaJumps, 0)} jump
-                {s.deltaJumps === 1 ? '' : 's'} · plan score {formatNumber(s.attractivity, 0)}
+                {s.deltaJumps === 1 ? '' : 's'}
               </Typography>
             </Box>
             <AddToPlanButton item={s.item} />
