@@ -58,7 +58,12 @@ interface Snapshot {
   regions: number;
 }
 
-const REFRESH_MS = 10 * 60 * 1000;
+// Kept above ESI's 15-minute market-order rate-limit window (12000 req/15m) so a
+// scheduled refresh never overlaps the previous one inside a single window. A
+// full all-region crawl is only ~1700 requests, so one crawl per window sits
+// comfortably under budget; the underlying ESI feed is itself CCP-cached ~5 min,
+// so the data isn't meaningfully fresher than this anyway.
+const REFRESH_MS = 20 * 60 * 1000;
 const REGION_CONCURRENCY = 5;
 const PAGE_CONCURRENCY = 10;
 

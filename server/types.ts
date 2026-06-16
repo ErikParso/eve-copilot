@@ -85,6 +85,11 @@ export interface ArbitrageOpportunity {
   buyPrice: number;
   /** Volume-weighted sell price (what you receive per unit at the dest). */
   sellPrice: number;
+  /**
+   * CCP's reference value per unit (ISK), or null if unknown. Lets the client
+   * flag a destination buy order priced far above fair value (bait).
+   */
+  marketPrice: number | null;
   /** Total ISK spent buying the stock (the capital at risk). */
   buyCost: number;
   /** Net profit after the default sales tax. */

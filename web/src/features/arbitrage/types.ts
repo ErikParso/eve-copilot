@@ -15,6 +15,8 @@ export interface ArbitrageItem {
   totalVolume: number;
   buyPrice: number;
   sellPrice: number;
+  /** CCP's reference value per unit (ISK), or null if unknown. */
+  marketPrice: number | null;
   buyCost: number;
   profit: number;
   marginPct: number;
