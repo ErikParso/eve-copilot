@@ -51,7 +51,9 @@ async function main() {
   console.log('Started reference-price refresh (refreshing every 60 min).');
 
   const app = express();
-  app.use(express.json());
+  // The Copilot suggestion route can post thousands of system pairs at once, so
+  // lift the body limit well above the 100 kB default.
+  app.use(express.json({ limit: '8mb' }));
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });

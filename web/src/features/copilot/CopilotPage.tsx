@@ -297,9 +297,11 @@ function SuggestionsPanel() {
   const basket = useAtomValue(basketAtom);
   const { status, suggestions, error, considered, run } = useSuggestions();
 
+  const TOP_N = 12;
   const hasResults = combined.rows.length > 0;
   const inBasket = new Set(basket.map((b) => b.key));
-  const visible = suggestions.filter((s) => !inBasket.has(s.item.key));
+  const ranked = suggestions.filter((s) => !inBasket.has(s.item.key));
+  const visible = ranked.slice(0, TOP_N);
 
   return (
     <Stack spacing={1.5}>
@@ -316,19 +318,24 @@ function SuggestionsPanel() {
       </Box>
       <AttractivityWeightsControl />
       <Typography variant="caption" color="text.secondary">
-        Ranked by how much each addition would raise the whole plan's attractivity — the plan as it
-        would look with that contract added — using these weights.
+        Considers every Hauling result that fits, ranked by the attractivity of the plan with that
+        contract added — scored the same way as the Hauling cards, using these weights.
       </Typography>
 
       {!hasResults && (
         <Alert severity="info">
           Run a search on the <strong>Hauling</strong> page first — suggestions are drawn from those
-          results and ranked by how much they raise the whole plan's attractivity.
+          results.
         </Alert>
       )}
       {status === 'error' && <Alert severity="error">{error}</Alert>}
-      {status === 'ready' && considered > 0 && visible.length === 0 && (
-        <Alert severity="info">No nearby addition improves the plan's attractivity right now.</Alert>
+      {status === 'ready' && considered > 0 && ranked.length === 0 && (
+        <Alert severity="info">None of the contracts fit the current plan's cargo / ISK limits.</Alert>
+      )}
+      {ranked.length > TOP_N && (
+        <Typography variant="caption" color="text.secondary">
+          Showing the top {TOP_N} of {ranked.length}.
+        </Typography>
       )}
 
       <Stack spacing={1}>
