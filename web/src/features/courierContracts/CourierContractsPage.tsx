@@ -1,14 +1,14 @@
 import { Alert, Box, LinearProgress, Stack, Tooltip, Typography } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
-import { useCourierSearch } from './useCourierSearch';
+import { useCombinedSearch } from './useCombinedSearch';
 import { FiltersPanel } from './components/FiltersPanel';
-import { ContractsGrid } from './components/ContractsGrid';
+import { CombinedGrid } from './components/CombinedGrid';
 
 function ProgressBar() {
   return (
     <Box>
       <Typography variant="body2" color="text.secondary" gutterBottom>
-        Loading courier contracts…
+        Loading courier contracts and arbitrage hauls…
       </Typography>
       <LinearProgress />
     </Box>
@@ -20,8 +20,12 @@ function formatTime(epochMs: number): string {
 }
 
 export function CourierContractsPage() {
-  const { run, status, rows, error, contractsAsOf } = useCourierSearch();
+  const { run, status, rows, error, contractsAsOf, market } = useCombinedSearch();
   const loading = status === 'loading';
+  const warming = status === 'success' && market !== null && market.status !== 'ready';
+
+  const courierCount = rows.filter((r) => r.kind === 'courier').length;
+  const arbitrageCount = rows.length - courierCount;
 
   return (
     <Grid container spacing={2} alignItems="flex-start">
@@ -43,8 +47,15 @@ export function CourierContractsPage() {
 
           {status === 'idle' && (
             <Alert severity="info">
-              Set your filters and press <strong>Search</strong> to load current courier contracts.
-              The first search fetches every region and can take a little while.
+              Set your filters and press <strong>Search</strong> to load current courier contracts
+              and arbitrage hauls. The first search fetches every region and can take a moment.
+            </Alert>
+          )}
+
+          {warming && (
+            <Alert severity="warning">
+              The market crawl is still warming up (the first all-region scan after the server
+              starts), so arbitrage hauls may be incomplete — try again in a moment.
             </Alert>
           )}
 
@@ -60,24 +71,37 @@ export function CourierContractsPage() {
                 }}
               >
                 <Typography variant="body2" color="text.secondary">
-                  {rows.length} courier contract{rows.length === 1 ? '' : 's'} match your filters.
+                  {courierCount} courier contract{courierCount === 1 ? '' : 's'} · {arbitrageCount}{' '}
+                  arbitrage haul{arbitrageCount === 1 ? '' : 's'}
                 </Typography>
-                {contractsAsOf && (
-                  <Tooltip
-                    title="Contracts come from CCP's public feed, which is rebuilt on a ~30-min cycle. The list can therefore lag reality by up to ~30 minutes — accepted or expired contracts may still appear until CCP's next rebuild."
-                    arrow
-                  >
-                    <Typography variant="caption" color="text.secondary">
-                      EVE data as of {formatTime(contractsAsOf)}
-                    </Typography>
-                  </Tooltip>
-                )}
+                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                  {contractsAsOf && (
+                    <Tooltip
+                      title="Contracts come from CCP's public feed (rebuilt ~every 30 min); the list can lag by up to ~30 minutes."
+                      arrow
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Contracts as of {formatTime(contractsAsOf)}
+                      </Typography>
+                    </Tooltip>
+                  )}
+                  {market?.lastModifiedAt && (
+                    <Tooltip
+                      title={`Market order books come from CCP's feed (rebuilt ~every 5 min) across ${market.regions} regions; prices can lag by a few minutes.`}
+                      arrow
+                    >
+                      <Typography variant="caption" color="text.secondary">
+                        Market as of {formatTime(market.lastModifiedAt)}
+                      </Typography>
+                    </Tooltip>
+                  )}
+                </Box>
               </Box>
               {rows.length > 0 ? (
-                <ContractsGrid rows={rows} />
+                <CombinedGrid rows={rows} />
               ) : (
                 <Alert severity="info">
-                  No contracts match. Try relaxing the collateral or cargo limits.
+                  Nothing matches. Try relaxing the collateral or cargo limits.
                 </Alert>
               )}
             </>
