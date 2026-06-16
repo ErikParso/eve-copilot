@@ -1,47 +1,10 @@
-import type { ContractEndpoint, RouteSystem, RouteType } from '@/features/courierContracts/types';
+import type { ContractEndpoint, RouteSystem } from '@/features/courierContracts/types';
 
-export type { RouteType };
-
-/** How the arbitrage cards are ordered (applied on Search). */
-export type ArbitrageSortId =
-  | 'attractivity'
-  | 'profit'
-  | 'margin'
-  | 'profitPerJump'
-  | 'jumps'
-  | 'danger'
-  | 'investment';
-
-/** User-editable arbitrage filters. `null` means "Any / no limit". */
-export interface ArbitrageFilters {
-  /** Buy only from this source system (null = anywhere). */
-  fromSystemId: number | null;
-  /** Sell only into this destination system (null = anywhere). */
-  toSystemId: number | null;
-  /** Max ISK (in millions) to spend buying one item's stock. */
-  maxInvestmentMillions: number | null;
-  /** Max cargo volume in m³. */
-  maxCargoM3: number | null;
-  routeType: RouteType;
-  /** Drop hauls longer than this many jumps (null = no cap). */
-  maxJumps: number | null;
-  /** Sales-tax percentage applied to sell proceeds (e.g. 4.5). */
-  salesTaxPercent: number;
-  sortBy: ArbitrageSortId;
-}
-
-export const DEFAULT_ARBITRAGE_FILTERS: ArbitrageFilters = {
-  fromSystemId: null,
-  toSystemId: null,
-  maxInvestmentMillions: null,
-  maxCargoM3: null,
-  routeType: 'safest',
-  maxJumps: null,
-  salesTaxPercent: 4.5,
-  sortBy: 'attractivity',
-};
-
-/** One arbitrage opportunity from the API, before client-side scoring. */
+/**
+ * One arbitrage opportunity from the API (the full profitable haul for an item),
+ * before client-side scoring. Mirrors the server's ArbitrageItem and the courier
+ * row shape (approach + delivery routes, danger). All filtering is client-side.
+ */
 export interface ArbitrageItem {
   id: string;
   typeId: number;
@@ -56,8 +19,17 @@ export interface ArbitrageItem {
   marginPct: number;
   source: ContractEndpoint;
   dest: ContractEndpoint;
-  jumps: number | null;
-  route: RouteSystem[] | null;
+  /** Jumps from the current system to the buy station (null if no origin). */
+  jumpsFromCurrent: number | null;
+  /** Jumps from the buy station to the sell station (null if no route). */
+  jumpsToDest: number | null;
+  /** Systems on the current-system → buy route (null if not applicable). */
+  approachRoute: RouteSystem[] | null;
+  /** Systems on the buy → sell route (null if no route). */
+  deliveryRoute: RouteSystem[] | null;
+  /** Sum of approach + delivery jumps. */
+  totalJumps: number | null;
+  /** Profit divided by total journey jumps (profit itself when 0 jumps). */
   profitPerJump: number | null;
   danger: number | null;
   dangerSteps: string[];
@@ -68,8 +40,6 @@ export interface ArbitrageRow extends ArbitrageItem {
   attractivity: number;
   attractivitySteps: string[];
 }
-
-export type SearchStatus = 'idle' | 'loading' | 'success' | 'error';
 
 /** Market-crawl readiness reported by the API. */
 export type MarketStatus = 'cold' | 'warming' | 'ready';

@@ -2,9 +2,8 @@ import express from 'express';
 import { loadSde } from './sde.js';
 import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
 import { startMarketRefresh } from './market.js';
-import { findArbitrage } from './arbitrage.js';
+import { getEnrichedArbitrage } from './arbitrage.js';
 import type { RouteType } from './routing.js';
-import type { ArbitrageFilters } from './types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -17,20 +16,6 @@ function parseOptionalNumber(value: unknown): number | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function parseArbitrageFilters(query: express.Request['query']): ArbitrageFilters {
-  const tax = parseOptionalNumber(query.salesTaxRate);
-  return {
-    fromSystemId: parseOptionalNumber(query.fromSystemId),
-    toSystemId: parseOptionalNumber(query.toSystemId),
-    maxInvestment: parseOptionalNumber(query.maxInvestment),
-    maxCargo: parseOptionalNumber(query.maxCargo),
-    routeType: parseRouteType(query.routeType),
-    maxJumps: parseOptionalNumber(query.maxJumps),
-    // Default to a mid Accounting skill (~4.5%) when unspecified.
-    salesTaxRate: tax !== null ? Math.min(Math.max(tax, 0), 1) : 0.045,
-  };
 }
 
 async function main() {
@@ -66,7 +51,9 @@ async function main() {
 
   app.get('/api/arbitrage', async (req, res) => {
     try {
-      const result = await findArbitrage(parseArbitrageFilters(req.query));
+      const type = parseRouteType(req.query.routeType);
+      const origin = parseOptionalNumber(req.query.origin);
+      const result = await getEnrichedArbitrage(type, origin);
       res.json(result);
     } catch (err) {
       console.error('GET /api/arbitrage failed', err);

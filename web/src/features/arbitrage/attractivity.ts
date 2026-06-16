@@ -29,7 +29,7 @@ const FACTORS: Factor[] = [
   { label: 'Margin', direction: 'higher', scale: 'linear', weight: 4, value: (r) => r.marginPct, format: pct },
   { label: 'Profit / jump', direction: 'higher', scale: 'log', weight: 5, value: (r) => r.profitPerJump, format: formatIsk },
   { label: 'Danger', direction: 'lower', scale: 'linear', weight: 3, value: (r) => r.danger, format: (v) => `${formatNumber(v, 0)}/100` },
-  { label: 'Jumps', direction: 'lower', scale: 'linear', weight: 3, value: (r) => r.jumps, format: jumps },
+  { label: 'Jumps', direction: 'lower', scale: 'linear', weight: 3, value: (r) => r.totalJumps, format: jumps },
   { label: 'Investment', direction: 'lower', scale: 'log', weight: 2, value: (r) => r.buyCost, format: formatIsk },
   { label: 'Cargo volume', direction: 'lower', scale: 'log', weight: 1, value: (r) => r.totalVolume, format: formatVolume },
 ];

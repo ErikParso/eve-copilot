@@ -30,9 +30,10 @@ function sortValue(card: ResultCard, sortBy: SortOptionId): number | null {
     case 'cargo':
       return r.totalVolume;
     case 'totalJumps':
-      return r.jumps;
-    // No equivalent on an arbitrage haul (no approach leg / no expiry) → last.
+      return r.totalJumps;
     case 'jumpsToPickup':
+      return r.jumpsFromCurrent; // jumps from current system to the buy station
+    // No equivalent on an arbitrage haul (no expiry / listing age) → last.
     case 'timeRemaining':
     case 'listedAge':
       return null;
