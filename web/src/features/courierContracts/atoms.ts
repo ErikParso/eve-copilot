@@ -21,7 +21,8 @@ export const draftFiltersAtom = atomWithStorage<CourierFilters>(
 
 /** User-chosen factor weights (0–10 each), persisted to localStorage. */
 export const attractivityWeightsAtom = atomWithStorage<AttractivityWeights>(
-  'eve-multitool.attractivityWeights',
+  // v2: unified courier+arbitrage factor set (ids changed), so reset old saves.
+  'eve-multitool.attractivityWeights.v2',
   DEFAULT_WEIGHTS,
   undefined,
   { getOnInit: true },

@@ -5,7 +5,7 @@ import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
 import { getShipKills } from './kills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import type { EnrichedContract, PublicContract } from './types.js';
+import type { ContractOpportunity, EnrichedContract, PublicContract } from './types.js';
 
 const REFRESH_MS = 10 * 60 * 1000;
 
@@ -53,59 +53,56 @@ async function crawlContracts(): Promise<{ contracts: PublicContract[]; lastModi
 
 // --- Enrichment ----------------------------------------------------------
 
-/**
- * Resolve one contract into a client row by adding its endpoints, the two route
- * legs (delivery pickup→dropoff, plus approach current system→pickup when an
- * origin is given) and freshly-computed listing times. Jumps, income/jump and
- * danger are derived from the routes on the FE. getRoute memoises the search.
- */
-function resolveContract(
-  c: PublicContract,
-  type: RouteType,
-  origin: number | null,
-  kills: Map<number, number>,
-): EnrichedContract {
-  const pickup = resolveEndpoint(c.start_location_id);
-  const dropoff = resolveEndpoint(c.end_location_id);
-
-  const deliveryIds =
-    pickup.systemId !== null && dropoff.systemId !== null
-      ? getRoute(pickup.systemId, dropoff.systemId, type)
-      : null;
-  const deliveryRoute = deliveryIds ? toRouteSystems(deliveryIds, kills) : null;
-
-  let approachRoute: EnrichedContract['approachRoute'] = null;
-  if (origin !== null && pickup.systemId !== null) {
-    const approachIds = getRoute(origin, pickup.systemId, type);
-    approachRoute = approachIds ? toRouteSystems(approachIds, kills) : null;
-  }
-
-  const issued = Date.parse(c.date_issued);
-  const expired = Date.parse(c.date_expired);
-  const now = Date.now();
-
+/** Resolve a raw contract into the cached opportunity (endpoints + economics, no routes). */
+function buildOpportunity(c: PublicContract): ContractOpportunity {
   return {
     id: c.contract_id,
-    pickup,
-    dropoff,
+    pickup: resolveEndpoint(c.start_location_id),
+    dropoff: resolveEndpoint(c.end_location_id),
     volume: c.volume,
     reward: c.reward,
     collateral: c.collateral,
-    approachRoute,
-    deliveryRoute,
-    activeDurationSeconds: (expired - issued) / 1000,
-    ageSeconds: (now - issued) / 1000,
-    remainingSeconds: (expired - now) / 1000,
+    issuedAt: Date.parse(c.date_issued),
+    expiresAt: Date.parse(c.date_expired),
     daysToComplete: c.days_to_complete,
   };
 }
 
+/**
+ * Enhance one opportunity with its two route legs: the delivery leg
+ * (pickup→dropoff) plus the approach leg (current system→pickup) when an origin
+ * is given. Returns null — filtering the contract out — when either leg is
+ * unreachable (or an endpoint's system is unknown). getRoute memoises the search.
+ */
+function resolveContract(
+  o: ContractOpportunity,
+  type: RouteType,
+  origin: number | null,
+  kills: Map<number, number>,
+): EnrichedContract | null {
+  if (o.pickup.systemId === null || o.dropoff.systemId === null) return null;
+
+  const deliveryIds = getRoute(o.pickup.systemId, o.dropoff.systemId, type);
+  if (!deliveryIds) return null; // can't deliver pickup → dropoff
+  const deliveryRoute = toRouteSystems(deliveryIds, kills);
+
+  let approachRoute: EnrichedContract['approachRoute'] = null;
+  if (origin !== null) {
+    const approachIds = getRoute(origin, o.pickup.systemId, type);
+    if (!approachIds) return null; // can't reach the pickup from here
+    approachRoute = toRouteSystems(approachIds, kills);
+  }
+
+  return { ...o, approachRoute, deliveryRoute };
+}
+
 // --- Cache ---------------------------------------------------------------
 //
-// Only the raw crawl is cached. Routes are resolved on every request, which is
-// cheap because the graph search is memoised per (origin, dest, type) by
-// routing.ts's routeCache; a request only re-runs the light endpoint / route /
-// danger mapping (and so the listing times are always fresh).
+// Two cached stages mirror the arbitrage pipeline: the raw crawl, and the
+// route-free opportunities derived from it (endpoints resolved). Routes are NOT
+// cached here — they're resolved per request, cheap because the graph search is
+// memoised per (origin, dest, type) by routing.ts's routeCache. Listing times
+// are derived on the FE from the raw timestamps, so they're always fresh.
 
 interface RawState {
   contracts: PublicContract[];
@@ -115,6 +112,8 @@ interface RawState {
 
 let raw: RawState | null = null;
 let crawling: Promise<void> | null = null;
+let opportunities: ContractOpportunity[] = [];
+let opportunitiesFetchedAt = -1;
 
 async function refresh(): Promise<void> {
   if (crawling) return crawling;
@@ -125,6 +124,16 @@ async function refresh(): Promise<void> {
     crawling = null;
   });
   return crawling;
+}
+
+/** Cached route-free opportunities, rebuilt only when the crawl refreshes. */
+function getOpportunities(): ContractOpportunity[] {
+  if (!raw) return [];
+  if (raw.fetchedAt !== opportunitiesFetchedAt) {
+    opportunities = raw.contracts.map(buildOpportunity);
+    opportunitiesFetchedAt = raw.fetchedAt;
+  }
+  return opportunities;
 }
 
 /** Start the periodic crawl (and do the first one now). */
@@ -139,7 +148,11 @@ export interface ContractsResponse {
   total: number;
 }
 
-/** Enriched contracts for a route type, optionally with approach legs from an origin system. */
+/**
+ * Every reachable contract for a route type, with routes resolved for this
+ * request (delivery leg, plus the approach leg from `origin` when given).
+ * Unreachable contracts are dropped.
+ */
 export async function getEnrichedContracts(
   type: RouteType,
   origin: number | null,
@@ -148,6 +161,10 @@ export async function getEnrichedContracts(
   if (!raw) return { contracts: [], lastModifiedAt: null, total: 0 };
 
   const kills = await getShipKills();
-  const contracts = raw.contracts.map((c) => resolveContract(c, type, origin, kills));
+  const contracts: EnrichedContract[] = [];
+  for (const o of getOpportunities()) {
+    const enriched = resolveContract(o, type, origin, kills);
+    if (enriched) contracts.push(enriched);
+  }
   return { contracts, lastModifiedAt: raw.lastModifiedAt, total: contracts.length };
 }
