@@ -3,6 +3,9 @@ import type { SecurityBand } from '@/data/sde';
 /** Route preference, mapped server-side to the routing algorithm. */
 export type RouteType = 'safest' | 'shortest';
 
+/** Which kinds of opportunity to show. Empty = no filter (show all). */
+export type ContractType = 'arbitrage' | 'courier';
+
 /** How the result cards are ordered (applied on Search). */
 export type SortOptionId =
   | 'attractivity'
@@ -24,6 +27,8 @@ export interface CourierFilters {
   routeType: RouteType;
   /** Origin solar-system id for the "jumps to pickup" calculation. */
   currentSystemId: number | null;
+  /** Opportunity kinds to show; empty means no filter (show all). */
+  contractTypes: ContractType[];
   /** Result ordering, applied on Search. */
   sortBy: SortOptionId;
 }
@@ -33,6 +38,7 @@ export const DEFAULT_FILTERS: CourierFilters = {
   maxCargoM3: null,
   routeType: 'safest',
   currentSystemId: null,
+  contractTypes: [],
   sortBy: 'attractivity',
 };
 

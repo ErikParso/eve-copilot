@@ -13,7 +13,8 @@ import type { MarketMeta } from '@/features/arbitrage/types';
  * Persisted to localStorage so the user doesn't have to re-enter them.
  */
 export const draftFiltersAtom = atomWithStorage<CourierFilters>(
-  'eve-multitool.courierFilters.v2',
+  // v3: added contractTypes; reset old saves so the field is always present.
+  'eve-multitool.courierFilters.v3',
   DEFAULT_FILTERS,
   undefined,
   { getOnInit: true },
