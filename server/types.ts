@@ -34,38 +34,44 @@ export interface ContractEndpoint {
 }
 
 /**
- * Enriched contract sent to the client. Matches the client's CourierRow minus
- * the attractivity fields (those are computed on the FE from user weights).
+ * A courier contract resolved into an opportunity, BEFORE routing: endpoints +
+ * economics + raw timestamps, no routes. This is the cached middle stage. Times
+ * are shipped raw (epoch ms) so the FE derives age/remaining fresh per render.
  */
-export interface EnrichedContract {
+export interface ContractOpportunity {
   id: number;
   pickup: ContractEndpoint;
   dropoff: ContractEndpoint;
   volume: number;
   reward: number;
   collateral: number;
-  jumpsFromCurrent: number | null;
-  jumpsToDropoff: number | null;
-  approachRoute: RouteSystem[] | null;
-  deliveryRoute: RouteSystem[] | null;
-  totalJumps: number | null;
-  incomePerJump: number | null;
-  activeDurationSeconds: number;
-  ageSeconds: number;
-  remainingSeconds: number;
+  /** Contract listed-at, epoch ms. */
+  issuedAt: number;
+  /** Contract expiry, epoch ms. */
+  expiresAt: number;
   daysToComplete: number;
-  danger: number | null;
-  dangerSteps: string[];
 }
 
 /**
- * One buy-here/sell-there opportunity for a single item type — the full
- * profitable haul (entire profitable order-book depth) at a default sales tax.
- * Mirrors the courier card shape (source/dest endpoints, approach + delivery
- * routes, danger). All user filtering (collateral/cargo/etc.) happens on the
- * client; the server resolves every item and caches the lot.
+ * A contract opportunity enhanced with its route legs (the per-request,
+ * authoritative stage). Unreachable contracts are filtered out before this is
+ * built, so `deliveryRoute` is always present and `approachRoute` is null only
+ * when no origin was given. Jumps, income/jump, danger and the listing times are
+ * all derived from these fields on the FE.
  */
-export interface ArbitrageItem {
+export interface EnrichedContract extends ContractOpportunity {
+  /** Systems on the current-station → pickup route (null when no origin). */
+  approachRoute: RouteSystem[] | null;
+  /** Systems on the pickup → dropoff route (always reachable). */
+  deliveryRoute: RouteSystem[];
+}
+
+/**
+ * One buy-here/sell-there opportunity for a single item type, BEFORE routing:
+ * the full profitable haul (entire profitable order-book depth) at a default
+ * sales tax, with endpoints + economics only. This is the cached middle stage.
+ */
+export interface ArbitrageOpportunity {
   id: string;
   typeId: number;
   itemName: string;
@@ -87,18 +93,17 @@ export interface ArbitrageItem {
   marginPct: number;
   source: ContractEndpoint;
   dest: ContractEndpoint;
-  /** Jumps from the current system to the buy station (null if no origin). */
-  jumpsFromCurrent: number | null;
-  /** Jumps from the buy station to the sell station (null if no route). */
-  jumpsToDest: number | null;
-  /** Systems on the current-system → buy route (null if not applicable). */
+}
+
+/**
+ * An arbitrage opportunity enhanced with its route legs (the per-request,
+ * authoritative stage). Unreachable hauls are filtered out before this is built,
+ * so `deliveryRoute` is always present and `approachRoute` is null only when no
+ * origin was given. Jumps, profit/jump and danger are derived on the FE.
+ */
+export interface ArbitrageItem extends ArbitrageOpportunity {
+  /** Systems on the current-system → buy route (null when no origin). */
   approachRoute: RouteSystem[] | null;
-  /** Systems on the buy → sell route (null if no route). */
-  deliveryRoute: RouteSystem[] | null;
-  /** Sum of approach + delivery jumps (the whole journey). */
-  totalJumps: number | null;
-  /** Profit divided by total journey jumps (profit itself when 0 jumps). */
-  profitPerJump: number | null;
-  danger: number | null;
-  dangerSteps: string[];
+  /** Systems on the buy → sell route (always reachable). */
+  deliveryRoute: RouteSystem[];
 }

@@ -4,20 +4,82 @@ import { computeAttractivity } from './attractivity';
 import { computeArbitrageAttractivity } from '@/features/arbitrage/attractivity';
 import { attractivityWeightsAtom, combinedResultAtom, draftFiltersAtom } from './atoms';
 import { sortCombined, type ResultCard } from './combined';
+import { deriveJourney, perJump } from './journey';
 import type { CourierRow } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
 
 const MILLION = 1_000_000;
 
-type ApiContract = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>;
+// The server ships only endpoints, economics and the route legs; jumps,
+// income/profit-per-jump and danger are derived here from the routes.
+type ApiContract = Pick<
+  CourierRow,
+  | 'id'
+  | 'pickup'
+  | 'dropoff'
+  | 'volume'
+  | 'reward'
+  | 'collateral'
+  | 'approachRoute'
+  | 'deliveryRoute'
+  | 'activeDurationSeconds'
+  | 'ageSeconds'
+  | 'remainingSeconds'
+  | 'daysToComplete'
+>;
+type ApiArbitrageItem = Pick<
+  ArbitrageItem,
+  | 'id'
+  | 'typeId'
+  | 'itemName'
+  | 'quantity'
+  | 'unitVolume'
+  | 'totalVolume'
+  | 'buyPrice'
+  | 'sellPrice'
+  | 'buyCost'
+  | 'profit'
+  | 'marginPct'
+  | 'source'
+  | 'dest'
+  | 'approachRoute'
+  | 'deliveryRoute'
+>;
 interface ContractsResponse {
   contracts: ApiContract[];
   lastModifiedAt: number | null;
   total: number;
 }
 interface ArbitrageResponse {
-  items: ArbitrageItem[];
+  items: ApiArbitrageItem[];
   meta: MarketMeta;
+}
+
+/** Add the route-derived fields (jumps, per-jump rate, danger) to an API row. */
+function hydrateContract(c: ApiContract, hasOrigin: boolean): Omit<CourierRow, 'attractivity' | 'attractivitySteps'> {
+  const j = deriveJourney(c.approachRoute, c.deliveryRoute, hasOrigin);
+  return {
+    ...c,
+    jumpsFromCurrent: j.jumpsFromCurrent,
+    jumpsToDropoff: j.jumpsToDest,
+    totalJumps: j.totalJumps,
+    incomePerJump: perJump(c.reward, j.totalJumps),
+    danger: j.danger,
+    dangerSteps: j.dangerSteps,
+  };
+}
+
+function hydrateArbitrage(a: ApiArbitrageItem, hasOrigin: boolean): ArbitrageItem {
+  const j = deriveJourney(a.approachRoute, a.deliveryRoute, hasOrigin);
+  return {
+    ...a,
+    jumpsFromCurrent: j.jumpsFromCurrent,
+    jumpsToDest: j.jumpsToDest,
+    totalJumps: j.totalJumps,
+    profitPerJump: perJump(a.profit, j.totalJumps),
+    danger: j.danger,
+    dangerSteps: j.dangerSteps,
+  };
 }
 
 /**
@@ -63,9 +125,11 @@ export function useCombinedSearch() {
       const maxCollateral =
         filters.maxCollateralMillions !== null ? filters.maxCollateralMillions * MILLION : Infinity;
       const maxCargo = filters.maxCargoM3 !== null ? filters.maxCargoM3 : Infinity;
+      const hasOrigin = filters.currentSystemId !== null;
 
       const courierRows = computeAttractivity(
         contractData.contracts
+          .map((c) => hydrateContract(c, hasOrigin))
           .filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo)
           .map((c) => ({ ...c, attractivity: 0, attractivitySteps: [] })),
         weights,
@@ -73,7 +137,9 @@ export function useCombinedSearch() {
       // Same filters mapped to arbitrage: capital tied up ↔ collateral, haul
       // size ↔ cargo.
       const arbRows = computeArbitrageAttractivity(
-        arbData.items.filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo),
+        arbData.items
+          .map((a) => hydrateArbitrage(a, hasOrigin))
+          .filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo),
       );
 
       const cards: ResultCard[] = [

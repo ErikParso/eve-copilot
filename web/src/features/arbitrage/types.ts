@@ -1,9 +1,10 @@
 import type { ContractEndpoint, RouteSystem } from '@/features/courierContracts/types';
 
 /**
- * One arbitrage opportunity from the API (the full profitable haul for an item),
- * before client-side scoring. Mirrors the server's ArbitrageItem and the courier
- * row shape (approach + delivery routes, danger). All filtering is client-side.
+ * One arbitrage opportunity, hydrated and ready to render (before client-side
+ * scoring). The server sends only endpoints, economics and the route legs; the
+ * jumps/per-jump/danger fields below are derived on the FE from the routes (see
+ * hydrateArbitrage). All filtering is client-side.
  */
 export interface ArbitrageItem {
   id: string;
