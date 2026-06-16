@@ -20,11 +20,13 @@ import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms'
 import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { setWaypoint } from '@/api/ui';
 import { getSystem } from '@/data/sde';
-import { draftFiltersAtom } from '@/features/courierContracts/atoms';
+import { combinedResultAtom, draftFiltersAtom } from '@/features/courierContracts/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import { basketAtom } from './atoms';
 import { usePlan } from './usePlan';
+import { useSuggestions } from './useSuggestions';
+import { AddToPlanButton } from './components/AddToPlanButton';
 import type { BasketStop, Plan } from './types';
 
 /** In-game waypoint target: the station id when resolved, else the system id. */
@@ -288,6 +290,76 @@ function Roadmap({ plan }: { plan: Plan }) {
   );
 }
 
+/** On-demand list of additions that would raise the plan's attractivity. */
+function SuggestionsPanel() {
+  const combined = useAtomValue(combinedResultAtom);
+  const basket = useAtomValue(basketAtom);
+  const { status, suggestions, error, considered, run } = useSuggestions();
+
+  const hasResults = combined.rows.length > 0;
+  const inBasket = new Set(basket.map((b) => b.key));
+  const visible = suggestions.filter((s) => !inBasket.has(s.item.key));
+
+  return (
+    <Stack spacing={1.5}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="subtitle2">Suggested additions</Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={run}
+          disabled={!hasResults || status === 'loading'}
+        >
+          {status === 'loading' ? 'Finding…' : 'Find additions'}
+        </Button>
+      </Box>
+
+      {!hasResults && (
+        <Alert severity="info">
+          Run a search on the <strong>Hauling</strong> page first — suggestions are drawn from those
+          results and ranked by how much they raise the whole plan's attractivity.
+        </Alert>
+      )}
+      {status === 'error' && <Alert severity="error">{error}</Alert>}
+      {status === 'ready' && considered > 0 && visible.length === 0 && (
+        <Alert severity="info">No nearby addition improves the plan's attractivity right now.</Alert>
+      )}
+
+      <Stack spacing={1}>
+        {visible.map((s) => (
+          <Box
+            key={s.item.key}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              p: 1,
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.item.label}>
+                {s.item.kind === 'arbitrage' ? s.item.label : 'Courier contract'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                {s.item.pickup.endpoint.systemName ?? '?'} →{' '}
+                {s.item.dropoff.endpoint.systemName ?? '?'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                +{formatIskMillions(s.deltaIncome)} · +{formatNumber(s.deltaJumps, 0)} jump
+                {s.deltaJumps === 1 ? '' : 's'} · plan score {formatNumber(s.attractivity, 0)}
+              </Typography>
+            </Box>
+            <AddToPlanButton item={s.item} />
+          </Box>
+        ))}
+      </Stack>
+    </Stack>
+  );
+}
+
 export function CopilotPage() {
   const basket = useAtomValue(basketAtom);
   const filters = useAtomValue(draftFiltersAtom);
@@ -346,6 +418,9 @@ export function CopilotPage() {
               <Roadmap plan={plan} />
             </>
           )}
+
+          <Divider />
+          <SuggestionsPanel />
         </Stack>
       </Grid>
     </Grid>
