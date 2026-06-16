@@ -41,30 +41,29 @@ export function rankSuggestions(
   inp: PlannerInputs,
   weights: AttractivityWeights,
 ): Suggestion[] {
+  // The current plan, used only to report each addition's marginal cost.
   const baseline = buildPlan(basket, inp);
 
-  // Build each candidate's resulting plan; drop ones the planner can't place.
+  // Build each candidate's resulting plan; drop the ones that don't fit.
   const entries = candidates
     .map((item) => ({ item, plan: buildPlan([...basket, item], inp) }))
     .filter((e) => !e.plan.infeasibleKeys.includes(e.item.key));
 
-  // Score the baseline and every candidate plan in one relative pass.
-  const rows: Array<{ item: BasketItem | null; plan: Plan }> = [
-    { item: null, plan: baseline },
-    ...entries,
-  ];
-  const scored = score(rows, weights, (r) => planToScorable(r.plan));
-  const baselineScore = scored.find((r) => r.item === null)?.attractivity ?? 0;
+  // Score the resulting plans exactly the way Hauling scores its cards: the
+  // shared engine, min-max normalised across the set being ranked, weighted.
+  // The set here is "the plan with each candidate added" — so on an EMPTY plan
+  // every resulting plan is a single contract and the set is the Hauling set,
+  // which reproduces the Hauling card scores and ordering. (The baseline is NOT
+  // part of this set, so its all-zero metrics can't skew the normalisation.)
+  const scored = score(entries, weights, (e) => planToScorable(e.plan));
 
   return scored
-    .filter((r): r is (typeof scored)[number] & { item: BasketItem } => r.item !== null)
-    .map((r) => ({
-      item: r.item,
-      plan: r.plan,
-      attractivity: r.attractivity,
-      deltaJumps: r.plan.totalJumps - baseline.totalJumps,
-      deltaIncome: r.plan.totalIncome - baseline.totalIncome,
+    .map((e) => ({
+      item: e.item,
+      plan: e.plan,
+      attractivity: e.attractivity,
+      deltaJumps: e.plan.totalJumps - baseline.totalJumps,
+      deltaIncome: e.plan.totalIncome - baseline.totalIncome,
     }))
-    .filter((s) => s.attractivity > baselineScore)
     .sort((a, b) => b.attractivity - a.attractivity);
 }
