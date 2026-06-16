@@ -4,10 +4,11 @@ import { Button, InputAdornment, MenuItem, Paper, Stack, TextField, Typography }
 import SearchIcon from '@mui/icons-material/Search';
 import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
 import { draftFiltersAtom } from '../atoms';
-import type { RouteType, SortOptionId } from '../types';
+import type { ContractType, RouteType, SortOptionId } from '../types';
 import { SORT_OPTIONS } from '../sortContracts';
 import { SystemAutocomplete } from './SystemAutocomplete';
 import { RouteTypeSelect } from './RouteTypeSelect';
+import { ContractTypeSelect } from './ContractTypeSelect';
 import { AttractivityWeightsControl } from './AttractivityWeightsControl';
 
 interface FiltersPanelProps {
@@ -87,6 +88,13 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
             onChange={(currentSystemId) => setFilters((f) => ({ ...f, currentSystemId }))}
           />
         )}
+
+        <ContractTypeSelect
+          value={filters.contractTypes}
+          onChange={(contractTypes: ContractType[]) =>
+            setFilters((f) => ({ ...f, contractTypes }))
+          }
+        />
 
         <RouteTypeSelect
           value={filters.routeType}

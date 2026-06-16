@@ -127,14 +127,23 @@ export function useCombinedSearch() {
         filters.maxCollateralMillions !== null ? filters.maxCollateralMillions * MILLION : Infinity;
       const maxCargo = filters.maxCargoM3 !== null ? filters.maxCargoM3 : Infinity;
 
-      const courierRows = contractData.contracts
-        .map((c) => hydrateContract(c))
-        .filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo);
+      // Contract-type filter: empty selection means "no filter" (show both).
+      const types = filters.contractTypes;
+      const showCourier = types.length === 0 || types.includes('courier');
+      const showArbitrage = types.length === 0 || types.includes('arbitrage');
+
+      const courierRows = showCourier
+        ? contractData.contracts
+            .map((c) => hydrateContract(c))
+            .filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo)
+        : [];
       // Same filters mapped to arbitrage: capital tied up ↔ collateral, haul
       // size ↔ cargo.
-      const arbRows = arbData.items
-        .map((a) => hydrateArbitrage(a))
-        .filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo);
+      const arbRows = showArbitrage
+        ? arbData.items
+            .map((a) => hydrateArbitrage(a))
+            .filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo)
+        : [];
 
       // Score both kinds in one pass so attractivity is comparable across the
       // mixed list we render.
