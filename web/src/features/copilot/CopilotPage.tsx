@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAtom, useAtomValue, useStore } from 'jotai';
+import { Link as RouterLink } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -9,9 +10,6 @@ import {
   IconButton,
   LinearProgress,
   Stack,
-  TextField,
-  ToggleButton,
-  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -21,10 +19,11 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { setWaypoint } from '@/api/ui';
+import { getSystem } from '@/data/sde';
+import { draftFiltersAtom } from '@/features/courierContracts/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
-import type { RouteType } from '@/features/courierContracts/types';
-import { basketAtom, copilotInputsAtom } from './atoms';
+import { basketAtom } from './atoms';
 import { usePlan } from './usePlan';
 import type { BasketStop, Plan } from './types';
 
@@ -39,64 +38,56 @@ function stopLine(stop: BasketStop): string {
   return `${stop.endpoint.name} · ${sys}`;
 }
 
-function InputsPanel() {
-  const [inputs, setInputs] = useAtom(copilotInputsAtom);
+function SettingRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="caption" sx={{ fontWeight: 600 }}>
+        {value}
+      </Typography>
+    </Box>
+  );
+}
+
+/** Read-only view of the shared Hauling settings the plan is built from. */
+function PlanSettingsPanel() {
+  const filters = useAtomValue(draftFiltersAtom);
   const status = useAtomValue(characterStatusAtom);
 
+  const locationName =
+    status?.systemName ??
+    (filters.currentSystemId !== null ? getSystem(filters.currentSystemId)?.name ?? null : null);
+  const capacity = filters.maxCargoM3 !== null ? formatVolume(filters.maxCargoM3) : 'Unlimited';
+  const isk =
+    filters.maxCollateralMillions !== null
+      ? formatIskMillions(filters.maxCollateralMillions * 1_000_000)
+      : 'Unlimited';
+  const route = filters.routeType === 'safest' ? 'Safest' : 'Shortest';
+
   return (
-    <Stack spacing={2}>
-      <Box>
-        <Typography variant="subtitle2" gutterBottom>
-          Current location
-        </Typography>
-        <Chip
-          icon={<MyLocationIcon />}
-          label={status?.systemName ?? 'Unknown — log in & undock'}
-          size="small"
-          color={status?.systemName ? 'default' : 'warning'}
-          variant="outlined"
-        />
+    <Stack spacing={1.5}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="subtitle2">Plan settings</Typography>
+        <Button size="small" component={RouterLink} to="/couriers">
+          Edit in filters
+        </Button>
       </Box>
-
-      <TextField
-        label="Cargo capacity (m³)"
-        type="number"
+      <Chip
+        icon={<MyLocationIcon />}
+        label={locationName ?? 'Unknown — set in filters'}
         size="small"
-        value={inputs.cargoM3 ?? ''}
-        onChange={(e) =>
-          setInputs({ ...inputs, cargoM3: e.target.value === '' ? null : Number(e.target.value) })
-        }
-        helperText="Free hold space. Blank = unlimited."
+        color={locationName ? 'default' : 'warning'}
+        variant="outlined"
+        sx={{ alignSelf: 'flex-start' }}
       />
-
-      <TextField
-        label="Starting ISK (millions)"
-        type="number"
-        size="small"
-        value={inputs.startIskMillions ?? ''}
-        onChange={(e) =>
-          setInputs({
-            ...inputs,
-            startIskMillions: e.target.value === '' ? null : Number(e.target.value),
-          })
-        }
-        helperText="Wallet balance. Blank = unlimited."
-      />
-
-      <Box>
-        <Typography variant="subtitle2" gutterBottom>
-          Route preference
-        </Typography>
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={inputs.routeType}
-          onChange={(_e, v: RouteType | null) => v && setInputs({ ...inputs, routeType: v })}
-        >
-          <ToggleButton value="safest">Safest</ToggleButton>
-          <ToggleButton value="shortest">Shortest</ToggleButton>
-        </ToggleButtonGroup>
-      </Box>
+      <SettingRow label="Cargo capacity" value={capacity} />
+      <SettingRow label="Available ISK" value={isk} />
+      <SettingRow label="Route" value={route} />
+      <Typography variant="caption" color="text.secondary">
+        Shared with the Hauling search — change them there.
+      </Typography>
     </Stack>
   );
 }
@@ -299,19 +290,21 @@ function Roadmap({ plan }: { plan: Plan }) {
 
 export function CopilotPage() {
   const basket = useAtomValue(basketAtom);
-  const inputs = useAtomValue(copilotInputsAtom);
+  const filters = useAtomValue(draftFiltersAtom);
   const { status, plan, error } = usePlan();
 
-  const capacity = inputs.cargoM3 ?? Number.POSITIVE_INFINITY;
+  const capacity = filters.maxCargoM3 ?? Number.POSITIVE_INFINITY;
   const startIsk =
-    inputs.startIskMillions !== null ? inputs.startIskMillions * 1_000_000 : Number.POSITIVE_INFINITY;
+    filters.maxCollateralMillions !== null
+      ? filters.maxCollateralMillions * 1_000_000
+      : Number.POSITIVE_INFINITY;
 
   return (
     <Grid container spacing={2} alignItems="flex-start">
       <Grid xs={12} sm={6} md={4} lg={3}>
         <Box sx={{ position: { md: 'sticky' }, top: { md: 80 } }}>
           <Stack spacing={2}>
-            <InputsPanel />
+            <PlanSettingsPanel />
             <Divider />
             <BasketPanel />
           </Stack>

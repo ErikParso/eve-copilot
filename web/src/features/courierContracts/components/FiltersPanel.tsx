@@ -44,7 +44,7 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
         </Typography>
 
         <TextField
-          label="Max collateral"
+          label="Available ISK"
           type="number"
           size="small"
           fullWidth
@@ -54,10 +54,11 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
           }
           InputProps={{ endAdornment: <InputAdornment position="end">M ISK</InputAdornment> }}
           inputProps={{ min: 0 }}
+          helperText="Hides what you can't cover; also the Copilot plan's start balance."
         />
 
         <TextField
-          label="Max cargo volume"
+          label="Cargo capacity"
           type="number"
           size="small"
           fullWidth
@@ -67,6 +68,7 @@ export function FiltersPanel({ onSearch, loading }: FiltersPanelProps) {
           }
           InputProps={{ endAdornment: <InputAdornment position="end">m³</InputAdornment> }}
           inputProps={{ min: 0 }}
+          helperText="Hides oversized hauls; also the Copilot plan's capacity."
         />
 
         {activeCharacter ? (
