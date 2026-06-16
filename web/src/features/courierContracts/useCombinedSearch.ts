@@ -1,32 +1,30 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAtom, useStore } from 'jotai';
-import { computeAttractivity } from './attractivity';
-import { computeArbitrageAttractivity } from '@/features/arbitrage/attractivity';
 import { attractivityWeightsAtom, combinedResultAtom, draftFiltersAtom } from './atoms';
-import { sortCombined, type ResultCard } from './combined';
+import { scoreCombined, sortCombined } from './combined';
 import { deriveJourney, perJump } from './journey';
-import type { CourierRow } from './types';
+import type { ContractEndpoint, CourierRow, RouteSystem } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
 
 const MILLION = 1_000_000;
 
-// The server ships only endpoints, economics and the route legs; jumps,
-// income/profit-per-jump and danger are derived here from the routes.
-type ApiContract = Pick<
-  CourierRow,
-  | 'id'
-  | 'pickup'
-  | 'dropoff'
-  | 'volume'
-  | 'reward'
-  | 'collateral'
-  | 'approachRoute'
-  | 'deliveryRoute'
-  | 'activeDurationSeconds'
-  | 'ageSeconds'
-  | 'remainingSeconds'
-  | 'daysToComplete'
->;
+// The server ships only the cached opportunity (endpoints + economics + raw
+// timestamps) plus the resolved route legs; jumps, per-jump rate, danger and the
+// listing times are derived here. Unreachable items are dropped server-side, so
+// deliveryRoute is always present and approachRoute is null only with no origin.
+interface ApiContract {
+  id: number;
+  pickup: ContractEndpoint;
+  dropoff: ContractEndpoint;
+  volume: number;
+  reward: number;
+  collateral: number;
+  issuedAt: number;
+  expiresAt: number;
+  daysToComplete: number;
+  approachRoute: RouteSystem[] | null;
+  deliveryRoute: RouteSystem[];
+}
 type ApiArbitrageItem = Pick<
   ArbitrageItem,
   | 'id'
@@ -43,8 +41,7 @@ type ApiArbitrageItem = Pick<
   | 'source'
   | 'dest'
   | 'approachRoute'
-  | 'deliveryRoute'
->;
+> & { deliveryRoute: RouteSystem[] };
 interface ContractsResponse {
   contracts: ApiContract[];
   lastModifiedAt: number | null;
@@ -55,22 +52,26 @@ interface ArbitrageResponse {
   meta: MarketMeta;
 }
 
-/** Add the route-derived fields (jumps, per-jump rate, danger) to an API row. */
-function hydrateContract(c: ApiContract, hasOrigin: boolean): Omit<CourierRow, 'attractivity' | 'attractivitySteps'> {
-  const j = deriveJourney(c.approachRoute, c.deliveryRoute, hasOrigin);
+/** Add the route-derived fields (jumps, per-jump rate, danger) + listing times. */
+function hydrateContract(c: ApiContract): Omit<CourierRow, 'attractivity' | 'attractivitySteps'> {
+  const j = deriveJourney(c.approachRoute, c.deliveryRoute);
+  const now = Date.now();
   return {
     ...c,
     jumpsFromCurrent: j.jumpsFromCurrent,
     jumpsToDropoff: j.jumpsToDest,
     totalJumps: j.totalJumps,
     incomePerJump: perJump(c.reward, j.totalJumps),
+    activeDurationSeconds: (c.expiresAt - c.issuedAt) / 1000,
+    ageSeconds: (now - c.issuedAt) / 1000,
+    remainingSeconds: (c.expiresAt - now) / 1000,
     danger: j.danger,
     dangerSteps: j.dangerSteps,
   };
 }
 
-function hydrateArbitrage(a: ApiArbitrageItem, hasOrigin: boolean): ArbitrageItem {
-  const j = deriveJourney(a.approachRoute, a.deliveryRoute, hasOrigin);
+function hydrateArbitrage(a: ApiArbitrageItem): ArbitrageItem {
+  const j = deriveJourney(a.approachRoute, a.deliveryRoute);
   return {
     ...a,
     jumpsFromCurrent: j.jumpsFromCurrent,
@@ -125,27 +126,19 @@ export function useCombinedSearch() {
       const maxCollateral =
         filters.maxCollateralMillions !== null ? filters.maxCollateralMillions * MILLION : Infinity;
       const maxCargo = filters.maxCargoM3 !== null ? filters.maxCargoM3 : Infinity;
-      const hasOrigin = filters.currentSystemId !== null;
 
-      const courierRows = computeAttractivity(
-        contractData.contracts
-          .map((c) => hydrateContract(c, hasOrigin))
-          .filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo)
-          .map((c) => ({ ...c, attractivity: 0, attractivitySteps: [] })),
-        weights,
-      );
+      const courierRows = contractData.contracts
+        .map((c) => hydrateContract(c))
+        .filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo);
       // Same filters mapped to arbitrage: capital tied up ↔ collateral, haul
       // size ↔ cargo.
-      const arbRows = computeArbitrageAttractivity(
-        arbData.items
-          .map((a) => hydrateArbitrage(a, hasOrigin))
-          .filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo),
-      );
+      const arbRows = arbData.items
+        .map((a) => hydrateArbitrage(a))
+        .filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo);
 
-      const cards: ResultCard[] = [
-        ...courierRows.map((row) => ({ kind: 'courier' as const, key: `c:${row.id}`, row })),
-        ...arbRows.map((row) => ({ kind: 'arbitrage' as const, key: `a:${row.id}`, row })),
-      ];
+      // Score both kinds in one pass so attractivity is comparable across the
+      // mixed list we render.
+      const cards = scoreCombined(courierRows, arbRows, weights);
 
       setResult({
         status: 'success',

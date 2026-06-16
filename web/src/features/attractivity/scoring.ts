@@ -22,14 +22,7 @@ export type FactorDirection = 'higher' | 'lower';
  */
 export type FactorScale = 'linear' | 'log';
 
-export type FactorId =
-  | 'income'
-  | 'profitPerJump'
-  | 'danger'
-  | 'totalJumps'
-  | 'jumpsToSource'
-  | 'investment'
-  | 'cargo';
+export type FactorId = 'income' | 'totalJumps' | 'danger' | 'cargo' | 'investment';
 
 /**
  * Neutral metrics a result exposes for scoring — only what courier contracts and
@@ -38,18 +31,14 @@ export type FactorId =
 export interface Scorable {
   /** Absolute ISK upside: courier reward / arbitrage profit. */
   income: number | null;
-  /** Income/profit per total jump. */
-  profitPerJump: number | null;
-  /** Route danger index 0–100. */
-  danger: number | null;
   /** Total jumps for the whole journey. */
   totalJumps: number | null;
-  /** Jumps from the current system to the source (pickup / buy station). */
-  jumpsToSource: number | null;
-  /** ISK at risk: courier collateral / arbitrage capital outlay. */
-  investment: number | null;
+  /** Route danger index 0–100. */
+  danger: number | null;
   /** Cargo volume in m³. */
   cargo: number | null;
+  /** ISK at risk: courier collateral / arbitrage capital outlay. */
+  investment: number | null;
 }
 
 export interface FactorDef {
@@ -72,7 +61,7 @@ const outOf100 = (v: number) => `${formatNumber(v, 0)}/100`;
 export const FACTORS: FactorDef[] = [
   {
     id: 'income',
-    label: 'Income / profit',
+    label: 'Income',
     direction: 'higher',
     scale: 'log',
     description: 'Absolute ISK upside — contract reward, or net arbitrage profit. Higher pays more.',
@@ -80,26 +69,8 @@ export const FACTORS: FactorDef[] = [
     format: formatIsk,
   },
   {
-    id: 'profitPerJump',
-    label: 'Profit / jump',
-    direction: 'higher',
-    scale: 'log',
-    description: 'Income or profit divided by total jumps — the payoff for the flying time.',
-    value: (s) => s.profitPerJump,
-    format: formatIsk,
-  },
-  {
-    id: 'danger',
-    label: 'Danger index',
-    direction: 'lower',
-    scale: 'linear',
-    description: 'Route danger (low/null-sec + recent kills). Lower is safer.',
-    value: (s) => s.danger,
-    format: outOf100,
-  },
-  {
     id: 'totalJumps',
-    label: 'Total jumps',
+    label: 'Jumps',
     direction: 'lower',
     scale: 'linear',
     description: 'Total jumps for the journey. Fewer is quicker.',
@@ -107,33 +78,31 @@ export const FACTORS: FactorDef[] = [
     format: jumps,
   },
   {
-    id: 'jumpsToSource',
-    label: 'Jumps to source',
+    id: 'danger',
+    label: 'Danger',
     direction: 'lower',
     scale: 'linear',
-    description:
-      'Jumps from your current system to the pickup / buy station. Closer sources are less ' +
-      'likely to be taken by others before you arrive. (Needs a current system.)',
-    value: (s) => s.jumpsToSource,
-    format: jumps,
-  },
-  {
-    id: 'investment',
-    label: 'Collateral / investment',
-    direction: 'lower',
-    scale: 'log',
-    description: 'ISK you must put up (collateral) or tie up (capital). Lower means less at risk.',
-    value: (s) => s.investment,
-    format: formatIsk,
+    description: 'Route danger (low/null-sec + recent kills). Lower is safer.',
+    value: (s) => s.danger,
+    format: outOf100,
   },
   {
     id: 'cargo',
-    label: 'Cargo volume',
+    label: 'Volume',
     direction: 'lower',
     scale: 'log',
     description: 'Cargo size in m³. Lower fits more ships and is easier to move.',
     value: (s) => s.cargo,
     format: formatVolume,
+  },
+  {
+    id: 'investment',
+    label: 'Investment',
+    direction: 'lower',
+    scale: 'log',
+    description: 'ISK you must put up (collateral) or tie up (capital). Lower means less at risk.',
+    value: (s) => s.investment,
+    format: formatIsk,
   },
 ];
 
@@ -158,13 +127,13 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
     id: 'balanced',
     label: 'Balanced',
     description: 'A sensible all-round mix of profit, effort and safety.',
-    weights: makeWeights({ income: 5, profitPerJump: 3, danger: 5, totalJumps: 5 }),
+    weights: makeWeights({ income: 5, totalJumps: 5, danger: 5 }),
   },
   {
     id: 'maxIskPerHour',
     label: 'Max ISK / hour',
-    description: 'Chase payoff for the flying time — high profit per jump with as few jumps as possible.',
-    weights: makeWeights({ profitPerJump: 8, income: 6, totalJumps: 4, danger: 2 }),
+    description: 'Chase the biggest payoff for the flying time — high income with as few jumps as possible.',
+    weights: makeWeights({ income: 8, totalJumps: 8, danger: 2 }),
   },
   {
     id: 'safe',
@@ -174,11 +143,10 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
     weights: makeWeights({ danger: 10, investment: 8, income: 3, totalJumps: 3 }),
   },
   {
-    id: 'grabNearby',
-    label: 'Grab nearby first',
-    description:
-      'Prioritise sources that are close — least likely to be taken before you arrive. Set your current system for this.',
-    weights: makeWeights({ jumpsToSource: 10, income: 4, totalJumps: 4 }),
+    id: 'lowCapital',
+    label: 'Low capital',
+    description: 'Keep the ISK at risk small — favour low collateral/investment and small cargo, still chasing income.',
+    weights: makeWeights({ investment: 10, cargo: 5, income: 4, danger: 3 }),
   },
   {
     id: 'bigBulk',
