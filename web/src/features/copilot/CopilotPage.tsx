@@ -22,7 +22,6 @@ import { setWaypoint } from '@/api/ui';
 import { getSystem } from '@/data/sde';
 import { combinedResultAtom, draftFiltersAtom } from '@/features/courierContracts/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
-import { AttractivityCell } from '@/features/courierContracts/components/AttractivityCell';
 import { AttractivityWeightsControl } from '@/features/courierContracts/components/AttractivityWeightsControl';
 import { formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import { basketAtom } from './atoms';
@@ -91,12 +90,6 @@ function PlanSettingsPanel() {
       <SettingRow label="Route" value={route} />
       <Typography variant="caption" color="text.secondary">
         Shared with the Hauling search — change them there.
-      </Typography>
-
-      <Divider />
-      <AttractivityWeightsControl />
-      <Typography variant="caption" color="text.secondary">
-        The plan summary's factors and the suggested additions are ranked by these weights.
       </Typography>
     </Stack>
   );
@@ -321,9 +314,10 @@ function SuggestionsPanel() {
           {status === 'loading' ? 'Finding…' : 'Find additions'}
         </Button>
       </Box>
+      <AttractivityWeightsControl />
       <Typography variant="caption" color="text.secondary">
-        Ranked by the attractivity of the plan each would produce, using your weights. Hover a score
-        for the per-factor breakdown.
+        Ranked by how much each addition would raise the whole plan's attractivity — the plan as it
+        would look with that contract added — using these weights.
       </Typography>
 
       {!hasResults && (
@@ -351,7 +345,6 @@ function SuggestionsPanel() {
               borderColor: 'divider',
             }}
           >
-            <AttractivityCell score={s.attractivity} steps={s.attractivitySteps} />
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.item.label}>
                 {s.item.kind === 'arbitrage' ? s.item.label : 'Courier contract'}
