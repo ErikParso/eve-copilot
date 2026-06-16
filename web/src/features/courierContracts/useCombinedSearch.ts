@@ -8,8 +8,6 @@ import type { CourierRow } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
 
 const MILLION = 1_000_000;
-// No sales-tax input on this page, so assume a mid Accounting skill.
-const DEFAULT_SALES_TAX = 0.045;
 
 type ApiContract = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>;
 interface ContractsResponse {
@@ -47,21 +45,14 @@ export function useCombinedSearch() {
     setResult({ status: 'loading', rows: [], error: null, contractsAsOf: null, market: null });
 
     try {
-      const contractParams = new URLSearchParams({ routeType: filters.routeType });
-      if (filters.currentSystemId !== null) contractParams.set('origin', String(filters.currentSystemId));
-
-      const arbParams = new URLSearchParams({
-        routeType: filters.routeType,
-        salesTaxRate: String(DEFAULT_SALES_TAX),
-      });
-      if (filters.currentSystemId !== null) arbParams.set('fromSystemId', String(filters.currentSystemId));
-      if (filters.maxCollateralMillions !== null)
-        arbParams.set('maxInvestment', String(filters.maxCollateralMillions * MILLION));
-      if (filters.maxCargoM3 !== null) arbParams.set('maxCargo', String(filters.maxCargoM3));
+      // Both endpoints take only routeType + origin (for route resolution); all
+      // user filtering happens here on the client.
+      const params = new URLSearchParams({ routeType: filters.routeType });
+      if (filters.currentSystemId !== null) params.set('origin', String(filters.currentSystemId));
 
       const [contractRes, arbRes] = await Promise.all([
-        fetch(`/api/contracts?${contractParams.toString()}`, { signal }),
-        fetch(`/api/arbitrage?${arbParams.toString()}`, { signal }),
+        fetch(`/api/contracts?${params.toString()}`, { signal }),
+        fetch(`/api/arbitrage?${params.toString()}`, { signal }),
       ]);
       if (!contractRes.ok) throw new Error(`Contracts API returned ${contractRes.status}`);
       if (!arbRes.ok) throw new Error(`Arbitrage API returned ${arbRes.status}`);
@@ -79,7 +70,11 @@ export function useCombinedSearch() {
           .map((c) => ({ ...c, attractivity: 0, attractivitySteps: [] })),
         weights,
       );
-      const arbRows = computeArbitrageAttractivity(arbData.items);
+      // Same filters mapped to arbitrage: capital tied up ↔ collateral, haul
+      // size ↔ cargo.
+      const arbRows = computeArbitrageAttractivity(
+        arbData.items.filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo),
+      );
 
       const cards: ResultCard[] = [
         ...courierRows.map((row) => ({ kind: 'courier' as const, key: `c:${row.id}`, row })),

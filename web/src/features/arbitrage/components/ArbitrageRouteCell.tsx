@@ -5,20 +5,37 @@ import { RouteSquares, type RouteNode } from '@/features/courierContracts/compon
 import type { ArbitrageRow } from '../types';
 
 /**
- * The haul (source → destination) as one strip of security-coloured squares,
- * with an up arrow on the buy system and a down arrow on the sell system.
- * `trailing` renders to the right of the jump-count line.
+ * The whole journey as one strip of security-coloured squares: an optional
+ * approach leg (current system → buy station) followed by the delivery leg
+ * (buy → sell), with an up arrow on the buy system and a down arrow on the sell
+ * system. `trailing` renders to the right of the jump-count line.
  */
 export function ArbitrageRouteCell({ row, trailing }: { row: ArbitrageRow; trailing?: ReactNode }) {
-  if (!row.route) return <>—</>;
+  const { approachRoute, deliveryRoute, jumpsFromCurrent, jumpsToDest } = row;
 
-  const last = row.route.length - 1;
-  const nodes: RouteNode[] = row.route.map((system, i) => ({
-    system,
-    marker: i === 0 ? 'pickup' : i === last ? 'dropoff' : undefined,
-  }));
+  if (!deliveryRoute) return <>—</>;
 
-  const label = `${formatNumber(row.jumps ?? 0, 0)} jump${row.jumps === 1 ? '' : 's'}`;
+  const nodes: RouteNode[] = [];
+  if (approachRoute) {
+    approachRoute.forEach((system, i) => {
+      // Last approach system is the buy station; the first is the current location.
+      const marker = i === approachRoute.length - 1 ? 'pickup' : i === 0 ? 'current' : undefined;
+      nodes.push({ system, marker });
+    });
+    deliveryRoute.slice(1).forEach((system, i) => {
+      nodes.push({ system, marker: i === deliveryRoute.length - 2 ? 'dropoff' : undefined });
+    });
+  } else {
+    deliveryRoute.forEach((system, i) => {
+      const marker = i === 0 ? 'pickup' : i === deliveryRoute.length - 1 ? 'dropoff' : undefined;
+      nodes.push({ system, marker });
+    });
+  }
+
+  const label =
+    jumpsFromCurrent !== null
+      ? `${formatNumber(jumpsFromCurrent, 0)} + ${formatNumber(jumpsToDest ?? 0, 0)} jumps`
+      : `${formatNumber(jumpsToDest ?? 0, 0)} jumps`;
 
   return (
     <Box>

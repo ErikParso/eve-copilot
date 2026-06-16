@@ -1,5 +1,4 @@
 import type { SecurityBand } from './sde.js';
-import type { RouteType } from './routing.js';
 
 /** Raw public contract fields from ESI we consume. */
 export interface PublicContract {
@@ -59,33 +58,18 @@ export interface EnrichedContract {
   dangerSteps: string[];
 }
 
-/** Search inputs for the arbitrage finder (null = "Any / no limit"). */
-export interface ArbitrageFilters {
-  /** Buy only from this source system (null = anywhere). */
-  fromSystemId: number | null;
-  /** Sell only into this destination system (null = anywhere). */
-  toSystemId: number | null;
-  /** Max ISK to spend buying one item's stock (null = no cap). */
-  maxInvestment: number | null;
-  /** Max cargo volume in m³ the haul may occupy (null = no cap). */
-  maxCargo: number | null;
-  routeType: RouteType;
-  /** Drop opportunities whose haul exceeds this many jumps (null = no cap). */
-  maxJumps: number | null;
-  /** Sales-tax fraction applied to sell proceeds (e.g. 0.045). */
-  salesTaxRate: number;
-}
-
 /**
- * One buy-here/sell-there opportunity for a single item type, sent to the
- * client. Mirrors the courier card shape (source/dest endpoints, route, danger)
- * with arbitrage-specific fields (quantity, prices, margin) added.
+ * One buy-here/sell-there opportunity for a single item type — the full
+ * profitable haul (entire profitable order-book depth) at a default sales tax.
+ * Mirrors the courier card shape (source/dest endpoints, approach + delivery
+ * routes, danger). All user filtering (collateral/cargo/etc.) happens on the
+ * client; the server resolves every item and caches the lot.
  */
 export interface ArbitrageItem {
   id: string;
   typeId: number;
   itemName: string;
-  /** Units to move (capped by order depth, cargo and budget). */
+  /** Units to move (the full profitable order-book depth, uncapped). */
   quantity: number;
   /** Volume of one unit (m³). */
   unitVolume: number;
@@ -97,14 +81,23 @@ export interface ArbitrageItem {
   sellPrice: number;
   /** Total ISK spent buying the stock (the capital at risk). */
   buyCost: number;
-  /** Net profit after sales tax. */
+  /** Net profit after the default sales tax. */
   profit: number;
   /** profit ÷ buyCost × 100. */
   marginPct: number;
   source: ContractEndpoint;
   dest: ContractEndpoint;
-  jumps: number | null;
-  route: RouteSystem[] | null;
+  /** Jumps from the current system to the buy station (null if no origin). */
+  jumpsFromCurrent: number | null;
+  /** Jumps from the buy station to the sell station (null if no route). */
+  jumpsToDest: number | null;
+  /** Systems on the current-system → buy route (null if not applicable). */
+  approachRoute: RouteSystem[] | null;
+  /** Systems on the buy → sell route (null if no route). */
+  deliveryRoute: RouteSystem[] | null;
+  /** Sum of approach + delivery jumps (the whole journey). */
+  totalJumps: number | null;
+  /** Profit divided by total journey jumps (profit itself when 0 jumps). */
   profitPerJump: number | null;
   danger: number | null;
   dangerSteps: string[];
