@@ -35,6 +35,7 @@ type ApiArbitrageItem = Pick<
   | 'totalVolume'
   | 'buyPrice'
   | 'sellPrice'
+  | 'marketPrice'
   | 'buyCost'
   | 'profit'
   | 'marginPct'

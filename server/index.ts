@@ -2,6 +2,7 @@ import express from 'express';
 import { loadSde } from './sde.js';
 import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
 import { startMarketRefresh } from './market.js';
+import { startPricesRefresh } from './prices.js';
 import { getEnrichedArbitrage } from './arbitrage.js';
 import type { RouteType } from './routing.js';
 
@@ -30,6 +31,9 @@ async function main() {
 
   startMarketRefresh();
   console.log('Started market crawl (refreshing every 10 min).');
+
+  startPricesRefresh();
+  console.log('Started reference-price refresh (refreshing every 60 min).');
 
   const app = express();
 

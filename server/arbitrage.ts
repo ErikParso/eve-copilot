@@ -17,6 +17,7 @@ import { getShipKills } from './kills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import { getType } from './sde.js';
+import { getMarketPrice } from './prices.js';
 import { getMarketMeta, getSnapshot, type MarketMeta, type Order, type TypeBook } from './market.js';
 import type { ArbitrageItem, ArbitrageOpportunity } from './types.js';
 
@@ -77,6 +78,7 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
 
   const sources = book.sells.slice(0, MAX_SOURCES_PER_TYPE);
   const dests = book.buys.slice(0, MAX_DESTS_PER_TYPE);
+  const marketPrice = getMarketPrice(typeId);
   const out: ArbitrageOpportunity[] = [];
 
   for (const source of sources) {
@@ -101,6 +103,7 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
         totalVolume: quantity * unitVolume,
         buyPrice: buyCost / quantity,
         sellPrice: sellRevenueGross / quantity,
+        marketPrice,
         buyCost,
         profit,
         marginPct: (profit / buyCost) * 100,
