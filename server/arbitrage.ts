@@ -20,7 +20,7 @@ const MAX_RESULTS = 150;
 // Per item, how many cheapest-sell and dearest-buy stations to pair up (K×K
 // candidates). Higher catches deep-but-not-cheapest stations and nearer hauls
 // at the cost of more per-item work.
-const K = 5;
+const K = 1000;
 
 interface RawOpportunity {
   typeId: number;

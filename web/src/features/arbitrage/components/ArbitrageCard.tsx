@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Box, Card, CardContent, Divider, Stack, Typography } from '@mui/material';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
+import arbitrageBg from '@/assets/card-arbitrage.jpg';
 import { LocationCell } from '@/features/courierContracts/components/LocationCell';
 import { AttractivityCell } from '@/features/courierContracts/components/AttractivityCell';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
@@ -46,6 +47,12 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
         flexDirection: 'column',
         position: 'relative',
         overflow: 'visible',
+        // Themed artwork as the card background, anchored top-left (no scrim yet —
+        // legibility tuning comes later).
+        backgroundImage: `url(${arbitrageBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'left top',
+        backgroundRepeat: 'no-repeat',
       }}
     >
       <Box sx={{ position: 'absolute', top: -10, right: -10, zIndex: 1 }}>

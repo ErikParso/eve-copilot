@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Box, Card, CardContent, Divider, Stack, Typography } from '@mui/material';
 import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
+import courierBg from '@/assets/card-courier.jpg';
 import type { CourierRow } from '../types';
 import type { ContractEndpoint } from '../types';
 import { LocationCell } from './LocationCell';
@@ -50,6 +51,12 @@ export const ContractCard = memo(function ContractCard({ row }: { row: CourierRo
         flexDirection: 'column',
         position: 'relative',
         overflow: 'visible', // let the bubble pop out past the corner
+        // Themed artwork as the card background, anchored top-left (no scrim yet —
+        // legibility tuning comes later).
+        backgroundImage: `url(${courierBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'left top',
+        backgroundRepeat: 'no-repeat',
       }}
     >
       {/* Attractivity score as a bubble popping out of the top-right corner */}

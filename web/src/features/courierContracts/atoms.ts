@@ -4,12 +4,9 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
-import {
-  DEFAULT_FILTERS,
-  type CourierFilters,
-  type CourierRow,
-  type SearchStatus,
-} from './types';
+import { DEFAULT_FILTERS, type CourierFilters, type SearchStatus } from './types';
+import type { ResultCard } from './combined';
+import type { MarketMeta } from '@/features/arbitrage/types';
 
 /**
  * Filters bound to the form inputs (the "draft", applied on Search click).
@@ -30,21 +27,22 @@ export const attractivityWeightsAtom = atomWithStorage<AttractivityWeights>(
   { getOnInit: true },
 );
 
-export interface SearchResult {
+/** Combined courier + arbitrage results for the hauling page. */
+export interface CombinedResult {
   status: SearchStatus;
-  rows: CourierRow[];
-  /** Filters that produced the current rows (snapshot at Search time). */
-  appliedFilters: CourierFilters | null;
+  rows: ResultCard[];
   error: string | null;
   /** When the contracts snapshot was built by CCP (epoch ms), or null. */
   contractsAsOf: number | null;
+  /** Market-crawl readiness + freshness from the arbitrage API. */
+  market: MarketMeta | null;
 }
 
-export const searchResultAtom = atom<SearchResult>({
+export const combinedResultAtom = atom<CombinedResult>({
   status: 'idle',
   rows: [],
-  appliedFilters: null,
   error: null,
   contractsAsOf: null,
+  market: null,
 });
 
