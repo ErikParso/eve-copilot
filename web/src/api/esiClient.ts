@@ -55,6 +55,26 @@ export async function esiGetAuthed<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * POST to an authenticated ESI endpoint that takes query params and no body
+ * (e.g. the UI/autopilot actions). Returns nothing — these reply 204 No Content.
+ */
+export async function esiPostAuthed(
+  path: string,
+  accessToken: string,
+  params?: Record<string, string | number>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(withParams(path, params), {
+    method: 'POST',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+    signal,
+  });
+  if (!res.ok) {
+    throw new EsiError(`ESI ${res.status} for ${path}`, res.status);
+  }
+}
+
 function parseHttpDate(value: string | null): number | null {
   if (!value) return null;
   const t = Date.parse(value);

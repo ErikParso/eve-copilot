@@ -1,4 +1,4 @@
-import { Box, Checkbox, Chip, ListItemText, MenuItem, TextField } from '@mui/material';
+import { Checkbox, ListItemText, MenuItem, TextField } from '@mui/material';
 import type { ContractType } from '../types';
 
 interface ContractTypeSelectProps {
