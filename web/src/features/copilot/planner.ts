@@ -64,6 +64,9 @@ export function buildPlan(items: BasketItem[], inp: PlannerInputs): Plan {
   let current = inp.origin;
   let wallet = inp.startIsk;
   let cargo = 0;
+  // ISK currently tied up (collateral held + stock bought, not yet recovered).
+  // Tracked directly so it's correct even when no starting wallet is set.
+  let committed = 0;
   let peakCargo = 0;
   let peakCapital = 0;
   let totalIncome = 0;
@@ -123,15 +126,17 @@ export function buildPlan(items: BasketItem[], inp: PlannerInputs): Plan {
     if (phase === 'pickup') {
       pickedUp.add(item.key);
       wallet -= item.capitalIsk;
+      committed += item.capitalIsk;
       cargo += item.cargoM3;
     } else {
       dropped.add(item.key);
       wallet += item.capitalIsk + item.income;
+      committed -= item.capitalIsk;
       cargo -= item.cargoM3;
       totalIncome += item.income;
     }
     peakCargo = Math.max(peakCargo, cargo);
-    if (Number.isFinite(inp.startIsk)) peakCapital = Math.max(peakCapital, inp.startIsk - wallet);
+    peakCapital = Math.max(peakCapital, committed);
 
     steps.push({
       action: phase,
