@@ -1,30 +1,42 @@
-// Resolves every profitable buy-here/sell-there opportunity (one best haul per
-// item type) from the cached market snapshot, enriches each with routes +
-// danger, and caches the lot per route type — recomputed only when the 10-min
-// market snapshot changes. Mirrors the courier pipeline: the only request
-// inputs are routeType (route resolution) and origin (the approach leg from the
-// current system). ALL user filtering (collateral, cargo, tax, …) is on the
-// client.
+// Arbitrage = buy-here/sell-there hauling, discovered from the live order books.
+//
+// Pipeline (mirrors the courier pipeline; route resolution is the only
+// per-request work):
+//   1. Resolve arbitrage WITHOUT routes — for every item type, emit one
+//      opportunity per profitable sell-station → buy-station pair (the full
+//      profitable order-book depth between them). No station pre-selection, no
+//      "single best per type", no reachability filter.
+//   2. Cache the route-free opportunities against the 10-min market snapshot.
+//   3. On request, resolve routes into items (delivery leg by route type, plus
+//      the approach leg from the current system when an origin is given). Jumps
+//      and danger are derived from the routes on the FE. Unreachable hauls are
+//      filtered out — they aren't returned to the client.
+//
+// ALL user filtering (collateral, cargo, tax, …) stays on the client.
 import { getShipKills } from './kills.js';
-import { getRoute, jumpsFromRoute, type RouteType } from './routing.js';
+import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import { computeDanger } from './danger.js';
 import { getType } from './sde.js';
-import { getMarketMeta, getSnapshot, type MarketMeta, type Order, type StationOrders, type TypeBook } from './market.js';
-import type { ArbitrageItem } from './types.js';
+import { getMarketMeta, getSnapshot, type MarketMeta, type Order, type TypeBook } from './market.js';
+import type { ArbitrageItem, ArbitrageOpportunity } from './types.js';
 
 // Sales tax assumed when scoring profit (mid Accounting skill). Baked in, not a
 // filter — the client can't realistically influence it without a backend skill
 // lookup, and there's no tax input on the page.
 const DEFAULT_SALES_TAX = 0.045;
-// Per item, how many cheapest-sell × dearest-buy stations to pair up.
-const K = 5;
 
-function profitPerJump(profit: number, totalJumps: number | null): number | null {
-  if (totalJumps === null) return null;
-  if (totalJumps === 0) return profit;
-  return profit / totalJumps;
-}
+// Perf guards. Books are pre-sorted (sells cheapest-first, buys dearest-first),
+// so the first N stations on each side ARE the most profitable — these caps are
+// generous enough to be a no-op for normal items while keeping a hot item like
+// Tritanium (thousands of stations) from emitting a combinatorial blow-up.
+const MAX_SOURCES_PER_TYPE = 40;
+const MAX_DESTS_PER_TYPE = 40;
+// Keep at most this many pairs per item type (most profitable first) so a single
+// deep item can't crowd everything else out of the global set.
+const MAX_PAIRS_PER_TYPE = 12;
+// Global ceiling on the cached set (most profitable first). Bounds both the JSON
+// we ship and the number of routes we resolve per request.
+const MAX_OPPORTUNITIES = 1500;
 
 /** Walk asks (asc) against bids (desc) over the FULL profitable depth (no caps). */
 function walkDepth(asks: Order[], bids: Order[]): { quantity: number; buyCost: number; sellRevenueGross: number } {
@@ -54,100 +66,118 @@ function walkDepth(asks: Order[], bids: Order[]): { quantity: number; buyCost: n
   return { quantity, buyCost, sellRevenueGross };
 }
 
-interface BestPair {
-  quantity: number;
-  buyCost: number;
-  sellRevenueGross: number;
-  profit: number;
-  source: StationOrders;
-  dest: StationOrders;
-  deliveryRouteIds: number[];
-  jumpsToDest: number | null;
-}
+// --- Step 1: route-free opportunities ----------------------------------------
 
-/**
- * The most profitable reachable haul for one item: among the K cheapest sell
- * stations × K dearest buy stations, the highest-profit pair that has a route.
- */
-function bestPairForType(book: TypeBook, routeType: RouteType): BestPair | null {
+/** Every profitable source→dest pair for one item type (most profitable first). */
+function opportunitiesForType(typeId: number, name: string, unitVolume: number, book: TypeBook): ArbitrageOpportunity[] {
   const tax = DEFAULT_SALES_TAX;
-  const bestSell = book.sells[0];
-  const bestBuy = book.buys[0];
-  if (!bestSell || !bestBuy || bestBuy.best * (1 - tax) <= bestSell.best) return null;
+  const dearestBuy = book.buys[0]?.best ?? -Infinity;
+  // Quick reject: if the dearest buy can't beat the cheapest sell, nothing here.
+  if (book.sells.length === 0 || dearestBuy * (1 - tax) <= (book.sells[0]?.best ?? Infinity)) return [];
 
-  const sources = book.sells.slice(0, K);
-  const dests = book.buys.slice(0, K);
+  const sources = book.sells.slice(0, MAX_SOURCES_PER_TYPE);
+  const dests = book.buys.slice(0, MAX_DESTS_PER_TYPE);
+  const out: ArbitrageOpportunity[] = [];
 
-  const candidates: Omit<BestPair, 'deliveryRouteIds' | 'jumpsToDest'>[] = [];
   for (const source of sources) {
+    // Sells ascending: once the cheapest remaining source can't be beaten by the
+    // dearest buy, no dearer source can be either.
+    if (dearestBuy * (1 - tax) <= source.best) break;
     for (const dest of dests) {
-      if (source.station === dest.station) continue;
-      if (dest.best * (1 - tax) <= source.best) continue;
+      if (dest.station === source.station) continue;
+      // Buys descending: once this dest can't beat the source, none after it can.
+      if (dest.best * (1 - tax) <= source.best) break;
       const { quantity, buyCost, sellRevenueGross } = walkDepth(source.orders, dest.orders);
       if (quantity <= 0) continue;
       const profit = sellRevenueGross * (1 - tax) - buyCost;
       if (profit <= 0) continue;
-      candidates.push({ quantity, buyCost, sellRevenueGross, profit, source, dest });
+
+      out.push({
+        id: `${typeId}:${source.station}:${dest.station}`,
+        typeId,
+        itemName: name,
+        quantity,
+        unitVolume,
+        totalVolume: quantity * unitVolume,
+        buyPrice: buyCost / quantity,
+        sellPrice: sellRevenueGross / quantity,
+        buyCost,
+        profit,
+        marginPct: (profit / buyCost) * 100,
+        source: resolveEndpoint(source.station, source.system),
+        dest: resolveEndpoint(dest.station, dest.system),
+      });
     }
   }
 
-  candidates.sort((a, b) => b.profit - a.profit);
-
-  for (const c of candidates) {
-    const routeIds = getRoute(c.source.system, c.dest.system, routeType);
-    if (!routeIds) continue; // unreachable — not a haul
-    return { ...c, deliveryRouteIds: routeIds, jumpsToDest: jumpsFromRoute(routeIds) };
-  }
-  return null;
+  out.sort((a, b) => b.profit - a.profit);
+  return out.length > MAX_PAIRS_PER_TYPE ? out.slice(0, MAX_PAIRS_PER_TYPE) : out;
 }
 
-/** Build the base (delivery-only, no origin) opportunity for every item. */
-function computeBase(routeType: RouteType, kills: Map<number, number>): ArbitrageItem[] {
+/** Resolve every profitable haul in the current snapshot (no routes). */
+function resolveOpportunities(byType: Map<number, TypeBook>): ArbitrageOpportunity[] {
+  const all: ArbitrageOpportunity[] = [];
+  for (const [typeId, book] of byType) {
+    const type = getType(typeId);
+    if (!type) continue;
+    all.push(...opportunitiesForType(typeId, type.name, type.volume, book));
+  }
+  all.sort((a, b) => b.profit - a.profit);
+  return all.length > MAX_OPPORTUNITIES ? all.slice(0, MAX_OPPORTUNITIES) : all;
+}
+
+// --- Step 2: cache the resolved opportunities (keyed by the market snapshot) --
+//
+// Only the route-free opportunities are cached. Routes are NOT cached here —
+// they're resolved on every request, which is cheap because the actual graph
+// search is memoised per (source, dest, type) by routing.ts's routeCache; a
+// request only re-runs the light toRouteSystems mapping.
+
+let opportunitiesSnapshotAt = -1;
+let opportunities: ArbitrageOpportunity[] = [];
+
+/** Cached route-free opportunities, rebuilt only when the snapshot changes. */
+function getOpportunities(): ArbitrageOpportunity[] {
   const snap = getSnapshot();
   if (!snap) return [];
-
-  const items: ArbitrageItem[] = [];
-  for (const [typeId, book] of snap.byType) {
-    const type = getType(typeId);
-    if (!type || book.sells.length === 0 || book.buys.length === 0) continue;
-
-    const pair = bestPairForType(book, routeType);
-    if (!pair) continue;
-
-    const deliveryRoute = toRouteSystems(pair.deliveryRouteIds, kills);
-    const danger = computeDanger(deliveryRoute);
-
-    items.push({
-      id: `${typeId}:${pair.source.station}:${pair.dest.station}`,
-      typeId,
-      itemName: type.name,
-      quantity: pair.quantity,
-      unitVolume: type.volume,
-      totalVolume: pair.quantity * type.volume,
-      buyPrice: pair.buyCost / pair.quantity,
-      sellPrice: pair.sellRevenueGross / pair.quantity,
-      buyCost: pair.buyCost,
-      profit: pair.profit,
-      marginPct: (pair.profit / pair.buyCost) * 100,
-      source: resolveEndpoint(pair.source.station, pair.source.system),
-      dest: resolveEndpoint(pair.dest.station, pair.dest.system),
-      jumpsFromCurrent: null,
-      jumpsToDest: pair.jumpsToDest,
-      approachRoute: null,
-      deliveryRoute,
-      totalJumps: pair.jumpsToDest,
-      profitPerJump: profitPerJump(pair.profit, pair.jumpsToDest),
-      danger: danger.index,
-      dangerSteps: danger.steps,
-    });
+  if (snap.builtAt !== opportunitiesSnapshotAt) {
+    opportunities = resolveOpportunities(snap.byType);
+    opportunitiesSnapshotAt = snap.builtAt;
   }
-  return items;
+  return opportunities;
 }
 
-// --- Cache (recomputed per route type when the market snapshot changes) ------
+// --- Step 3: resolve routes into items (every request) ------------------------
 
-let cacheSnapshotAt = -1;
-const byRouteType = new Map<RouteType, ArbitrageItem[]>();
+/**
+ * Resolve one opportunity into a client item by adding its two route legs: the
+ * delivery leg (source→dest) plus the approach leg (current system→source) when
+ * an origin is given. Returns null — filtering the haul out — when either leg is
+ * unreachable (or an endpoint's system is unknown). getRoute memoises the search.
+ */
+function resolveItem(
+  opp: ArbitrageOpportunity,
+  routeType: RouteType,
+  origin: number | null,
+  kills: Map<number, number>,
+): ArbitrageItem | null {
+  const srcSys = opp.source.systemId;
+  const dstSys = opp.dest.systemId;
+  if (srcSys === null || dstSys === null) return null;
+
+  const deliveryIds = getRoute(srcSys, dstSys, routeType);
+  if (!deliveryIds) return null; // can't haul source → dest
+  const deliveryRoute = toRouteSystems(deliveryIds, kills);
+
+  let approachRoute: ArbitrageItem['approachRoute'] = null;
+  if (origin !== null) {
+    const approachIds = getRoute(origin, srcSys, routeType);
+    if (!approachIds) return null; // can't reach the buy station from here
+    approachRoute = toRouteSystems(approachIds, kills);
+  }
+
+  return { ...opp, approachRoute, deliveryRoute };
+}
 
 export interface ArbitrageResponse {
   items: ArbitrageItem[];
@@ -155,60 +185,21 @@ export interface ArbitrageResponse {
 }
 
 /**
- * Every arbitrage opportunity for a route type, optionally with approach legs
- * (current system → buy station) when an origin is given. Cached per route type
- * against the current market snapshot; the origin augmentation is per request,
- * exactly like the courier pipeline.
+ * Every reachable arbitrage opportunity, with routes resolved for this request
+ * (delivery leg by route type, plus the approach leg from `origin` when given).
+ * The route-free opportunities are cached against the market snapshot; the route
+ * resolution is per request (memoised by routing.ts), and unreachable hauls are
+ * dropped.
  */
 export async function getEnrichedArbitrage(routeType: RouteType, origin: number | null): Promise<ArbitrageResponse> {
   const meta = getMarketMeta();
-  const snap = getSnapshot();
-  if (!snap) return { items: [], meta };
+  if (!getSnapshot()) return { items: [], meta };
 
-  if (snap.builtAt !== cacheSnapshotAt) {
-    byRouteType.clear();
-    cacheSnapshotAt = snap.builtAt;
+  const kills = await getShipKills();
+  const items: ArbitrageItem[] = [];
+  for (const opp of getOpportunities()) {
+    const item = resolveItem(opp, routeType, origin, kills);
+    if (item) items.push(item);
   }
-
-  let rows = byRouteType.get(routeType);
-  if (!rows) {
-    const kills = await getShipKills();
-    rows = computeBase(routeType, kills);
-    byRouteType.set(routeType, rows);
-  }
-
-  if (origin !== null) {
-    const kills = await getShipKills();
-    rows = rows.map((row) => {
-      if (row.source.systemId === null) return row;
-      const approachIds = getRoute(origin, row.source.systemId, routeType);
-      const jumpsFromCurrent = jumpsFromRoute(approachIds);
-      const totalJumps =
-        jumpsFromCurrent !== null && row.jumpsToDest !== null ? jumpsFromCurrent + row.jumpsToDest : null;
-      const approachRoute = approachIds ? toRouteSystems(approachIds, kills) : null;
-
-      // Danger over the whole journey (approach + delivery), matching the route
-      // the card draws; the approach's last system == the buy station, drop the seam.
-      let danger = row.danger;
-      let dangerSteps = row.dangerSteps;
-      if (approachRoute && row.deliveryRoute) {
-        const full = [...approachRoute, ...row.deliveryRoute.slice(1)];
-        const d = computeDanger(full);
-        danger = d.index;
-        dangerSteps = d.steps;
-      }
-
-      return {
-        ...row,
-        jumpsFromCurrent,
-        approachRoute,
-        totalJumps,
-        profitPerJump: profitPerJump(row.profit, totalJumps),
-        danger,
-        dangerSteps,
-      };
-    });
-  }
-
-  return { items: rows, meta };
+  return { items, meta };
 }

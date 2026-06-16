@@ -3,9 +3,8 @@
 // so all clients share one crawl. Attractivity scoring stays on the client.
 import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
 import { getShipKills } from './kills.js';
-import { getRoute, jumpsFromRoute, type RouteType } from './routing.js';
+import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import { computeDanger } from './danger.js';
 import type { EnrichedContract, PublicContract } from './types.js';
 
 const REFRESH_MS = 10 * 60 * 1000;
@@ -54,14 +53,18 @@ async function crawlContracts(): Promise<{ contracts: PublicContract[]; lastModi
 
 // --- Enrichment ----------------------------------------------------------
 
-function incomePerJump(reward: number, totalJumps: number | null): number | null {
-  if (totalJumps === null) return null;
-  if (totalJumps === 0) return reward;
-  return reward / totalJumps;
-}
-
-/** Enrich one contract for a route type (delivery leg only; no origin yet). */
-function enrichOne(c: PublicContract, type: RouteType, kills: Map<number, number>): EnrichedContract {
+/**
+ * Resolve one contract into a client row by adding its endpoints, the two route
+ * legs (delivery pickup→dropoff, plus approach current system→pickup when an
+ * origin is given) and freshly-computed listing times. Jumps, income/jump and
+ * danger are derived from the routes on the FE. getRoute memoises the search.
+ */
+function resolveContract(
+  c: PublicContract,
+  type: RouteType,
+  origin: number | null,
+  kills: Map<number, number>,
+): EnrichedContract {
   const pickup = resolveEndpoint(c.start_location_id);
   const dropoff = resolveEndpoint(c.end_location_id);
 
@@ -70,8 +73,12 @@ function enrichOne(c: PublicContract, type: RouteType, kills: Map<number, number
       ? getRoute(pickup.systemId, dropoff.systemId, type)
       : null;
   const deliveryRoute = deliveryIds ? toRouteSystems(deliveryIds, kills) : null;
-  const jumpsToDropoff = jumpsFromRoute(deliveryIds);
-  const danger = deliveryRoute ? computeDanger(deliveryRoute) : null;
+
+  let approachRoute: EnrichedContract['approachRoute'] = null;
+  if (origin !== null && pickup.systemId !== null) {
+    const approachIds = getRoute(origin, pickup.systemId, type);
+    approachRoute = approachIds ? toRouteSystems(approachIds, kills) : null;
+  }
 
   const issued = Date.parse(c.date_issued);
   const expired = Date.parse(c.date_expired);
@@ -84,22 +91,21 @@ function enrichOne(c: PublicContract, type: RouteType, kills: Map<number, number
     volume: c.volume,
     reward: c.reward,
     collateral: c.collateral,
-    jumpsFromCurrent: null,
-    jumpsToDropoff,
-    approachRoute: null,
+    approachRoute,
     deliveryRoute,
-    totalJumps: jumpsToDropoff,
-    incomePerJump: incomePerJump(c.reward, jumpsToDropoff),
     activeDurationSeconds: (expired - issued) / 1000,
     ageSeconds: (now - issued) / 1000,
     remainingSeconds: (expired - now) / 1000,
     daysToComplete: c.days_to_complete,
-    danger: danger ? danger.index : null,
-    dangerSteps: danger ? danger.steps : [],
   };
 }
 
 // --- Cache ---------------------------------------------------------------
+//
+// Only the raw crawl is cached. Routes are resolved on every request, which is
+// cheap because the graph search is memoised per (origin, dest, type) by
+// routing.ts's routeCache; a request only re-runs the light endpoint / route /
+// danger mapping (and so the listing times are always fresh).
 
 interface RawState {
   contracts: PublicContract[];
@@ -109,14 +115,12 @@ interface RawState {
 
 let raw: RawState | null = null;
 let crawling: Promise<void> | null = null;
-const enrichedByType = new Map<RouteType, EnrichedContract[]>();
 
 async function refresh(): Promise<void> {
   if (crawling) return crawling;
   crawling = (async () => {
     const result = await crawlContracts();
     raw = { ...result, fetchedAt: Date.now() };
-    enrichedByType.clear(); // recompute lazily against fresh data
   })().finally(() => {
     crawling = null;
   });
@@ -143,48 +147,7 @@ export async function getEnrichedContracts(
   if (!raw) await refresh();
   if (!raw) return { contracts: [], lastModifiedAt: null, total: 0 };
 
-  let rows = enrichedByType.get(type);
-  if (!rows) {
-    const kills = await getShipKills();
-    rows = raw.contracts.map((c) => enrichOne(c, type, kills));
-    enrichedByType.set(type, rows);
-  }
-
-  if (origin !== null) {
-    const kills = await getShipKills();
-    rows = rows.map((row) => {
-      if (row.pickup.systemId === null) return row;
-      const approachIds = getRoute(origin, row.pickup.systemId, type);
-      const jumpsFromCurrent = jumpsFromRoute(approachIds);
-      const totalJumps =
-        jumpsFromCurrent !== null && row.jumpsToDropoff !== null
-          ? jumpsFromCurrent + row.jumpsToDropoff
-          : null;
-      const approachRoute = approachIds ? toRouteSystems(approachIds, kills) : null;
-
-      // Danger reflects the WHOLE journey you'll fly (approach + delivery),
-      // matching the route shown. The approach last system == delivery first
-      // (the pickup), so drop the seam.
-      let danger = row.danger;
-      let dangerSteps = row.dangerSteps;
-      if (approachRoute && row.deliveryRoute) {
-        const full = [...approachRoute, ...row.deliveryRoute.slice(1)];
-        const d = computeDanger(full);
-        danger = d.index;
-        dangerSteps = d.steps;
-      }
-
-      return {
-        ...row,
-        jumpsFromCurrent,
-        approachRoute,
-        totalJumps,
-        incomePerJump: incomePerJump(row.reward, totalJumps),
-        danger,
-        dangerSteps,
-      };
-    });
-  }
-
-  return { contracts: rows, lastModifiedAt: raw.lastModifiedAt, total: rows.length };
+  const kills = await getShipKills();
+  const contracts = raw.contracts.map((c) => resolveContract(c, type, origin, kills));
+  return { contracts, lastModifiedAt: raw.lastModifiedAt, total: contracts.length };
 }
