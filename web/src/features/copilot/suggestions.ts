@@ -24,6 +24,8 @@ export interface Suggestion {
   item: BasketItem;
   /** The resulting plan's attractivity, relative to the scored candidate set. */
   attractivity: number;
+  /** Step-by-step breakdown of how that attractivity was scored (per factor). */
+  attractivitySteps: string[];
   /** Extra jumps this addition costs the tour vs. the current plan. */
   deltaJumps: number;
   /** Extra income this addition adds vs. the current plan. */
@@ -62,6 +64,7 @@ export function rankSuggestions(
       item: r.item,
       plan: r.plan,
       attractivity: r.attractivity,
+      attractivitySteps: r.attractivitySteps,
       deltaJumps: r.plan.totalJumps - baseline.totalJumps,
       deltaIncome: r.plan.totalIncome - baseline.totalIncome,
     }))
