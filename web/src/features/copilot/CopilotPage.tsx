@@ -160,9 +160,7 @@ function BasketPanel() {
   );
 }
 
-function SummaryBanner({ plan, capacity, startIsk }: { plan: Plan; capacity: number; startIsk: number }) {
-  const overCargo = plan.peakCargo > capacity;
-  const overIsk = plan.peakCapital > startIsk;
+function SummaryBanner({ plan }: { plan: Plan }) {
   return (
     <Stack spacing={1}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
@@ -174,46 +172,26 @@ function SummaryBanner({ plan, capacity, startIsk }: { plan: Plan; capacity: num
           </Typography>
           <DangerText score={plan.danger} steps={plan.dangerSteps} />
         </Box>
-        <Metric
-          label="Peak cargo"
-          value={formatVolume(plan.peakCargo)}
-          warn={overCargo}
-        />
-        <Metric
-          label="Peak ISK out"
-          value={formatIskMillions(plan.peakCapital)}
-          warn={overIsk}
-        />
+        <Metric label="Peak cargo" value={formatVolume(plan.peakCargo)} />
+        <Metric label="Peak ISK out" value={formatIskMillions(plan.peakCapital)} />
       </Box>
-      {overCargo && (
-        <Alert severity="warning">
-          Peak cargo ({formatVolume(plan.peakCargo)}) exceeds your capacity. Some items won't fit at
-          once — remove a few or split the run.
-        </Alert>
-      )}
-      {overIsk && (
-        <Alert severity="warning">
-          Peak ISK committed ({formatIskMillions(plan.peakCapital)}) exceeds your wallet. You can't
-          afford every buy/collateral simultaneously.
-        </Alert>
-      )}
       {plan.infeasibleKeys.length > 0 && (
         <Alert severity="info">
-          {plan.infeasibleKeys.length} item(s) couldn't be placed (unresolved location, unreachable,
-          too large, or unaffordable) and were left out of the route.
+          {plan.infeasibleKeys.length} item(s) couldn't be routed (unresolved or unreachable
+          location) and were left out.
         </Alert>
       )}
     </Stack>
   );
 }
 
-function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>
-      <Typography variant="caption" sx={{ fontWeight: 700, color: warn ? 'warning.main' : undefined }}>
+      <Typography variant="caption" sx={{ fontWeight: 700 }}>
         {value}
       </Typography>
     </Box>
@@ -401,14 +379,7 @@ function SuggestionsPanel() {
 
 export function CopilotPage() {
   const basket = useAtomValue(basketAtom);
-  const filters = useAtomValue(draftFiltersAtom);
   const { status, plan, error } = usePlan();
-
-  const capacity = filters.maxCargoM3 ?? Number.POSITIVE_INFINITY;
-  const startIsk =
-    filters.maxCollateralMillions !== null
-      ? filters.maxCollateralMillions * 1_000_000
-      : Number.POSITIVE_INFINITY;
 
   return (
     <Grid container spacing={2} alignItems="flex-start">
@@ -452,7 +423,7 @@ export function CopilotPage() {
 
           {status === 'ready' && plan && plan.steps.length > 0 && (
             <>
-              <SummaryBanner plan={plan} capacity={capacity} startIsk={startIsk} />
+              <SummaryBanner plan={plan} />
               <Divider />
               <Roadmap plan={plan} />
             </>
