@@ -26,3 +26,22 @@ export function setWaypoint(
     signal,
   );
 }
+
+/**
+ * Open the in-game Market Details window for `typeId` in the running client. This
+ * is how an arbitrage haul (which is a market trade, not a contract) is acted on:
+ * the player buys from the sell orders shown here. ESI has no way to target a
+ * specific order or station — it opens the item's market view; the buy station is
+ * on the card, and Waypoint gets the player there.
+ */
+export function openMarketWindow(typeId: number, token: string, signal?: AbortSignal): Promise<void> {
+  return esiPostAuthed('/ui/openwindow/marketdetails/', token, { type_id: typeId }, signal);
+}
+
+/**
+ * Open the in-game window for a specific public contract, so the player can
+ * review and accept it. (ESI can't accept it — Copilot is a navigator.)
+ */
+export function openContract(contractId: number, token: string, signal?: AbortSignal): Promise<void> {
+  return esiPostAuthed('/ui/openwindow/contract/', token, { contract_id: contractId }, signal);
+}

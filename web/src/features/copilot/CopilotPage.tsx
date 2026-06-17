@@ -18,7 +18,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
-import { setWaypoint } from '@/api/ui';
+import { openContract, openMarketWindow, setWaypoint } from '@/api/ui';
 import { haulingRowsAtom } from '@/features/courierContracts/atoms';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
@@ -27,7 +27,7 @@ import { basketAtom } from './atoms';
 import { usePlan } from './usePlan';
 import { useSuggestions } from './useSuggestions';
 import { AddToPlanButton } from './components/AddToPlanButton';
-import type { BasketStop, Plan } from './types';
+import type { BasketStop, Plan, PlanStep } from './types';
 
 /** In-game waypoint target: the station id when resolved, else the system id. */
 function destinationId(stop: BasketStop): number | null {
@@ -196,28 +196,52 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** The in-game window action for a step, or null when none applies. */
+function openActionLabel(step: PlanStep): string | null {
+  if (step.kind === 'arbitrage') return 'Open market';
+  if (step.kind === 'courier' && step.action === 'pickup') return 'Open contract';
+  return null;
+}
+
 function Roadmap({ plan }: { plan: Plan }) {
   const store = useStore();
   const active = useAtomValue(activeCharacterAtom);
+  const basket = useAtomValue(basketAtom);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const sendWaypoint = async (stop: BasketStop, add: boolean) => {
+  const byKey = new Map(basket.map((b) => [b.key, b]));
+
+  const withToken = async (fn: (token: string) => Promise<void>) => {
     if (!active) {
-      setError('Log in with a character to set waypoints.');
-      return;
-    }
-    const dest = destinationId(stop);
-    if (dest === null) {
-      setError('This stop has no resolvable destination.');
+      setError('Log in with a character to use in-game actions.');
       return;
     }
     try {
       const token = await ensureAccessToken(store, active.characterId);
-      await setWaypoint(dest, token, { add });
+      await fn(token);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to set waypoint.');
+      setError(e instanceof Error ? e.message : 'In-game action failed.');
+    }
+  };
+
+  const sendWaypoint = (stop: BasketStop, add: boolean) => {
+    const dest = destinationId(stop);
+    if (dest === null) {
+      setError('This stop has no resolvable destination.');
+      return Promise.resolve();
+    }
+    return withToken((token) => setWaypoint(dest, token, { add }));
+  };
+
+  const openWindowFor = (step: PlanStep) => {
+    const item = byKey.get(step.itemKey);
+    if (!item) return;
+    if (item.kind === 'arbitrage' && item.marketTypeId != null) {
+      void withToken((token) => openMarketWindow(item.marketTypeId!, token));
+    } else if (item.kind === 'courier' && item.contractId != null) {
+      void withToken((token) => openContract(item.contractId!, token));
     }
   };
 
@@ -270,13 +294,28 @@ function Roadmap({ plan }: { plan: Plan }) {
                 Wallet {formatIskMillions(step.walletAfter)} · Cargo {formatVolume(step.cargoAfter)}
               </Typography>
             </Box>
-            <Tooltip title="Set in-game waypoint for this stop" arrow>
-              <span>
-                <Button size="small" disabled={!active} onClick={() => sendWaypoint(step.stop, false)}>
-                  Waypoint
-                </Button>
-              </span>
-            </Tooltip>
+            <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+              {openActionLabel(step) && (
+                <Tooltip title="Open the relevant window in the EVE client" arrow>
+                  <span>
+                    <Button size="small" disabled={!active} onClick={() => openWindowFor(step)}>
+                      {openActionLabel(step)}
+                    </Button>
+                  </span>
+                </Tooltip>
+              )}
+              <Tooltip title="Set in-game waypoint for this stop" arrow>
+                <span>
+                  <Button
+                    size="small"
+                    disabled={!active}
+                    onClick={() => void sendWaypoint(step.stop, false)}
+                  >
+                    Waypoint
+                  </Button>
+                </span>
+              </Tooltip>
+            </Stack>
           </Box>
         ))}
       </Stack>
