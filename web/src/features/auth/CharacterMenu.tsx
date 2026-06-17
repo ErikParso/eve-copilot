@@ -16,8 +16,8 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { portraitUrl } from '@/api/character';
 import { securityColor } from '@/data/sde';
-import { formatNumber } from '@/utils/format';
-import { characterStatusAtom } from './atoms';
+import { formatIskMillions, formatNumber } from '@/utils/format';
+import { characterStatusAtom, characterWalletAtom } from './atoms';
 import { useAuth } from './useAuth';
 
 function ageSeconds(fetchedAt: number): number {
@@ -28,6 +28,7 @@ function ageSeconds(fetchedAt: number): number {
 export function CharacterMenu() {
   const { active, characters, login, logout, setActive } = useAuth();
   const status = useAtomValue(characterStatusAtom);
+  const wallet = useAtomValue(characterWalletAtom);
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
 
   if (!active) return null;
@@ -95,6 +96,13 @@ export function CharacterMenu() {
 
               <Typography variant="caption" color="text.secondary">
                 Ship: <Box component="span" sx={{ color: 'text.primary' }}>{status.shipTypeName ?? '—'}</Box>
+              </Typography>
+
+              <Typography variant="caption" color="text.secondary">
+                Wallet:{' '}
+                <Box component="span" sx={{ color: 'text.primary' }}>
+                  {wallet ? formatIskMillions(wallet.balance) : '—'}
+                </Box>
               </Typography>
 
               <Typography variant="caption" color="text.disabled">

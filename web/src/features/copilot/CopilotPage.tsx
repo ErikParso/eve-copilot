@@ -17,14 +17,14 @@ import Grid from '@mui/material/Unstable_Grid2';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
-import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
+import { activeCharacterAtom, characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { openContract, openMarketWindow, setWaypoint } from '@/api/ui';
 import { haulingRowsAtom } from '@/features/courierContracts/atoms';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
-import { basketAtom, runProgressAtom } from './atoms';
+import { basketAtom, effectiveStartIskAtom, runProgressAtom } from './atoms';
 import { usePlan } from './usePlan';
 import { useSuggestions } from './useSuggestions';
 import { AddToPlanButton } from './components/AddToPlanButton';
@@ -71,18 +71,19 @@ function SettingRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Read-only view of the global preferences the plan is built from. */
+/** Read-only view of the global preferences + live wallet the plan is built from. */
 function PlanSettingsPanel() {
   const prefs = useAtomValue(preferencesAtom);
   const status = useAtomValue(characterStatusAtom);
+  const wallet = useAtomValue(characterWalletAtom);
+  const startIsk = useAtomValue(effectiveStartIskAtom);
   const openPrefs = useSetAtom(preferencesOpenAtom);
 
   const locationName = status?.systemName ?? null;
   const capacity = prefs.cargoM3 !== null ? formatVolume(prefs.cargoM3) : 'Unlimited';
-  const isk =
-    prefs.availableIskMillions !== null
-      ? formatIskMillions(prefs.availableIskMillions * 1_000_000)
-      : 'Unlimited';
+  const walletText = wallet ? formatIskMillions(wallet.balance) : 'Not available';
+  // While a run is underway the plan simulates from a frozen balance.
+  const frozen = startIsk !== null && wallet !== null && startIsk !== wallet.balance;
   const route = prefs.routeType === 'safest' ? 'Safest' : 'Shortest';
 
   return (
@@ -102,10 +103,14 @@ function PlanSettingsPanel() {
         sx={{ alignSelf: 'flex-start' }}
       />
       <SettingRow label="Cargo capacity" value={capacity} />
-      <SettingRow label="Available ISK" value={isk} />
+      <SettingRow label="Wallet" value={walletText} />
+      {frozen && (
+        <SettingRow label="Plan starts from" value={formatIskMillions(startIsk!)} />
+      )}
       <SettingRow label="Route" value={route} />
       <Typography variant="caption" color="text.secondary">
-        From your Preferences.
+        Cargo &amp; route from Preferences; ISK from your live wallet
+        {frozen ? ' (frozen for the run in progress).' : '.'}
       </Typography>
     </Stack>
   );
@@ -208,6 +213,7 @@ function Roadmap({ plan }: { plan: Plan }) {
   const store = useStore();
   const active = useAtomValue(activeCharacterAtom);
   const status = useAtomValue(characterStatusAtom);
+  const wallet = useAtomValue(characterWalletAtom);
   const basket = useAtomValue(basketAtom);
   const [progress, setProgress] = useAtom(runProgressAtom);
   const [error, setError] = useState<string | null>(null);
@@ -219,12 +225,26 @@ function Roadmap({ plan }: { plan: Plan }) {
 
   // Reset progress whenever the plan's step sequence changes.
   useEffect(() => {
-    setProgress((p) => (p.signature === signature ? p : { signature, index: 0 }));
+    setProgress((p) => (p.signature === signature ? p : { signature, index: 0, startIsk: null }));
   }, [signature, setProgress]);
 
   const currentIndex = progress.signature === signature ? Math.min(progress.index, steps.length) : 0;
-  const setIndex = (i: number) =>
-    setProgress({ signature, index: Math.max(0, Math.min(i, steps.length)) });
+
+  // Advancing past step 0 freezes the wallet balance as the plan's start ISK, so
+  // the forward simulation isn't thrown off by buys you make during the run.
+  const setIndex = (i: number) => {
+    const clamped = Math.max(0, Math.min(i, steps.length));
+    setProgress((p) => ({
+      signature,
+      index: clamped,
+      startIsk:
+        clamped > 0
+          ? p.signature === signature && p.startIsk !== null
+            ? p.startIsk
+            : wallet?.balance ?? null
+          : null,
+    }));
+  };
 
   // Auto-advance: when the character reaches an upcoming step's system, jump the
   // roadmap to that step (steps before it become done). ESI only reports your

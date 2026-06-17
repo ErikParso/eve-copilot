@@ -6,6 +6,7 @@ import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
 import { useSdeMeta } from '@/data/sdeContext';
 import { AuthControls } from '@/features/auth/AuthControls';
 import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
+import { useCharacterWalletPoller } from '@/features/auth/useCharacterWalletPoller';
 import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
 import { PreferencesDrawer } from '@/features/preferences/PreferencesDrawer';
 import { preferencesOpenAtom } from '@/features/preferences/atoms';
@@ -26,6 +27,7 @@ export function Layout() {
   const sdeMeta = useSdeMeta();
   const openPrefs = useSetAtom(preferencesOpenAtom);
   useCharacterStatusPoller();
+  useCharacterWalletPoller();
   useHaulingSearchController();
 
   return (

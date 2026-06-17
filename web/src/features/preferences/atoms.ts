@@ -11,16 +11,15 @@ import type { ContractType, RouteType } from '@/features/courierContracts/types'
 export interface Preferences {
   /** Usable cargo capacity in m³ (null = unconstrained). */
   cargoM3: number | null;
-  /** Wallet / max ISK to commit, in millions (null = unconstrained). */
-  availableIskMillions: number | null;
   routeType: RouteType;
   /** Opportunity kinds to consider; empty = all. */
   contractTypes: ContractType[];
 }
 
+// Note: available ISK is no longer a preference — it comes from the live wallet
+// balance (esi-wallet scope), see characterWalletAtom / effectiveStartIskAtom.
 export const DEFAULT_PREFERENCES: Preferences = {
   cargoM3: null,
-  availableIskMillions: null,
   routeType: 'safest',
   contractTypes: [],
 };

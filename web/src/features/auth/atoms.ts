@@ -49,3 +49,12 @@ export interface CharacterStatus {
 }
 
 export const characterStatusAtom = atom<CharacterStatus | null>(null);
+
+/** Live wallet balance (ISK) of the active character, polled (~120 s cache). */
+export interface CharacterWallet {
+  balance: number;
+  /** When this balance was fetched (epoch ms). */
+  fetchedAt: number;
+}
+
+export const characterWalletAtom = atom<CharacterWallet | null>(null);

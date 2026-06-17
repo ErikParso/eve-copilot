@@ -9,7 +9,7 @@ import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { attractivityWeightsAtom, haulingRowsAtom } from '@/features/courierContracts/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
-import { basketAtom } from './atoms';
+import { basketAtom, effectiveStartIskAtom } from './atoms';
 import { cardToBasketItem, type BasketItem } from './types';
 import { rankSuggestions, type Suggestion } from './suggestions';
 
@@ -29,14 +29,12 @@ export function useSuggestions(): SuggestionsState {
   const weights = useAtomValue(attractivityWeightsAtom);
   const rows = useAtomValue(haulingRowsAtom);
   const status = useAtomValue(characterStatusAtom);
+  const effectiveStartIsk = useAtomValue(effectiveStartIskAtom);
 
   const origin = status?.systemId ?? null;
   const routeType = prefs.routeType;
   const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
-  const startIsk =
-    prefs.availableIskMillions !== null
-      ? prefs.availableIskMillions * 1_000_000
-      : Number.POSITIVE_INFINITY;
+  const startIsk = effectiveStartIsk ?? Number.POSITIVE_INFINITY;
 
   // Candidates: every hauling row not already in the basket, resolvable.
   const candidates = useMemo<BasketItem[]>(() => {
