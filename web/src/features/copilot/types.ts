@@ -32,6 +32,10 @@ export interface BasketItem {
   pickup: BasketStop;
   /** Where you unload (courier dropoff) or sell (arbitrage dest). */
   dropoff: BasketStop;
+  /** Arbitrage: the item's type id, to open its in-game market window. */
+  marketTypeId?: number;
+  /** Courier: the contract id, to open its in-game contract window. */
+  contractId?: number;
 }
 
 export type StepAction = 'pickup' | 'dropoff';
@@ -80,6 +84,7 @@ export function courierRowToBasketItem(r: CourierRow): BasketItem {
     capitalIsk: r.collateral,
     pickup: { endpoint: r.pickup, systemId: r.pickup.systemId },
     dropoff: { endpoint: r.dropoff, systemId: r.dropoff.systemId },
+    contractId: r.id,
   };
 }
 
@@ -93,6 +98,7 @@ export function arbitrageRowToBasketItem(r: ArbitrageRow): BasketItem {
     capitalIsk: r.buyCost,
     pickup: { endpoint: r.source, systemId: r.source.systemId },
     dropoff: { endpoint: r.dest, systemId: r.dest.systemId },
+    marketTypeId: r.typeId,
   };
 }
 
