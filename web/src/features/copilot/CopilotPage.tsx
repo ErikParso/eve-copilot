@@ -51,6 +51,10 @@ function signedInt(n: number): string {
   return `${n >= 0 ? '+' : '−'}${formatNumber(Math.abs(n), 0)}`;
 }
 
+function signedVolume(n: number): string {
+  return `${n >= 0 ? '+' : '−'}${formatVolume(Math.abs(n))}`;
+}
+
 /** Colour a change green/amber by whether it's an improvement. */
 function changeColor(delta: number, higherIsBetter: boolean): string {
   if (delta === 0) return 'text.secondary';
@@ -505,6 +509,15 @@ function SuggestionsPanel() {
                 {' · '}
                 <Box component="span" sx={{ color: changeColor(s.deltaIskPerJump ?? 0, true) }}>
                   {signedIsk(s.deltaIskPerJump)} / jump
+                </Box>
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                <Box component="span" sx={{ color: changeColor(s.deltaCargo, false) }}>
+                  {signedVolume(s.deltaCargo)}
+                </Box>
+                {' · '}
+                <Box component="span" sx={{ color: changeColor(s.deltaInvestment, false) }}>
+                  {signedIsk(s.deltaInvestment)} invested
                 </Box>
               </Typography>
             </Box>
