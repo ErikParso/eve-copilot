@@ -18,8 +18,7 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { setWaypoint } from '@/api/ui';
-import { getSystem } from '@/data/sde';
-import { combinedResultAtom, haulingViewAtom } from '@/features/courierContracts/atoms';
+import { haulingRowsAtom } from '@/features/courierContracts/atoms';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
@@ -73,13 +72,10 @@ function SettingRow({ label, value }: { label: string; value: string }) {
 /** Read-only view of the global preferences the plan is built from. */
 function PlanSettingsPanel() {
   const prefs = useAtomValue(preferencesAtom);
-  const view = useAtomValue(haulingViewAtom);
   const status = useAtomValue(characterStatusAtom);
   const openPrefs = useSetAtom(preferencesOpenAtom);
 
-  const locationName =
-    status?.systemName ??
-    (view.currentSystemId !== null ? getSystem(view.currentSystemId)?.name ?? null : null);
+  const locationName = status?.systemName ?? null;
   const capacity = prefs.cargoM3 !== null ? formatVolume(prefs.cargoM3) : 'Unlimited';
   const isk =
     prefs.availableIskMillions !== null
@@ -289,13 +285,13 @@ function Roadmap({ plan }: { plan: Plan }) {
 
 /** On-demand list of additions that would raise the plan's attractivity. */
 function SuggestionsPanel() {
-  const combined = useAtomValue(combinedResultAtom);
+  const haulingRows = useAtomValue(haulingRowsAtom);
   const basket = useAtomValue(basketAtom);
   const openPrefs = useSetAtom(preferencesOpenAtom);
   const { status, suggestions, error, considered, run } = useSuggestions();
 
   const TOP_N = 12;
-  const hasResults = combined.rows.length > 0;
+  const hasResults = haulingRows.length > 0;
   const inBasket = new Set(basket.map((b) => b.key));
   const ranked = suggestions.filter((s) => !inBasket.has(s.item.key));
   const visible = ranked.slice(0, TOP_N);

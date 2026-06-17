@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
-import { haulingViewAtom } from '@/features/courierContracts/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
 import { basketAtom } from './atoms';
 import { buildPlan } from './planner';
@@ -27,9 +26,8 @@ export function usePlan(): PlanState {
   // Constraints come from the global preferences; live location (when logged in)
   // overrides the contextual current system for the plan's starting point.
   const prefs = useAtomValue(preferencesAtom);
-  const view = useAtomValue(haulingViewAtom);
   const status = useAtomValue(characterStatusAtom);
-  const origin = status?.systemId ?? view.currentSystemId;
+  const origin = status?.systemId ?? null;
   const [state, setState] = useState<PlanState>(EMPTY);
   const abortRef = useRef<AbortController | null>(null);
 

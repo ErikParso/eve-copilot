@@ -8,7 +8,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
-import { attractivityWeightsAtom, combinedResultAtom, haulingViewAtom } from '@/features/courierContracts/atoms';
+import { attractivityWeightsAtom, haulingRowsAtom } from '@/features/courierContracts/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
 import { basketAtom } from './atoms';
 import { cardToBasketItem } from './types';
@@ -29,11 +29,10 @@ const EMPTY: SuggestionsState = { status: 'idle', suggestions: [], error: null, 
 export function useSuggestions() {
   const basket = useAtomValue(basketAtom);
   const prefs = useAtomValue(preferencesAtom);
-  const view = useAtomValue(haulingViewAtom);
   const weights = useAtomValue(attractivityWeightsAtom);
-  const combined = useAtomValue(combinedResultAtom);
+  const rows = useAtomValue(haulingRowsAtom);
   const status = useAtomValue(characterStatusAtom);
-  const origin = status?.systemId ?? view.currentSystemId;
+  const origin = status?.systemId ?? null;
   const [state, setState] = useState<SuggestionsState>(EMPTY);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -52,7 +51,7 @@ export function useSuggestions() {
     // Candidate pool: every last-Hauling result not already in the basket, with
     // resolvable endpoints. No distance filter — we consider them all.
     const inBasket = new Set(basket.map((b) => b.key));
-    const candidates = combined.rows
+    const candidates = rows
       .filter((c) => !inBasket.has(c.key))
       .map(cardToBasketItem)
       .filter((it) => it.pickup.systemId !== null && it.dropoff.systemId !== null);
@@ -126,7 +125,7 @@ export function useSuggestions() {
         considered: candidates.length,
       });
     }
-  }, [basket, prefs, weights, combined, origin]);
+  }, [basket, prefs, weights, rows, origin]);
 
   return { ...state, run };
 }
