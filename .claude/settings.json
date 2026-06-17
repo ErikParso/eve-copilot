@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk npm *)",
+      "Bash(rtk lint *)",
+      "Bash(kill 4831)",
+      "Bash(pkill -f \"tsx index.ts\")",
+      "Bash(git reset *)",
+      "Bash(rtk git *)",
+      "Bash(rtk read *)",
+      "Bash(rtk curl *)",
+      "WebFetch(domain:skoli.ru)"
+    ]
+  }
+}
