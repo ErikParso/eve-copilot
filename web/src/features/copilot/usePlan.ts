@@ -5,7 +5,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
-import { draftFiltersAtom } from '@/features/courierContracts/atoms';
+import { preferencesAtom } from '@/features/preferences/atoms';
+import { haulingViewAtom } from '@/features/courierContracts/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
 import { basketAtom } from './atoms';
 import { buildPlan } from './planner';
@@ -23,11 +24,12 @@ const EMPTY: PlanState = { status: 'idle', plan: null, error: null };
 
 export function usePlan(): PlanState {
   const basket = useAtomValue(basketAtom);
-  // Constraints come from the shared Hauling filters; live location (when logged
-  // in) overrides the filter's current system for the plan's starting point.
-  const filters = useAtomValue(draftFiltersAtom);
+  // Constraints come from the global preferences; live location (when logged in)
+  // overrides the contextual current system for the plan's starting point.
+  const prefs = useAtomValue(preferencesAtom);
+  const view = useAtomValue(haulingViewAtom);
   const status = useAtomValue(characterStatusAtom);
-  const origin = status?.systemId ?? filters.currentSystemId;
+  const origin = status?.systemId ?? view.currentSystemId;
   const [state, setState] = useState<PlanState>(EMPTY);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -43,10 +45,10 @@ export function usePlan(): PlanState {
     abortRef.current = controller;
     const { signal } = controller;
 
-    const capacity = filters.maxCargoM3 ?? Number.POSITIVE_INFINITY;
+    const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
     const startIsk =
-      filters.maxCollateralMillions !== null
-        ? filters.maxCollateralMillions * 1_000_000
+      prefs.availableIskMillions !== null
+        ? prefs.availableIskMillions * 1_000_000
         : Number.POSITIVE_INFINITY;
 
     // Distinct systems involved: every resolvable stop, plus the current system.
@@ -67,7 +69,7 @@ export function usePlan(): PlanState {
         const res = await fetch('/api/routes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ routeType: filters.routeType, pairs }),
+          body: JSON.stringify({ routeType: prefs.routeType, pairs }),
           signal,
         });
         if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
@@ -84,7 +86,7 @@ export function usePlan(): PlanState {
     })();
 
     return () => controller.abort();
-  }, [basket, filters, origin]);
+  }, [basket, prefs, origin]);
 
   return state;
 }

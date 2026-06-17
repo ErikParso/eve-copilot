@@ -37,11 +37,29 @@ export function CharacterMenu() {
 
   return (
     <>
-      <Tooltip title={active.name} arrow>
-        <IconButton onClick={(e) => setAnchor(e.currentTarget)} size="small" sx={{ p: 0.5 }}>
-          <Avatar src={portraitUrl(active.characterId)} sx={{ width: 32, height: 32 }} />
-        </IconButton>
-      </Tooltip>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ textAlign: 'right', display: { xs: 'none', sm: 'block' }, lineHeight: 1.25 }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+            {active.name}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {status?.systemName ?? 'Locating…'}
+            {status?.security != null && (
+              <Box
+                component="span"
+                sx={{ color: securityColor(status.security), fontWeight: 600, ml: 0.5 }}
+              >
+                {formatNumber(status.security, 1)}
+              </Box>
+            )}
+          </Typography>
+        </Box>
+        <Tooltip title={active.name} arrow>
+          <IconButton onClick={(e) => setAnchor(e.currentTarget)} size="small" sx={{ p: 0.5 }}>
+            <Avatar src={portraitUrl(active.characterId)} sx={{ width: 32, height: 32 }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
       <Menu anchorEl={anchor} open={!!anchor} onClose={close}>
         <Box sx={{ px: 2, py: 1, minWidth: 240 }}>

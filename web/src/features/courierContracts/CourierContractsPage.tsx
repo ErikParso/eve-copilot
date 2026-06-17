@@ -1,6 +1,12 @@
-import { Alert, Box, LinearProgress, Stack, Tooltip, Typography } from '@mui/material';
+import { useMemo } from 'react';
+import { useAtom } from 'jotai';
+import { Alert, Box, LinearProgress, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
 import { useCombinedSearch } from './useCombinedSearch';
+import { haulingViewAtom } from './atoms';
+import { sortCombined } from './combined';
+import { SORT_OPTIONS } from './sortContracts';
+import type { SortOptionId } from './types';
 import { FiltersPanel } from './components/FiltersPanel';
 import { CombinedGrid } from './components/CombinedGrid';
 
@@ -21,11 +27,16 @@ function formatTime(epochMs: number): string {
 
 export function CourierContractsPage() {
   const { run, status, rows, error, contractsAsOf, market } = useCombinedSearch();
+  const [view, setView] = useAtom(haulingViewAtom);
   const loading = status === 'loading';
   const warming = status === 'success' && market !== null && market.status !== 'ready';
 
   const courierCount = rows.filter((r) => r.kind === 'courier').length;
   const arbitrageCount = rows.length - courierCount;
+
+  // Ordering is applied live here (not at search time) so the sort control above
+  // the grid reorders instantly.
+  const sortedRows = useMemo(() => sortCombined(rows, view.sortBy), [rows, view.sortBy]);
 
   return (
     <Grid container spacing={2} alignItems="flex-start">
@@ -98,10 +109,30 @@ export function CourierContractsPage() {
                 </Box>
               </Box>
               {rows.length > 0 ? (
-                <CombinedGrid rows={rows} />
+                <>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <TextField
+                      select
+                      size="small"
+                      label="Sort by"
+                      value={view.sortBy}
+                      onChange={(e) =>
+                        setView((v) => ({ ...v, sortBy: e.target.value as SortOptionId }))
+                      }
+                      sx={{ minWidth: 200 }}
+                    >
+                      {SORT_OPTIONS.map((opt) => (
+                        <MenuItem key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Box>
+                  <CombinedGrid rows={sortedRows} />
+                </>
               ) : (
                 <Alert severity="info">
-                  Nothing matches. Try relaxing the collateral or cargo limits.
+                  Nothing matches. Try relaxing the cargo or ISK limits in Preferences.
                 </Alert>
               )}
             </>

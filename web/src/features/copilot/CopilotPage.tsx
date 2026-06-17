@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { useAtom, useAtomValue, useStore } from 'jotai';
-import { Link as RouterLink } from 'react-router-dom';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   Alert,
   Box,
@@ -20,9 +19,9 @@ import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms'
 import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { setWaypoint } from '@/api/ui';
 import { getSystem } from '@/data/sde';
-import { combinedResultAtom, draftFiltersAtom } from '@/features/courierContracts/atoms';
+import { combinedResultAtom, haulingViewAtom } from '@/features/courierContracts/atoms';
+import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
-import { AttractivityWeightsControl } from '@/features/courierContracts/components/AttractivityWeightsControl';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import { basketAtom } from './atoms';
 import { usePlan } from './usePlan';
@@ -71,32 +70,34 @@ function SettingRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Read-only view of the shared Hauling settings the plan is built from. */
+/** Read-only view of the global preferences the plan is built from. */
 function PlanSettingsPanel() {
-  const filters = useAtomValue(draftFiltersAtom);
+  const prefs = useAtomValue(preferencesAtom);
+  const view = useAtomValue(haulingViewAtom);
   const status = useAtomValue(characterStatusAtom);
+  const openPrefs = useSetAtom(preferencesOpenAtom);
 
   const locationName =
     status?.systemName ??
-    (filters.currentSystemId !== null ? getSystem(filters.currentSystemId)?.name ?? null : null);
-  const capacity = filters.maxCargoM3 !== null ? formatVolume(filters.maxCargoM3) : 'Unlimited';
+    (view.currentSystemId !== null ? getSystem(view.currentSystemId)?.name ?? null : null);
+  const capacity = prefs.cargoM3 !== null ? formatVolume(prefs.cargoM3) : 'Unlimited';
   const isk =
-    filters.maxCollateralMillions !== null
-      ? formatIskMillions(filters.maxCollateralMillions * 1_000_000)
+    prefs.availableIskMillions !== null
+      ? formatIskMillions(prefs.availableIskMillions * 1_000_000)
       : 'Unlimited';
-  const route = filters.routeType === 'safest' ? 'Safest' : 'Shortest';
+  const route = prefs.routeType === 'safest' ? 'Safest' : 'Shortest';
 
   return (
     <Stack spacing={1.5}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="subtitle2">Plan settings</Typography>
-        <Button size="small" component={RouterLink} to="/couriers">
-          Edit in filters
+        <Button size="small" onClick={() => openPrefs(true)}>
+          Edit
         </Button>
       </Box>
       <Chip
         icon={<MyLocationIcon />}
-        label={locationName ?? 'Unknown — set in filters'}
+        label={locationName ?? 'Unknown location'}
         size="small"
         color={locationName ? 'default' : 'warning'}
         variant="outlined"
@@ -106,7 +107,7 @@ function PlanSettingsPanel() {
       <SettingRow label="Available ISK" value={isk} />
       <SettingRow label="Route" value={route} />
       <Typography variant="caption" color="text.secondary">
-        Shared with the Hauling search — change them there.
+        From your Preferences.
       </Typography>
     </Stack>
   );
@@ -290,6 +291,7 @@ function Roadmap({ plan }: { plan: Plan }) {
 function SuggestionsPanel() {
   const combined = useAtomValue(combinedResultAtom);
   const basket = useAtomValue(basketAtom);
+  const openPrefs = useSetAtom(preferencesOpenAtom);
   const { status, suggestions, error, considered, run } = useSuggestions();
 
   const TOP_N = 12;
@@ -311,10 +313,17 @@ function SuggestionsPanel() {
           {status === 'loading' ? 'Finding…' : 'Find additions'}
         </Button>
       </Box>
-      <AttractivityWeightsControl />
       <Typography variant="caption" color="text.secondary">
         Considers every Hauling result that fits, ranked by the attractivity of the plan with that
-        contract added — scored the same way as the Hauling cards, using these weights.
+        contract added — scored the same way as the Hauling cards, using your{' '}
+        <Box
+          component="span"
+          onClick={() => openPrefs(true)}
+          sx={{ color: 'primary.main', cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          attractivity weights
+        </Box>
+        .
       </Typography>
 
       {!hasResults && (
