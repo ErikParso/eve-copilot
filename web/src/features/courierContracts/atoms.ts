@@ -25,8 +25,8 @@ export const haulingViewAtom = atomWithStorage<HaulingView>(
 
 /** User-chosen factor weights (0–10 each), persisted to localStorage. */
 export const attractivityWeightsAtom = atomWithStorage<AttractivityWeights>(
-  // v2: unified courier+arbitrage factor set (ids changed), so reset old saves.
-  'eve-multitool.attractivityWeights.v2',
+  // v3: dropped cargo/investment factors, so reset old saves.
+  'eve-multitool.attractivityWeights.v3',
   DEFAULT_WEIGHTS,
   undefined,
   { getOnInit: true },

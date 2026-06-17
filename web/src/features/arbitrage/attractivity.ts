@@ -7,13 +7,11 @@ import type { ArbitrageItem } from './types';
 
 /** A haul's metrics in the shared scoring vocabulary. */
 export function arbitrageToScorable(
-  r: Pick<ArbitrageItem, 'profit' | 'totalJumps' | 'danger' | 'totalVolume' | 'buyCost'>,
+  r: Pick<ArbitrageItem, 'profit' | 'totalJumps' | 'danger'>,
 ): Scorable {
   return {
     income: r.profit,
     totalJumps: r.totalJumps,
     danger: r.danger,
-    cargo: r.totalVolume,
-    investment: r.buyCost,
   };
 }

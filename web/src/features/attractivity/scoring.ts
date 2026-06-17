@@ -11,7 +11,7 @@
 // are exactly the ones common to both: each feature adapts its row to the
 // neutral `Scorable` shape below, so income↔profit, collateral↔investment, etc.
 // score identically.
-import { formatIsk, formatNumber, formatVolume } from '@/utils/format';
+import { formatIsk, formatNumber } from '@/utils/format';
 
 export type FactorDirection = 'higher' | 'lower';
 
@@ -22,7 +22,7 @@ export type FactorDirection = 'higher' | 'lower';
  */
 export type FactorScale = 'linear' | 'log';
 
-export type FactorId = 'income' | 'totalJumps' | 'danger' | 'cargo' | 'investment';
+export type FactorId = 'income' | 'totalJumps' | 'danger';
 
 /**
  * Neutral metrics a result exposes for scoring — only what courier contracts and
@@ -35,10 +35,6 @@ export interface Scorable {
   totalJumps: number | null;
   /** Route danger index 0–100. */
   danger: number | null;
-  /** Cargo volume in m³. */
-  cargo: number | null;
-  /** ISK at risk: courier collateral / arbitrage capital outlay. */
-  investment: number | null;
 }
 
 export interface FactorDef {
@@ -86,24 +82,6 @@ export const FACTORS: FactorDef[] = [
     value: (s) => s.danger,
     format: outOf100,
   },
-  {
-    id: 'cargo',
-    label: 'Volume',
-    direction: 'lower',
-    scale: 'log',
-    description: 'Cargo size in m³. Lower fits more ships and is easier to move.',
-    value: (s) => s.cargo,
-    format: formatVolume,
-  },
-  {
-    id: 'investment',
-    label: 'Investment',
-    direction: 'lower',
-    scale: 'log',
-    description: 'ISK you must put up (collateral) or tie up (capital). Lower means less at risk.',
-    value: (s) => s.investment,
-    format: formatIsk,
-  },
 ];
 
 const FACTOR_BY_ID = new Map(FACTORS.map((f) => [f.id, f]));
@@ -138,21 +116,14 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
   {
     id: 'safe',
     label: 'Safe & steady',
-    description:
-      'Minimise risk: avoid dangerous routes and large outlays, with a modest pull toward decent income on short routes.',
-    weights: makeWeights({ danger: 10, investment: 8, income: 3, totalJumps: 3 }),
+    description: 'Minimise risk: avoid dangerous routes, with a modest pull toward decent income on short routes.',
+    weights: makeWeights({ danger: 10, income: 3, totalJumps: 3 }),
   },
   {
-    id: 'lowCapital',
-    label: 'Low capital',
-    description: 'Keep the ISK at risk small — favour low collateral/investment and small cargo, still chasing income.',
-    weights: makeWeights({ investment: 10, cargo: 5, income: 4, danger: 3 }),
-  },
-  {
-    id: 'bigBulk',
-    label: 'Big bulk runs',
-    description: 'Go for the largest payouts (favouring smaller cargo for value density), with mild caution on outlay and danger.',
-    weights: makeWeights({ income: 10, cargo: 5, investment: 4, danger: 3 }),
+    id: 'maxIncome',
+    label: 'Max income',
+    description: 'Chase the biggest payouts, with mild caution on effort and danger.',
+    weights: makeWeights({ income: 10, totalJumps: 3, danger: 3 }),
   },
 ];
 
