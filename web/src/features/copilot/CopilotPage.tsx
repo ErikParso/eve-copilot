@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Divider,
   IconButton,
   LinearProgress,
@@ -283,12 +284,12 @@ function Roadmap({ plan }: { plan: Plan }) {
   );
 }
 
-/** On-demand list of additions that would raise the plan's attractivity. */
+/** Auto-updating list of additions that would raise the plan's attractivity. */
 function SuggestionsPanel() {
   const haulingRows = useAtomValue(haulingRowsAtom);
   const basket = useAtomValue(basketAtom);
   const openPrefs = useSetAtom(preferencesOpenAtom);
-  const { status, suggestions, error, considered, run } = useSuggestions();
+  const { status, suggestions, error, considered } = useSuggestions();
 
   const TOP_N = 12;
   const hasResults = haulingRows.length > 0;
@@ -300,18 +301,13 @@ function SuggestionsPanel() {
     <Stack spacing={1.5}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="subtitle2">Suggested additions</Typography>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={run}
-          disabled={!hasResults || status === 'loading'}
-        >
-          {status === 'loading' ? 'Finding…' : 'Find additions'}
-        </Button>
+        {status === 'loading' && (
+          <CircularProgress size={16} thickness={5} aria-label="Updating suggestions" />
+        )}
       </Box>
       <Typography variant="caption" color="text.secondary">
-        Considers every Hauling result that fits, ranked by the attractivity of the plan with that
-        contract added — scored the same way as the Hauling cards, using your{' '}
+        Auto-updates as the list, your plan and preferences change. Ranked by the attractivity of the
+        plan with that contract added — scored like the Hauling cards, using your{' '}
         <Box
           component="span"
           onClick={() => openPrefs(true)}
@@ -324,8 +320,7 @@ function SuggestionsPanel() {
 
       {!hasResults && (
         <Alert severity="info">
-          Run a search on the <strong>Hauling</strong> page first — suggestions are drawn from those
-          results.
+          No hauling results yet — suggestions are drawn from the live list.
         </Alert>
       )}
       {status === 'error' && <Alert severity="error">{error}</Alert>}
