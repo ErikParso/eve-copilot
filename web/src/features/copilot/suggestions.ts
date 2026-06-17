@@ -31,6 +31,10 @@ export interface Suggestion {
   deltaIncome: number;
   /** Change in the plan's danger index (0–100) vs. the current plan (+ = more dangerous). */
   deltaDanger: number;
+  /** Change in peak cargo (m³) vs. the current plan. */
+  deltaCargo: number;
+  /** Change in peak ISK committed vs. the current plan. */
+  deltaInvestment: number;
   /** The resulting plan's ISK-per-jump (income ÷ total jumps). */
   iskPerJump: number | null;
   /** Change in ISK-per-jump vs. the current plan (+ = more efficient). */
@@ -76,6 +80,8 @@ export function rankSuggestions(
         deltaJumps: e.plan.totalJumps - baseline.totalJumps,
         deltaIncome: e.plan.totalIncome - baseline.totalIncome,
         deltaDanger: e.plan.danger - baseline.danger,
+        deltaCargo: e.plan.peakCargo - baseline.peakCargo,
+        deltaInvestment: e.plan.peakCapital - baseline.peakCapital,
         iskPerJump,
         deltaIskPerJump:
           iskPerJump !== null && baseIskPerJump !== null ? iskPerJump - baseIskPerJump : null,
