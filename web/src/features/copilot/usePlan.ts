@@ -1,17 +1,18 @@
-// Computes the Copilot plan: collects the distinct solar systems of the basket's
-// stops (plus the current location), asks the server for the route legs between
-// every pair (pathfinding lives server-side), then runs the local planner. Re-runs
-// whenever the basket, the manual inputs, or the character's location changes.
-import { useEffect, useRef, useState } from 'react';
+// Computes the Copilot plan. The route legs (server-side pathfinding) are only
+// re-fetched when something that changes routes moves — the basket, the current
+// location, or the route type. The plan math (which depends on cargo capacity and
+// the effective start ISK) is then derived reactively, so a wallet/cargo change
+// re-plans without a re-fetch.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
-import { basketAtom } from './atoms';
+import { basketAtom, effectiveStartIskAtom } from './atoms';
 import { buildPlan } from './planner';
 import type { Plan } from './types';
 
-type RoutesResponse = { routes: Record<string, RouteSystem[] | null> };
+type RoutesMap = Record<string, RouteSystem[] | null>;
 
 export type PlanState =
   | { status: 'idle'; plan: null; error: null }
@@ -19,23 +20,28 @@ export type PlanState =
   | { status: 'ready'; plan: Plan; error: null }
   | { status: 'error'; plan: null; error: string };
 
-const EMPTY: PlanState = { status: 'idle', plan: null, error: null };
-
 export function usePlan(): PlanState {
   const basket = useAtomValue(basketAtom);
-  // Constraints come from the global preferences; live location (when logged in)
-  // overrides the contextual current system for the plan's starting point.
   const prefs = useAtomValue(preferencesAtom);
+  const startIsk = useAtomValue(effectiveStartIskAtom);
   const status = useAtomValue(characterStatusAtom);
   const origin = status?.systemId ?? null;
-  const [state, setState] = useState<PlanState>(EMPTY);
+  const routeType = prefs.routeType;
+  const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
+
+  const [routes, setRoutes] = useState<RoutesMap>({});
+  const [fetchStatus, setFetchStatus] = useState<PlanState['status']>('idle');
+  const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Fetch the route matrix when routes-affecting inputs change.
   useEffect(() => {
     abortRef.current?.abort();
 
     if (basket.length === 0) {
-      setState(EMPTY);
+      setRoutes({});
+      setError(null);
+      setFetchStatus('idle');
       return;
     }
 
@@ -43,13 +49,6 @@ export function usePlan(): PlanState {
     abortRef.current = controller;
     const { signal } = controller;
 
-    const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
-    const startIsk =
-      prefs.availableIskMillions !== null
-        ? prefs.availableIskMillions * 1_000_000
-        : Number.POSITIVE_INFINITY;
-
-    // Distinct systems involved: every resolvable stop, plus the current system.
     const systems = new Set<number>();
     if (origin !== null) systems.add(origin);
     for (const it of basket) {
@@ -60,31 +59,46 @@ export function usePlan(): PlanState {
     const pairs: Array<[number, number]> = [];
     for (const a of ids) for (const b of ids) pairs.push([a, b]);
 
-    setState({ status: 'loading', plan: null, error: null });
-
+    setFetchStatus('loading');
     (async () => {
       try {
         const res = await fetch('/api/routes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ routeType: prefs.routeType, pairs }),
+          body: JSON.stringify({ routeType, pairs }),
           signal,
         });
         if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
-        const data = (await res.json()) as RoutesResponse;
+        const data = (await res.json()) as { routes: RoutesMap };
         if (signal.aborted) return;
-
-        const getLeg = (from: number, to: number) => data.routes[`${from}:${to}`] ?? null;
-        const plan = buildPlan(basket, { origin, capacity, startIsk, getLeg });
-        setState({ status: 'ready', plan, error: null });
+        setRoutes(data.routes);
+        setError(null);
+        setFetchStatus('ready');
       } catch (err) {
         if (signal.aborted) return;
-        setState({ status: 'error', plan: null, error: err instanceof Error ? err.message : 'Planning failed' });
+        setError(err instanceof Error ? err.message : 'Planning failed');
+        setFetchStatus('error');
       }
     })();
 
     return () => controller.abort();
-  }, [basket, prefs, origin]);
+  }, [basket, origin, routeType]);
 
-  return state;
+  // Re-plan reactively from the fetched routes + the current capacity/ISK.
+  const plan = useMemo<Plan | null>(() => {
+    if (fetchStatus !== 'ready' || basket.length === 0) return null;
+    const getLeg = (from: number, to: number) => routes[`${from}:${to}`] ?? null;
+    return buildPlan(basket, {
+      origin,
+      capacity,
+      startIsk: startIsk ?? Number.POSITIVE_INFINITY,
+      getLeg,
+    });
+  }, [fetchStatus, routes, basket, origin, capacity, startIsk]);
+
+  if (basket.length === 0) return { status: 'idle', plan: null, error: null };
+  if (fetchStatus === 'loading') return { status: 'loading', plan: null, error: null };
+  if (fetchStatus === 'error') return { status: 'error', plan: null, error: error ?? 'Planning failed' };
+  if (plan) return { status: 'ready', plan, error: null };
+  return { status: 'idle', plan: null, error: null };
 }

@@ -95,14 +95,6 @@ export function PreferencesDrawer() {
           </Typography>
 
           <NumberPrefField
-            label="Available ISK"
-            value={prefs.availableIskMillions}
-            unit="M ISK"
-            helperText="Your wallet — hides what you can't cover; the plan's start balance."
-            onCommit={(availableIskMillions) => setPrefs({ ...prefs, availableIskMillions })}
-          />
-
-          <NumberPrefField
             label="Cargo capacity"
             value={prefs.cargoM3}
             unit="m³"

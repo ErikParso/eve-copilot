@@ -4,6 +4,7 @@
 // and re-scores instantly without a re-fetch.
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
+import { characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import { scoreCombined, type ResultCard } from './combined';
@@ -58,8 +59,6 @@ export const haulingDataAtom = atom<HaulingData>({
   market: null,
 });
 
-const MILLION = 1_000_000;
-
 /**
  * The displayed cards: filter the raw data by the global cargo/ISK/contract-type
  * preferences and score by the weights. Recomputes reactively when either the
@@ -72,8 +71,8 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const prefs = get(preferencesAtom);
   const weights = get(attractivityWeightsAtom);
 
-  const maxCollateral =
-    prefs.availableIskMillions !== null ? prefs.availableIskMillions * MILLION : Infinity;
+  // ISK ceiling = your live wallet (hide what you can't cover); no wallet = no cap.
+  const maxCollateral = get(characterWalletAtom)?.balance ?? Infinity;
   const maxCargo = prefs.cargoM3 ?? Infinity;
   const types = prefs.contractTypes;
   const showCourier = types.length === 0 || types.includes('courier');

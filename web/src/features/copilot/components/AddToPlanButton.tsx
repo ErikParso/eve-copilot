@@ -2,6 +2,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { IconButton, Tooltip } from '@mui/material';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
+import { characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { basketAtom } from '../atoms';
 import type { BasketItem } from '../types';
@@ -14,13 +15,11 @@ import type { BasketItem } from '../types';
 export function AddToPlanButton({ item }: { item: BasketItem }) {
   const [basket, setBasket] = useAtom(basketAtom);
   const prefs = useAtomValue(preferencesAtom);
+  const wallet = useAtomValue(characterWalletAtom);
   const added = basket.some((b) => b.key === item.key);
 
   const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
-  const availableIsk =
-    prefs.availableIskMillions !== null
-      ? prefs.availableIskMillions * 1_000_000
-      : Number.POSITIVE_INFINITY;
+  const availableIsk = wallet?.balance ?? Number.POSITIVE_INFINITY;
   const tooBig = item.cargoM3 > capacity;
   const tooPricey = item.capitalIsk > availableIsk;
   const blocked = !added && (tooBig || tooPricey);
@@ -31,9 +30,9 @@ export function AddToPlanButton({ item }: { item: BasketItem }) {
   const title = added
     ? 'Remove from Copilot plan'
     : tooBig
-      ? "Won't fit your cargo capacity — change it in the Hauling filters"
+      ? "Won't fit your cargo capacity (set it in Preferences)"
       : tooPricey
-        ? 'Costs more than your available ISK — change it in the Hauling filters'
+        ? 'Costs more than your wallet balance'
         : 'Add to Copilot plan';
 
   return (

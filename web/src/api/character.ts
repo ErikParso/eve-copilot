@@ -44,6 +44,11 @@ export function getOnline(
   return esiGetAuthed(`/characters/${characterId}/online/`, token, undefined, signal);
 }
 
+/** Character wallet balance in ISK. ESI caches this for up to 120 s. */
+export function getWallet(characterId: number, token: string, signal?: AbortSignal): Promise<number> {
+  return esiGetAuthed<number>(`/characters/${characterId}/wallet/`, token, undefined, signal);
+}
+
 // Type id → name (public, rarely changes), cached for the session.
 const typeNameCache = new Map<number, Promise<string>>();
 
