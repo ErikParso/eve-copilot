@@ -16,6 +16,7 @@ import {
 import Grid from '@mui/material/Unstable_Grid2';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { activeCharacterAtom, characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
@@ -491,9 +492,29 @@ function SuggestionsPanel() {
             }}
           >
             <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.item.label}>
-                {s.item.kind === 'arbitrage' ? s.item.label : 'Courier contract'}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.item.label}>
+                  {s.item.kind === 'arbitrage' ? s.item.label : 'Courier contract'}
+                </Typography>
+                <Tooltip
+                  arrow
+                  slotProps={{ tooltip: { sx: { maxWidth: 360 } } }}
+                  title={
+                    <Box sx={{ py: 0.5 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                        Why this rank (score {s.attractivity})
+                      </Typography>
+                      {s.attractivitySteps.map((step, k) => (
+                        <Typography key={k} variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
+                          {step}
+                        </Typography>
+                      ))}
+                    </Box>
+                  }
+                >
+                  <InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.secondary', cursor: 'help', flexShrink: 0 }} />
+                </Tooltip>
+              </Box>
               <Typography variant="caption" color="text.secondary" display="block" noWrap>
                 {s.item.pickup.endpoint.systemName ?? '?'} →{' '}
                 {s.item.dropoff.endpoint.systemName ?? '?'}
