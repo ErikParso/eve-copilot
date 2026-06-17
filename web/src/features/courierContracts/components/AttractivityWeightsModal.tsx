@@ -1,4 +1,5 @@
-import { useAtom } from 'jotai';
+import { useEffect, useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   Box,
   Button,
@@ -42,12 +43,25 @@ interface AttractivityWeightsModalProps {
 }
 
 export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsModalProps) {
-  const [weights, setWeights] = useAtom(attractivityWeightsAtom);
+  const committed = useAtomValue(attractivityWeightsAtom);
+  const commit = useSetAtom(attractivityWeightsAtom);
 
-  const activePreset = ATTRACTIVITY_PRESETS.find((p) => weightsEqual(p.weights, weights));
+  // Edit a local draft; only apply it (which re-scores/re-ranks downstream) when
+  // the user confirms with Done. Closing/cancelling discards the draft.
+  const [draft, setDraft] = useState(committed);
+  useEffect(() => {
+    if (open) setDraft(committed);
+  }, [open, committed]);
+
+  const activePreset = ATTRACTIVITY_PRESETS.find((p) => weightsEqual(p.weights, draft));
 
   const setWeight = (id: FactorId, value: number) =>
-    setWeights((prev) => ({ ...prev, [id]: value }));
+    setDraft((prev) => ({ ...prev, [id]: value }));
+
+  const applyAndClose = () => {
+    if (!weightsEqual(draft, committed)) commit(draft);
+    onClose();
+  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -69,7 +83,7 @@ export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsM
                 label={preset.label}
                 color={activePreset?.id === preset.id ? 'primary' : 'default'}
                 variant={activePreset?.id === preset.id ? 'filled' : 'outlined'}
-                onClick={() => setWeights(preset.weights)}
+                onClick={() => setDraft(preset.weights)}
               />
             </Tooltip>
           ))}
@@ -87,7 +101,7 @@ export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsM
         </Typography>
         <Stack spacing={2.5} sx={{ mt: 1 }}>
           {FACTORS.map((factor) => {
-            const value = weights[factor.id] ?? 0;
+            const value = draft[factor.id] ?? 0;
             const off = value === 0;
             return (
               <Box key={factor.id} sx={{ opacity: off ? 0.55 : 1 }}>
@@ -130,8 +144,9 @@ export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsM
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={() => setWeights(ATTRACTIVITY_PRESETS[0].weights)}>Reset</Button>
-        <Button variant="contained" onClick={onClose}>
+        <Button onClick={() => setDraft(ATTRACTIVITY_PRESETS[0].weights)}>Reset</Button>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={applyAndClose}>
           Done
         </Button>
       </DialogActions>
