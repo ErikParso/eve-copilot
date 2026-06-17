@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   Alert,
@@ -14,6 +14,7 @@ import {
   Typography,
 } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { activeCharacterAtom, characterStatusAtom } from '@/features/auth/atoms';
@@ -23,7 +24,7 @@ import { haulingRowsAtom } from '@/features/courierContracts/atoms';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
-import { basketAtom } from './atoms';
+import { basketAtom, runProgressAtom } from './atoms';
 import { usePlan } from './usePlan';
 import { useSuggestions } from './useSuggestions';
 import { AddToPlanButton } from './components/AddToPlanButton';
@@ -206,11 +207,43 @@ function openActionLabel(step: PlanStep): string | null {
 function Roadmap({ plan }: { plan: Plan }) {
   const store = useStore();
   const active = useAtomValue(activeCharacterAtom);
+  const status = useAtomValue(characterStatusAtom);
   const basket = useAtomValue(basketAtom);
+  const [progress, setProgress] = useAtom(runProgressAtom);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const byKey = new Map(basket.map((b) => [b.key, b]));
+  const steps = plan.steps;
+  const signature = useMemo(() => steps.map((s) => `${s.itemKey}:${s.action}`).join('|'), [steps]);
+
+  // Reset progress whenever the plan's step sequence changes.
+  useEffect(() => {
+    setProgress((p) => (p.signature === signature ? p : { signature, index: 0 }));
+  }, [signature, setProgress]);
+
+  const currentIndex = progress.signature === signature ? Math.min(progress.index, steps.length) : 0;
+  const setIndex = (i: number) =>
+    setProgress({ signature, index: Math.max(0, Math.min(i, steps.length)) });
+
+  // Auto-advance: when the character reaches an upcoming step's system, jump the
+  // roadmap to that step (steps before it become done). ESI only reports your
+  // system, not that you docked/accepted/bought — confirm those with Done.
+  const sysId = status?.systemId ?? null;
+  useEffect(() => {
+    if (sysId === null) return;
+    for (let j = currentIndex; j < steps.length; j++) {
+      if (steps[j].stop.systemId === sysId) {
+        if (j > currentIndex) setIndex(j);
+        break;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sysId]);
+
+  const done = currentIndex >= steps.length;
+  const nowWallet = currentIndex > 0 ? steps[currentIndex - 1].walletAfter : null;
+  const nowCargo = currentIndex > 0 ? steps[currentIndex - 1].cargoAfter : null;
 
   const withToken = async (fn: (token: string) => Promise<void>) => {
     if (!active) {
@@ -259,14 +292,50 @@ function Roadmap({ plan }: { plan: Plan }) {
   return (
     <Stack spacing={1.5}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="subtitle2">Roadmap ({plan.steps.length} stops)</Typography>
+        <Typography variant="subtitle2">Roadmap ({steps.length} stops)</Typography>
         <Button size="small" variant="outlined" disabled={busy || !active} onClick={sendFullRoute}>
           Send full route to autopilot
         </Button>
       </Box>
+
+      {/* Progress controls — advances automatically as you arrive in each stop's
+          system; Done confirms an action, Back/Restart adjust manually. */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          flexWrap: 'wrap',
+          p: 1,
+          borderRadius: 1,
+          bgcolor: 'action.hover',
+        }}
+      >
+        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+          {done ? 'Run complete' : `Step ${currentIndex + 1} of ${steps.length}`}
+        </Typography>
+        {nowWallet !== null && (
+          <Typography variant="caption" color="text.secondary">
+            · wallet {formatIskMillions(nowWallet)} · cargo {formatVolume(nowCargo ?? 0)}
+          </Typography>
+        )}
+        <Box sx={{ flexGrow: 1 }} />
+        <Button size="small" disabled={currentIndex === 0} onClick={() => setIndex(currentIndex - 1)}>
+          Back
+        </Button>
+        <Button size="small" variant="contained" disabled={done} onClick={() => setIndex(currentIndex + 1)}>
+          Done
+        </Button>
+        <Button size="small" color="inherit" disabled={currentIndex === 0} onClick={() => setIndex(0)}>
+          Restart
+        </Button>
+      </Box>
+
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       <Stack spacing={1}>
-        {plan.steps.map((step, i) => (
+        {steps.map((step, i) => {
+          const state = i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'upcoming';
+          return (
           <Box
             key={`${step.itemKey}:${step.action}:${i}`}
             sx={{
@@ -276,12 +345,22 @@ function Roadmap({ plan }: { plan: Plan }) {
               p: 1,
               borderRadius: 1,
               border: '1px solid',
-              borderColor: 'divider',
+              borderColor: state === 'current' ? 'primary.main' : 'divider',
+              bgcolor: state === 'current' ? 'action.selected' : undefined,
+              opacity: state === 'done' ? 0.55 : 1,
             }}
           >
-            <Typography variant="caption" color="text.secondary" sx={{ width: 24, textAlign: 'right' }}>
-              {i + 1}.
-            </Typography>
+            {state === 'done' ? (
+              <CheckCircleIcon sx={{ fontSize: 18, color: 'success.main' }} />
+            ) : (
+              <Typography
+                variant="caption"
+                color={state === 'current' ? 'primary.main' : 'text.secondary'}
+                sx={{ width: 24, textAlign: 'right', fontWeight: state === 'current' ? 700 : 400 }}
+              >
+                {i + 1}.
+              </Typography>
+            )}
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                 {step.jumps > 0 ? `Travel ${step.jumps} jump${step.jumps === 1 ? '' : 's'} → ` : ''}
@@ -317,7 +396,8 @@ function Roadmap({ plan }: { plan: Plan }) {
               </Tooltip>
             </Stack>
           </Box>
-        ))}
+          );
+        })}
       </Stack>
     </Stack>
   );
