@@ -382,14 +382,12 @@ function SuggestionsPanel() {
                 {s.deltaJumps === 1 ? '' : 's'}
               </Typography>
               <Typography variant="caption" color="text.secondary" display="block">
-                Danger {s.plan.danger}{' '}
                 <Box component="span" sx={{ color: changeColor(s.deltaDanger, false) }}>
-                  ({signedInt(s.deltaDanger)})
+                  {signedInt(s.deltaDanger)} danger
                 </Box>
-                {' · ISK/jump '}
-                {s.iskPerJump === null ? '—' : formatIsk(s.iskPerJump)}{' '}
+                {' · '}
                 <Box component="span" sx={{ color: changeColor(s.deltaIskPerJump ?? 0, true) }}>
-                  ({signedIsk(s.deltaIskPerJump)})
+                  {signedIsk(s.deltaIskPerJump)} / jump
                 </Box>
               </Typography>
             </Box>
