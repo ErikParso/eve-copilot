@@ -6,6 +6,7 @@ import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
 import { useSdeMeta } from '@/data/sdeContext';
 import { AuthControls } from '@/features/auth/AuthControls';
 import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
+import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
 import { PreferencesDrawer } from '@/features/preferences/PreferencesDrawer';
 import { preferencesOpenAtom } from '@/features/preferences/atoms';
 
@@ -25,6 +26,7 @@ export function Layout() {
   const sdeMeta = useSdeMeta();
   const openPrefs = useSetAtom(preferencesOpenAtom);
   useCharacterStatusPoller();
+  useHaulingSearchController();
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -74,7 +76,7 @@ export function Layout() {
 
       <PreferencesDrawer />
 
-      <Container maxWidth="lg" sx={{ py: 3, flex: 1 }}>
+      <Container maxWidth="xl" sx={{ py: 3, flex: 1 }}>
         <Outlet />
       </Container>
     </Box>
