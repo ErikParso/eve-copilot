@@ -1,9 +1,13 @@
-import { AppBar, Box, Button, Container, Toolbar, Tooltip, Typography } from '@mui/material';
+import { AppBar, Box, Button, Container, IconButton, Toolbar, Tooltip, Typography } from '@mui/material';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
+import SettingsIcon from '@mui/icons-material/Settings';
+import { useSetAtom } from 'jotai';
 import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
 import { useSdeMeta } from '@/data/sdeContext';
 import { AuthControls } from '@/features/auth/AuthControls';
 import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
+import { PreferencesDrawer } from '@/features/preferences/PreferencesDrawer';
+import { preferencesOpenAtom } from '@/features/preferences/atoms';
 
 interface NavItem {
   label: string;
@@ -19,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
 export function Layout() {
   const { pathname } = useLocation();
   const sdeMeta = useSdeMeta();
+  const openPrefs = useSetAtom(preferencesOpenAtom);
   useCharacterStatusPoller();
 
   return (
@@ -57,9 +62,17 @@ export function Layout() {
             </Tooltip>
           )}
 
+          <Tooltip title="Preferences" arrow>
+            <IconButton color="inherit" onClick={() => openPrefs(true)} sx={{ mr: 1 }}>
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
+
           <AuthControls />
         </Toolbar>
       </AppBar>
+
+      <PreferencesDrawer />
 
       <Container maxWidth="lg" sx={{ py: 3, flex: 1 }}>
         <Outlet />

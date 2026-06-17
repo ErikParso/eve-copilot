@@ -18,30 +18,6 @@ export type SortOptionId =
   | 'timeRemaining'
   | 'listedAge';
 
-/** User-editable search filters. `null` means "no limit / not set". */
-export interface CourierFilters {
-  /** Maximum collateral in millions of ISK. */
-  maxCollateralMillions: number | null;
-  /** Maximum cargo volume in m³. */
-  maxCargoM3: number | null;
-  routeType: RouteType;
-  /** Origin solar-system id for the "jumps to pickup" calculation. */
-  currentSystemId: number | null;
-  /** Opportunity kinds to show; empty means no filter (show all). */
-  contractTypes: ContractType[];
-  /** Result ordering, applied on Search. */
-  sortBy: SortOptionId;
-}
-
-export const DEFAULT_FILTERS: CourierFilters = {
-  maxCollateralMillions: null,
-  maxCargoM3: null,
-  routeType: 'safest',
-  currentSystemId: null,
-  contractTypes: [],
-  sortBy: 'attractivity',
-};
-
 /** One solar system on a route, with the data the danger index needs. */
 export interface RouteSystem {
   systemId: number;

@@ -2,24 +2,24 @@ import { useAtom, useAtomValue } from 'jotai';
 import { IconButton, Tooltip } from '@mui/material';
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
-import { draftFiltersAtom } from '@/features/courierContracts/atoms';
+import { preferencesAtom } from '@/features/preferences/atoms';
 import { basketAtom } from '../atoms';
 import type { BasketItem } from '../types';
 
 /**
  * Toggles an opportunity in/out of the Copilot basket. Rendered on the Hauling
- * cards. An item that can't fit your ship or wallet (per the shared Hauling
- * cargo/ISK settings) can't be added — the button is disabled with the reason.
+ * cards. An item that can't fit your ship or wallet (per the global cargo/ISK
+ * preferences) can't be added — the button is disabled with the reason.
  */
 export function AddToPlanButton({ item }: { item: BasketItem }) {
   const [basket, setBasket] = useAtom(basketAtom);
-  const filters = useAtomValue(draftFiltersAtom);
+  const prefs = useAtomValue(preferencesAtom);
   const added = basket.some((b) => b.key === item.key);
 
-  const capacity = filters.maxCargoM3 ?? Number.POSITIVE_INFINITY;
+  const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
   const availableIsk =
-    filters.maxCollateralMillions !== null
-      ? filters.maxCollateralMillions * 1_000_000
+    prefs.availableIskMillions !== null
+      ? prefs.availableIskMillions * 1_000_000
       : Number.POSITIVE_INFINITY;
   const tooBig = item.cargoM3 > capacity;
   const tooPricey = item.capitalIsk > availableIsk;

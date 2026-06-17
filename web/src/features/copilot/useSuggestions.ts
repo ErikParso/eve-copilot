@@ -7,11 +7,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
-import {
-  attractivityWeightsAtom,
-  combinedResultAtom,
-  draftFiltersAtom,
-} from '@/features/courierContracts/atoms';
+import { preferencesAtom } from '@/features/preferences/atoms';
+import { attractivityWeightsAtom, combinedResultAtom, haulingViewAtom } from '@/features/courierContracts/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
 import { basketAtom } from './atoms';
 import { cardToBasketItem } from './types';
@@ -31,11 +28,12 @@ const EMPTY: SuggestionsState = { status: 'idle', suggestions: [], error: null, 
 
 export function useSuggestions() {
   const basket = useAtomValue(basketAtom);
-  const filters = useAtomValue(draftFiltersAtom);
+  const prefs = useAtomValue(preferencesAtom);
+  const view = useAtomValue(haulingViewAtom);
   const weights = useAtomValue(attractivityWeightsAtom);
   const combined = useAtomValue(combinedResultAtom);
   const status = useAtomValue(characterStatusAtom);
-  const origin = status?.systemId ?? filters.currentSystemId;
+  const origin = status?.systemId ?? view.currentSystemId;
   const [state, setState] = useState<SuggestionsState>(EMPTY);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -45,10 +43,10 @@ export function useSuggestions() {
     abortRef.current = controller;
     const { signal } = controller;
 
-    const capacity = filters.maxCargoM3 ?? Number.POSITIVE_INFINITY;
+    const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
     const startIsk =
-      filters.maxCollateralMillions !== null
-        ? filters.maxCollateralMillions * 1_000_000
+      prefs.availableIskMillions !== null
+        ? prefs.availableIskMillions * 1_000_000
         : Number.POSITIVE_INFINITY;
 
     // Candidate pool: every last-Hauling result not already in the basket, with
@@ -104,7 +102,7 @@ export function useSuggestions() {
       const res = await fetch('/api/routes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ routeType: filters.routeType, pairs }),
+        body: JSON.stringify({ routeType: prefs.routeType, pairs }),
         signal,
       });
       if (!res.ok) throw new Error(`Routes API returned ${res.status}`);
@@ -128,7 +126,7 @@ export function useSuggestions() {
         considered: candidates.length,
       });
     }
-  }, [basket, filters, weights, combined, origin]);
+  }, [basket, prefs, weights, combined, origin]);
 
   return { ...state, run };
 }

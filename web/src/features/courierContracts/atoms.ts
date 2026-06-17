@@ -4,18 +4,27 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
-import { DEFAULT_FILTERS, type CourierFilters, type SearchStatus } from './types';
+import type { SearchStatus, SortOptionId } from './types';
 import type { ResultCard } from './combined';
 import type { MarketMeta } from '@/features/arbitrage/types';
 
 /**
- * Filters bound to the form inputs (the "draft", applied on Search click).
- * Persisted to localStorage so the user doesn't have to re-enter them.
+ * Contextual Hauling-page state (NOT global preferences): the origin system and
+ * the grid's sort order. Capacity/ISK/route/contract-type/weights live in the
+ * global Preferences (see features/preferences). Persisted to localStorage.
  */
-export const draftFiltersAtom = atomWithStorage<CourierFilters>(
-  // v3: added contractTypes; reset old saves so the field is always present.
-  'eve-multitool.courierFilters.v3',
-  DEFAULT_FILTERS,
+export interface HaulingView {
+  /** Origin solar-system id (live from the character, or manual when logged out). */
+  currentSystemId: number | null;
+  /** Result ordering for the Hauling grid. */
+  sortBy: SortOptionId;
+}
+
+export const DEFAULT_HAULING_VIEW: HaulingView = { currentSystemId: null, sortBy: 'attractivity' };
+
+export const haulingViewAtom = atomWithStorage<HaulingView>(
+  'eve-multitool.haulingView.v1',
+  DEFAULT_HAULING_VIEW,
   undefined,
   { getOnInit: true },
 );

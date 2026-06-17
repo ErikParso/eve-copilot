@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAtom, useStore } from 'jotai';
-import { attractivityWeightsAtom, combinedResultAtom, draftFiltersAtom } from './atoms';
-import { scoreCombined, sortCombined } from './combined';
+import { preferencesAtom } from '@/features/preferences/atoms';
+import { attractivityWeightsAtom, combinedResultAtom, haulingViewAtom } from './atoms';
+import { scoreCombined } from './combined';
 import { deriveJourney, perJump } from './journey';
 import type { ContractEndpoint, CourierRow, RouteSystem } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
@@ -103,7 +104,8 @@ export function useCombinedSearch() {
     abortRef.current = controller;
     const { signal } = controller;
 
-    const filters = store.get(draftFiltersAtom);
+    const prefs = store.get(preferencesAtom);
+    const view = store.get(haulingViewAtom);
     const weights = store.get(attractivityWeightsAtom);
 
     setResult({ status: 'loading', rows: [], error: null, contractsAsOf: null, market: null });
@@ -111,8 +113,8 @@ export function useCombinedSearch() {
     try {
       // Both endpoints take only routeType + origin (for route resolution); all
       // user filtering happens here on the client.
-      const params = new URLSearchParams({ routeType: filters.routeType });
-      if (filters.currentSystemId !== null) params.set('origin', String(filters.currentSystemId));
+      const params = new URLSearchParams({ routeType: prefs.routeType });
+      if (view.currentSystemId !== null) params.set('origin', String(view.currentSystemId));
 
       const [contractRes, arbRes] = await Promise.all([
         fetch(`/api/contracts?${params.toString()}`, { signal }),
@@ -125,11 +127,11 @@ export function useCombinedSearch() {
       if (signal.aborted) return;
 
       const maxCollateral =
-        filters.maxCollateralMillions !== null ? filters.maxCollateralMillions * MILLION : Infinity;
-      const maxCargo = filters.maxCargoM3 !== null ? filters.maxCargoM3 : Infinity;
+        prefs.availableIskMillions !== null ? prefs.availableIskMillions * MILLION : Infinity;
+      const maxCargo = prefs.cargoM3 !== null ? prefs.cargoM3 : Infinity;
 
       // Contract-type filter: empty selection means "no filter" (show both).
-      const types = filters.contractTypes;
+      const types = prefs.contractTypes;
       const showCourier = types.length === 0 || types.includes('courier');
       const showArbitrage = types.length === 0 || types.includes('arbitrage');
 
@@ -147,12 +149,13 @@ export function useCombinedSearch() {
         : [];
 
       // Score both kinds in one pass so attractivity is comparable across the
-      // mixed list we render.
+      // mixed list we render. Ordering is applied live in the page (sort control
+      // above the grid), so we store the scored cards unsorted.
       const cards = scoreCombined(courierRows, arbRows, weights);
 
       setResult({
         status: 'success',
-        rows: sortCombined(cards, filters.sortBy),
+        rows: cards,
         error: null,
         contractsAsOf: contractData.lastModifiedAt,
         market: arbData.meta,
