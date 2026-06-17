@@ -9,6 +9,7 @@ import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import type { ContractEndpoint } from '@/features/courierContracts/types';
 import type { ArbitrageRow } from '../types';
 import { ArbitrageRouteCell } from './ArbitrageRouteCell';
+import { OpenMarketButton } from './OpenMarketButton';
 import { AddToPlanButton } from '@/features/copilot/components/AddToPlanButton';
 import { arbitrageRowToBasketItem } from '@/features/copilot/types';
 
@@ -51,7 +52,16 @@ function Stat({
   );
 }
 
-function Endpoint({ label, endpoint }: { label: string; endpoint: ContractEndpoint }) {
+function Endpoint({
+  label,
+  endpoint,
+  action,
+}: {
+  label: string;
+  endpoint: ContractEndpoint;
+  /** Optional trailing control (e.g. open the in-game Market at the buy station). */
+  action?: ReactNode;
+}) {
   return (
     <Box sx={{ display: 'flex', gap: 1 }}>
       <Typography variant="caption" color="text.secondary" sx={{ width: 28, flexShrink: 0, mt: 0.25 }}>
@@ -60,6 +70,7 @@ function Endpoint({ label, endpoint }: { label: string; endpoint: ContractEndpoi
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <LocationCell endpoint={endpoint} />
       </Box>
+      {action}
     </Box>
   );
 }
@@ -128,7 +139,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
           </Typography>
         </Box>
 
-        <Endpoint label="Buy" endpoint={row.source} />
+        <Endpoint label="Buy" endpoint={row.source} action={<OpenMarketButton typeId={row.typeId} />} />
         <Endpoint label="Sell" endpoint={row.dest} />
 
         <ArbitrageRouteCell row={row} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
