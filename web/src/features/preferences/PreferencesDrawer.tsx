@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useAtom } from 'jotai';
 import {
   Box,
@@ -20,6 +21,54 @@ function parseOptionalNumber(raw: string): number | null {
   if (raw.trim() === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/**
+ * Numeric preference field that buffers typing locally and only commits the
+ * value on blur or Enter — so the downstream re-filter/re-fetch doesn't fire on
+ * every keystroke.
+ */
+function NumberPrefField({
+  label,
+  value,
+  unit,
+  helperText,
+  onCommit,
+}: {
+  label: string;
+  value: number | null;
+  unit: string;
+  helperText: string;
+  onCommit: (value: number | null) => void;
+}) {
+  const [text, setText] = useState(value === null ? '' : String(value));
+  // Re-sync the buffer if the committed value changes elsewhere (e.g. reset).
+  useEffect(() => {
+    setText(value === null ? '' : String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = parseOptionalNumber(text);
+    if (parsed !== value) onCommit(parsed);
+  };
+
+  return (
+    <TextField
+      label={label}
+      type="number"
+      size="small"
+      fullWidth
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+      }}
+      InputProps={{ endAdornment: <InputAdornment position="end">{unit}</InputAdornment> }}
+      inputProps={{ min: 0 }}
+      helperText={helperText}
+    />
+  );
 }
 
 /** Slide-out panel for the global hauling preferences. */
@@ -45,30 +94,20 @@ export function PreferencesDrawer() {
             How you haul — shared by the Hauling search and the Copilot plan.
           </Typography>
 
-          <TextField
+          <NumberPrefField
             label="Available ISK"
-            type="number"
-            size="small"
-            fullWidth
-            value={prefs.availableIskMillions ?? ''}
-            onChange={(e) =>
-              setPrefs({ ...prefs, availableIskMillions: parseOptionalNumber(e.target.value) })
-            }
-            InputProps={{ endAdornment: <InputAdornment position="end">M ISK</InputAdornment> }}
-            inputProps={{ min: 0 }}
+            value={prefs.availableIskMillions}
+            unit="M ISK"
             helperText="Your wallet — hides what you can't cover; the plan's start balance."
+            onCommit={(availableIskMillions) => setPrefs({ ...prefs, availableIskMillions })}
           />
 
-          <TextField
+          <NumberPrefField
             label="Cargo capacity"
-            type="number"
-            size="small"
-            fullWidth
-            value={prefs.cargoM3 ?? ''}
-            onChange={(e) => setPrefs({ ...prefs, cargoM3: parseOptionalNumber(e.target.value) })}
-            InputProps={{ endAdornment: <InputAdornment position="end">m³</InputAdornment> }}
-            inputProps={{ min: 0 }}
+            value={prefs.cargoM3}
+            unit="m³"
             helperText="Your hold — hides oversized hauls; the plan's capacity."
+            onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
           />
 
           <RouteTypeSelect
