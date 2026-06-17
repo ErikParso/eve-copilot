@@ -23,7 +23,7 @@ import { getSystem } from '@/data/sde';
 import { combinedResultAtom, draftFiltersAtom } from '@/features/courierContracts/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { AttractivityWeightsControl } from '@/features/courierContracts/components/AttractivityWeightsControl';
-import { formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
+import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import { basketAtom } from './atoms';
 import { usePlan } from './usePlan';
 import { useSuggestions } from './useSuggestions';
@@ -39,6 +39,23 @@ function destinationId(stop: BasketStop): number | null {
 function stopLine(stop: BasketStop): string {
   const sys = stop.endpoint.systemName ?? '?';
   return `${stop.endpoint.name} · ${sys}`;
+}
+
+/** Signed ISK delta, e.g. "+1.2 M ISK" / "−300 000 ISK"; em-dash when unknown. */
+function signedIsk(n: number | null): string {
+  if (n === null) return '—';
+  return `${n >= 0 ? '+' : '−'}${formatIsk(Math.abs(n))}`;
+}
+
+function signedInt(n: number): string {
+  return `${n >= 0 ? '+' : '−'}${formatNumber(Math.abs(n), 0)}`;
+}
+
+/** Colour a change green/amber by whether it's an improvement. */
+function changeColor(delta: number, higherIsBetter: boolean): string {
+  if (delta === 0) return 'text.secondary';
+  const good = higherIsBetter ? delta > 0 : delta < 0;
+  return good ? 'success.main' : 'warning.main';
 }
 
 function SettingRow({ label, value }: { label: string; value: string }) {
@@ -360,9 +377,20 @@ function SuggestionsPanel() {
                 {s.item.pickup.endpoint.systemName ?? '?'} →{' '}
                 {s.item.dropoff.endpoint.systemName ?? '?'}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" display="block">
                 +{formatIskMillions(s.deltaIncome)} · +{formatNumber(s.deltaJumps, 0)} jump
                 {s.deltaJumps === 1 ? '' : 's'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Danger {s.plan.danger}{' '}
+                <Box component="span" sx={{ color: changeColor(s.deltaDanger, false) }}>
+                  ({signedInt(s.deltaDanger)})
+                </Box>
+                {' · ISK/jump '}
+                {s.iskPerJump === null ? '—' : formatIsk(s.iskPerJump)}{' '}
+                <Box component="span" sx={{ color: changeColor(s.deltaIskPerJump ?? 0, true) }}>
+                  ({signedIsk(s.deltaIskPerJump)})
+                </Box>
               </Typography>
             </Box>
             <AddToPlanButton item={s.item} />

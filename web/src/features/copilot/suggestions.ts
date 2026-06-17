@@ -6,6 +6,7 @@
 // meaningful score against other plans. We then surface the candidates whose
 // resulting plan beats the baseline, best first.
 import { score, type AttractivityWeights, type Scorable } from '@/features/attractivity/scoring';
+import { perJump } from '@/features/courierContracts/journey';
 import { buildPlan, type PlannerInputs } from './planner';
 import type { BasketItem, Plan } from './types';
 
@@ -28,6 +29,12 @@ export interface Suggestion {
   deltaJumps: number;
   /** Extra income this addition adds vs. the current plan. */
   deltaIncome: number;
+  /** Change in the plan's danger index (0–100) vs. the current plan (+ = more dangerous). */
+  deltaDanger: number;
+  /** The resulting plan's ISK-per-jump (income ÷ total jumps). */
+  iskPerJump: number | null;
+  /** Change in ISK-per-jump vs. the current plan (+ = more efficient). */
+  deltaIskPerJump: number | null;
   plan: Plan;
 }
 
@@ -57,13 +64,22 @@ export function rankSuggestions(
   // part of this set, so its all-zero metrics can't skew the normalisation.)
   const scored = score(entries, weights, (e) => planToScorable(e.plan));
 
+  const baseIskPerJump = perJump(baseline.totalIncome, baseline.totalJumps);
+
   return scored
-    .map((e) => ({
-      item: e.item,
-      plan: e.plan,
-      attractivity: e.attractivity,
-      deltaJumps: e.plan.totalJumps - baseline.totalJumps,
-      deltaIncome: e.plan.totalIncome - baseline.totalIncome,
-    }))
+    .map((e) => {
+      const iskPerJump = perJump(e.plan.totalIncome, e.plan.totalJumps);
+      return {
+        item: e.item,
+        plan: e.plan,
+        attractivity: e.attractivity,
+        deltaJumps: e.plan.totalJumps - baseline.totalJumps,
+        deltaIncome: e.plan.totalIncome - baseline.totalIncome,
+        deltaDanger: e.plan.danger - baseline.danger,
+        iskPerJump,
+        deltaIskPerJump:
+          iskPerJump !== null && baseIskPerJump !== null ? iskPerJump - baseIskPerJump : null,
+      };
+    })
     .sort((a, b) => b.attractivity - a.attractivity);
 }
