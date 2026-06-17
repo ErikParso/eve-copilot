@@ -16,13 +16,11 @@ export type { AttractivityWeights, FactorId, FactorDef } from '@/features/attrac
 
 /** A contract's metrics in the shared scoring vocabulary. */
 export function courierToScorable(
-  r: Pick<CourierRow, 'reward' | 'totalJumps' | 'danger' | 'volume' | 'collateral'>,
+  r: Pick<CourierRow, 'reward' | 'totalJumps' | 'danger'>,
 ): Scorable {
   return {
     income: r.reward,
     totalJumps: r.totalJumps,
     danger: r.danger,
-    cargo: r.volume,
-    investment: r.collateral,
   };
 }
