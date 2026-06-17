@@ -23,8 +23,10 @@ export function planToScorable(plan: Plan): Scorable {
 
 export interface Suggestion {
   item: BasketItem;
-  /** The resulting plan's attractivity (relative to the set) — used to rank/filter, not shown. */
+  /** The resulting plan's attractivity (relative to the set) — used to rank/filter. */
   attractivity: number;
+  /** Per-factor breakdown of how that attractivity was scored (norm × weight). */
+  attractivitySteps: string[];
   /** Extra jumps this addition costs the tour vs. the current plan. */
   deltaJumps: number;
   /** Extra income this addition adds vs. the current plan. */
@@ -77,6 +79,7 @@ export function rankSuggestions(
         item: e.item,
         plan: e.plan,
         attractivity: e.attractivity,
+        attractivitySteps: e.attractivitySteps,
         deltaJumps: e.plan.totalJumps - baseline.totalJumps,
         deltaIncome: e.plan.totalIncome - baseline.totalIncome,
         deltaDanger: e.plan.danger - baseline.danger,
