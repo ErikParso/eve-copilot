@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useState } from 'react';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   Alert,
   Box,
@@ -14,23 +14,20 @@ import {
   Typography,
 } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { activeCharacterAtom, characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
-import { openContract, openMarketWindow, setWaypoint } from '@/api/ui';
-import { haulingRowsAtom } from '@/features/courierContracts/atoms';
+import { openMarketWindow, setWaypoint } from '@/api/ui';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
+import type { RouteSystem } from '@/features/courierContracts/types';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
-import { basketAtom, effectiveStartIskAtom, resolvedBasketAtom, runProgressAtom } from './atoms';
-import { usePlan } from './usePlan';
-import { useSuggestions } from './useSuggestions';
-import { useCopilotPlanController } from './useCopilotPlanController';
-import { AddToPlanButton } from './components/AddToPlanButton';
-import type { BasketStop, Plan, PlanStep } from './types';
+import { completeStopAtom, planAtom, runModeAtom } from './atoms';
+import { useRun, type RunSuggestion } from './useRun';
+import { ShipInventoryPanel } from './components/ShipInventoryPanel';
+import { RunModeToggle } from './components/RunModeToggle';
+import type { BasketStop, RunPlan, RunStep, RunStop } from './types';
 
 /** In-game waypoint target: the station id when resolved, else the system id. */
 function destinationId(stop: BasketStop): number | null {
@@ -43,21 +40,11 @@ function stopLine(stop: BasketStop): string {
   return `${stop.endpoint.name} · ${sys}`;
 }
 
-/** Signed ISK delta, e.g. "+1.2 M ISK" / "−300 000 ISK"; em-dash when unknown. */
-function signedIsk(n: number | null): string {
-  if (n === null) return '—';
-  return `${n >= 0 ? '+' : '−'}${formatIsk(Math.abs(n))}`;
-}
-
-function signedInt(n: number): string {
-  return `${n >= 0 ? '+' : '−'}${formatNumber(Math.abs(n), 0)}`;
-}
-
-/** Colour a change green/amber by whether it's an improvement. */
-function changeColor(delta: number, higherIsBetter: boolean): string {
-  if (delta === 0) return 'text.secondary';
-  const good = higherIsBetter ? delta > 0 : delta < 0;
-  return good ? 'success.main' : 'warning.main';
+/** Colour a system chip by its security status. */
+function securityColor(sec: number): string {
+  if (sec >= 0.5) return 'success.main';
+  if (sec > 0) return 'warning.main';
+  return 'error.main';
 }
 
 function SettingRow({ label, value }: { label: string; value: string }) {
@@ -78,20 +65,17 @@ function PlanSettingsPanel() {
   const prefs = useAtomValue(preferencesAtom);
   const status = useAtomValue(characterStatusAtom);
   const wallet = useAtomValue(characterWalletAtom);
-  const startIsk = useAtomValue(effectiveStartIskAtom);
   const openPrefs = useSetAtom(preferencesOpenAtom);
 
   const locationName = status?.systemName ?? null;
   const capacity = prefs.cargoM3 !== null ? formatVolume(prefs.cargoM3) : 'Unlimited';
   const walletText = wallet ? formatIskMillions(wallet.balance) : 'Not available';
-  // While a run is underway the plan simulates from a frozen balance.
-  const frozen = startIsk !== null && wallet !== null && startIsk !== wallet.balance;
   const route = prefs.routeType === 'safest' ? 'Safest' : 'Shortest';
 
   return (
     <Stack spacing={1.5}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="subtitle2">Plan settings</Typography>
+        <Typography variant="subtitle2">Settings</Typography>
         <Button size="small" onClick={() => openPrefs(true)}>
           Edit
         </Button>
@@ -106,70 +90,45 @@ function PlanSettingsPanel() {
       />
       <SettingRow label="Cargo capacity" value={capacity} />
       <SettingRow label="Wallet" value={walletText} />
-      {frozen && (
-        <SettingRow label="Plan starts from" value={formatIskMillions(startIsk!)} />
-      )}
       <SettingRow label="Route" value={route} />
       <Typography variant="caption" color="text.secondary">
-        Cargo &amp; route from Preferences; ISK from your live wallet
-        {frozen ? ' (frozen for the run in progress).' : '.'}
+        Cargo &amp; route from Preferences; ISK from your live wallet.
       </Typography>
     </Stack>
   );
 }
 
-function BasketPanel() {
-  // Display the live-economics basket (with stale/shortfall flags); edits write
-  // back to the stored basket so we never persist the derived fields.
-  const basket = useAtomValue(resolvedBasketAtom);
-  const setBasket = useSetAtom(basketAtom);
-  if (basket.length === 0) return null;
+/** The stops chosen for the current run, with manual removal. */
+function RunPlanPanel() {
+  const plan = useAtomValue(planAtom);
+  const setPlan = useSetAtom(planAtom);
+  const mode = useAtomValue(runModeAtom);
+  if (plan.length === 0) return null;
 
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-        <Typography variant="subtitle2">In the plan ({basket.length})</Typography>
-        <Button size="small" color="inherit" onClick={() => setBasket([])}>
+        <Typography variant="subtitle2">In the {mode} run ({plan.length})</Typography>
+        <Button size="small" color="inherit" onClick={() => setPlan([])}>
           Clear all
         </Button>
       </Box>
       <Stack spacing={1}>
-        {basket.map((item) => (
+        {plan.map((s) => (
           <Box
-            key={item.key}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              p: 1,
-              borderRadius: 1,
-              bgcolor: 'action.hover',
-              opacity: item.stale ? 0.6 : 1,
-            }}
+            key={s.key}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, borderRadius: 1, bgcolor: 'action.hover' }}
           >
             <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={item.label}>
-                {item.kind === 'arbitrage' ? item.label : 'Courier contract'}
+              <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.itemName}>
+                {formatNumber(s.quantity, 0)} × {s.itemName}
               </Typography>
               <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                {item.pickup.endpoint.systemName ?? '?'} → {item.dropoff.endpoint.systemName ?? '?'}
+                {s.stop.endpoint.systemName ?? '?'}
               </Typography>
-              {item.stale && (
-                <Typography variant="caption" color="error.main" display="block" sx={{ fontWeight: 600 }}>
-                  No longer available — the orders are gone
-                </Typography>
-              )}
-              {!item.stale && item.shortfall && (
-                <Typography variant="caption" color="warning.main" display="block" sx={{ fontWeight: 600 }}>
-                  Partly available — {formatNumber(item.quantity ?? 0, 0)} units fit the live book
-                </Typography>
-              )}
             </Box>
-            <Tooltip title="Remove" arrow>
-              <IconButton
-                size="small"
-                onClick={() => setBasket((prev) => prev.filter((b) => b.key !== item.key))}
-              >
+            <Tooltip title="Remove from plan" arrow>
+              <IconButton size="small" onClick={() => setPlan((prev) => prev.filter((p) => p.key !== s.key))}>
                 <DeleteOutlineIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -177,29 +136,6 @@ function BasketPanel() {
         ))}
       </Stack>
     </Box>
-  );
-}
-
-function SummaryBanner({ plan }: { plan: Plan }) {
-  return (
-    <Stack spacing={1}>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-        <Metric label="Total income" value={formatIskMillions(plan.totalIncome)} />
-        <Metric label="Jumps" value={formatNumber(plan.totalJumps, 0)} />
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
-          <Typography variant="caption" color="text.secondary">
-            Danger
-          </Typography>
-          <DangerText score={plan.danger} steps={plan.dangerSteps} />
-        </Box>
-      </Box>
-      {plan.infeasibleKeys.length > 0 && (
-        <Alert severity="info">
-          {plan.infeasibleKeys.length} item(s) couldn't be routed (unresolved or unreachable
-          location) and were left out.
-        </Alert>
-      )}
-    </Stack>
   );
 }
 
@@ -216,68 +152,79 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** The in-game window action for a step, or null when none applies. */
-function openActionLabel(step: PlanStep): string | null {
-  if (step.kind === 'arbitrage') return 'Open market';
-  if (step.kind === 'courier' && step.action === 'pickup') return 'Open contract';
-  return null;
+function SummaryBanner({ plan }: { plan: RunPlan }) {
+  return (
+    <Stack spacing={1}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+        {plan.mode === 'buy' ? (
+          <Metric label="Total spend" value={formatIskMillions(plan.totalSpend)} />
+        ) : (
+          <Metric label="Net revenue" value={formatIskMillions(plan.totalRevenue)} />
+        )}
+        <Metric label="Jumps" value={formatNumber(plan.totalJumps, 0)} />
+        <Metric label="Peak cargo" value={formatVolume(plan.peakCargo)} />
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">
+            Danger
+          </Typography>
+          <DangerText score={plan.danger} steps={plan.dangerSteps} />
+        </Box>
+      </Box>
+      {plan.infeasibleKeys.length > 0 && (
+        <Alert severity="info">
+          {plan.infeasibleKeys.length} item(s) couldn't be routed (unresolved/unreachable location, or
+          over your cargo/ISK limits) and were left out.
+        </Alert>
+      )}
+    </Stack>
+  );
 }
 
-function Roadmap({ plan }: { plan: Plan }) {
+/** A compact strip of the whole tour's systems, coloured by security. */
+function RouteStrip({ steps }: { steps: RunStep[] }) {
+  const systems: RouteSystem[] = [];
+  for (const step of steps) {
+    const leg = step.leg;
+    const slice = systems.length === 0 ? leg : leg.slice(1);
+    systems.push(...slice);
+  }
+  if (systems.length === 0) return null;
+
+  return (
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+      {systems.map((sys, i) => (
+        <Tooltip key={`${sys.systemId}:${i}`} arrow title={`${sys.name} · ${sys.security.toFixed(1)} sec`}>
+          <Box
+            sx={{
+              px: 0.75,
+              py: 0.25,
+              borderRadius: 0.5,
+              fontSize: '0.65rem',
+              fontWeight: 600,
+              color: 'common.white',
+              bgcolor: securityColor(sys.security),
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {sys.name}
+          </Box>
+        </Tooltip>
+      ))}
+    </Box>
+  );
+}
+
+function Roadmap({ plan }: { plan: RunPlan }) {
   const store = useStore();
   const active = useAtomValue(activeCharacterAtom);
-  const status = useAtomValue(characterStatusAtom);
-  const wallet = useAtomValue(characterWalletAtom);
-  const basket = useAtomValue(basketAtom);
-  const [progress, setProgress] = useAtom(runProgressAtom);
+  const planStops = useAtomValue(planAtom);
+  const complete = useSetAtom(completeStopAtom);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const byKey = new Map(basket.map((b) => [b.key, b]));
+  const byKey = new Map<string, RunStop>(planStops.map((s) => [s.key, s]));
   const steps = plan.steps;
-  const signature = useMemo(() => steps.map((s) => `${s.itemKey}:${s.action}`).join('|'), [steps]);
-
-  // Reset progress whenever the plan's step sequence changes.
-  useEffect(() => {
-    setProgress((p) => (p.signature === signature ? p : { signature, index: 0, startIsk: null }));
-  }, [signature, setProgress]);
-
-  const currentIndex = progress.signature === signature ? Math.min(progress.index, steps.length) : 0;
-
-  // Advancing past step 0 freezes the wallet balance as the plan's start ISK, so
-  // the forward simulation isn't thrown off by buys you make during the run.
-  const setIndex = (i: number) => {
-    const clamped = Math.max(0, Math.min(i, steps.length));
-    setProgress((p) => ({
-      signature,
-      index: clamped,
-      startIsk:
-        clamped > 0
-          ? p.signature === signature && p.startIsk !== null
-            ? p.startIsk
-            : wallet?.balance ?? null
-          : null,
-    }));
-  };
-
-  // Auto-advance: when the character reaches an upcoming step's system, jump the
-  // roadmap to that step (steps before it become done). ESI only reports your
-  // system, not that you docked/accepted/bought — confirm those with Done.
-  const sysId = status?.systemId ?? null;
-  useEffect(() => {
-    if (sysId === null) return;
-    for (let j = currentIndex; j < steps.length; j++) {
-      if (steps[j].stop.systemId === sysId) {
-        if (j > currentIndex) setIndex(j);
-        break;
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sysId]);
-
-  const done = currentIndex >= steps.length;
-  const nowWallet = currentIndex > 0 ? steps[currentIndex - 1].walletAfter : null;
-  const nowCargo = currentIndex > 0 ? steps[currentIndex - 1].cargoAfter : null;
+  const doneVerb = plan.mode === 'buy' ? 'Bought' : 'Sold';
 
   const withToken = async (fn: (token: string) => Promise<void>) => {
     if (!active) {
@@ -302,21 +249,11 @@ function Roadmap({ plan }: { plan: Plan }) {
     return withToken((token) => setWaypoint(dest, token, { add }));
   };
 
-  const openWindowFor = (step: PlanStep) => {
-    const item = byKey.get(step.itemKey);
-    if (!item) return;
-    if (item.kind === 'arbitrage' && item.marketTypeId != null) {
-      void withToken((token) => openMarketWindow(item.marketTypeId!, token));
-    } else if (item.kind === 'courier' && item.contractId != null) {
-      void withToken((token) => openContract(item.contractId!, token));
-    }
-  };
-
   const sendFullRoute = async () => {
     setBusy(true);
     try {
-      for (let i = 0; i < plan.steps.length; i++) {
-        await sendWaypoint(plan.steps[i].stop, i > 0); // first clears, rest append
+      for (let i = 0; i < steps.length; i++) {
+        await sendWaypoint(steps[i].stop, i > 0); // first clears, rest append
       }
     } finally {
       setBusy(false);
@@ -332,104 +269,80 @@ function Roadmap({ plan }: { plan: Plan }) {
         </Button>
       </Box>
 
-      {/* Progress controls — advances automatically as you arrive in each stop's
-          system; Done confirms an action, Back/Restart adjust manually. */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          flexWrap: 'wrap',
-          p: 1,
-          borderRadius: 1,
-          bgcolor: 'action.hover',
-        }}
-      >
-        <Typography variant="body2" sx={{ fontWeight: 700 }}>
-          {done ? 'Run complete' : `Step ${currentIndex + 1} of ${steps.length}`}
-        </Typography>
-        {nowWallet !== null && (
-          <Typography variant="caption" color="text.secondary">
-            · wallet {formatIskMillions(nowWallet)} · cargo {formatVolume(nowCargo ?? 0)}
-          </Typography>
-        )}
-        <Box sx={{ flexGrow: 1 }} />
-        <Button size="small" disabled={currentIndex === 0} onClick={() => setIndex(currentIndex - 1)}>
-          Back
-        </Button>
-        <Button size="small" variant="contained" disabled={done} onClick={() => setIndex(currentIndex + 1)}>
-          Done
-        </Button>
-        <Button size="small" color="inherit" disabled={currentIndex === 0} onClick={() => setIndex(0)}>
-          Restart
-        </Button>
-      </Box>
+      <RouteStrip steps={steps} />
 
-      {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
       <Stack spacing={1}>
         {steps.map((step, i) => {
-          const state = i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'upcoming';
+          const current = i === 0;
+          const stop = byKey.get(step.key);
           return (
-          <Box
-            key={`${step.itemKey}:${step.action}:${i}`}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              p: 1,
-              borderRadius: 1,
-              border: '1px solid',
-              borderColor: state === 'current' ? 'primary.main' : 'divider',
-              bgcolor: state === 'current' ? 'action.selected' : undefined,
-              opacity: state === 'done' ? 0.55 : 1,
-            }}
-          >
-            {state === 'done' ? (
-              <CheckCircleIcon sx={{ fontSize: 18, color: 'success.main' }} />
-            ) : (
+            <Box
+              key={step.key}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                p: 1,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: current ? 'primary.main' : 'divider',
+                bgcolor: current ? 'action.selected' : undefined,
+              }}
+            >
               <Typography
                 variant="caption"
-                color={state === 'current' ? 'primary.main' : 'text.secondary'}
-                sx={{ width: 24, textAlign: 'right', fontWeight: state === 'current' ? 700 : 400 }}
+                color={current ? 'primary.main' : 'text.secondary'}
+                sx={{ width: 24, textAlign: 'right', fontWeight: current ? 700 : 400 }}
               >
                 {i + 1}.
               </Typography>
-            )}
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                {step.jumps > 0 ? `Travel ${step.jumps} jump${step.jumps === 1 ? '' : 's'} → ` : ''}
-                {step.label}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                {stopLine(step.stop)}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Wallet {formatIskMillions(step.walletAfter)} · Cargo {formatVolume(step.cargoAfter)}
-              </Typography>
-            </Box>
-            <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
-              {openActionLabel(step) && (
-                <Tooltip title="Open the relevant window in the EVE client" arrow>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  {step.jumps > 0 ? `Travel ${step.jumps} jump${step.jumps === 1 ? '' : 's'} → ` : ''}
+                  {step.label}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                  {formatNumber(step.quantity, 0)} units · {stopLine(step.stop)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Wallet {formatIskMillions(step.walletAfter)} · Cargo {formatVolume(step.cargoAfter)}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+                <Tooltip title="Open the item's market window in the EVE client" arrow>
                   <span>
-                    <Button size="small" disabled={!active} onClick={() => openWindowFor(step)}>
-                      {openActionLabel(step)}
+                    <Button size="small" disabled={!active} onClick={() => void withToken((t) => openMarketWindow(step.typeId, t))}>
+                      Open market
                     </Button>
                   </span>
                 </Tooltip>
-              )}
-              <Tooltip title="Set in-game waypoint for this stop" arrow>
-                <span>
-                  <Button
-                    size="small"
-                    disabled={!active}
-                    onClick={() => void sendWaypoint(step.stop, false)}
-                  >
-                    Waypoint
-                  </Button>
-                </span>
-              </Tooltip>
-            </Stack>
-          </Box>
+                <Tooltip title="Set in-game waypoint for this stop" arrow>
+                  <span>
+                    <Button size="small" disabled={!active} onClick={() => void sendWaypoint(step.stop, false)}>
+                      Waypoint
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip title={`Mark as ${doneVerb.toLowerCase()} — updates your inventory`} arrow>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={!stop}
+                      onClick={() => stop && complete(stop)}
+                    >
+                      {doneVerb}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Stack>
+            </Box>
           );
         })}
       </Stack>
@@ -437,113 +350,93 @@ function Roadmap({ plan }: { plan: Plan }) {
   );
 }
 
-/** Auto-updating list of additions that would raise the plan's attractivity. */
-function SuggestionsPanel() {
-  const haulingRows = useAtomValue(haulingRowsAtom);
-  const basket = useAtomValue(basketAtom);
-  const openPrefs = useSetAtom(preferencesOpenAtom);
-  const { status, suggestions, error, considered } = useSuggestions();
+/** One suggestion card — mode-aware: buy leads with discount, sell with net price. */
+function SuggestionCard({ s }: { s: RunSuggestion }) {
+  const setPlan = useSetAtom(planAtom);
+  const add = () => setPlan((prev) => (prev.some((p) => p.key === s.stop.key) ? prev : [...prev, s.stop]));
 
+  const jumpsText = s.jumps === null ? 'route unknown' : `${formatNumber(s.jumps, 0)} jump${s.jumps === 1 ? '' : 's'}`;
+
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.stop.itemName}>
+          {formatNumber(s.stop.quantity, 0)} × {s.stop.itemName}
+        </Typography>
+
+        {s.buy && (
+          <>
+            <Typography variant="caption" color="success.main" display="block" sx={{ fontWeight: 700 }}>
+              {s.buy.discountPct.toFixed(1)}% under market · {formatIsk(s.buy.askPrice)}/u
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" noWrap>
+              Buy at {s.buy.source.systemName ?? '?'} · {jumpsText}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Resale {s.buy.resaleMarginPct.toFixed(0)}% @ {s.buy.bestResaleStation.systemName ?? '?'} · demand{' '}
+              {formatNumber(s.buy.demandUnits, 0)} u
+            </Typography>
+          </>
+        )}
+
+        {s.sell && (
+          <>
+            <Typography variant="caption" color="success.main" display="block" sx={{ fontWeight: 700 }}>
+              {formatIskMillions(s.sell.netRevenue)} net · {formatIsk(s.sell.sellPrice)}/u
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" noWrap>
+              Sell at {s.sell.dest.systemName ?? '?'} · {jumpsText}
+            </Typography>
+            {s.iskPerJump !== null && (
+              <Typography variant="caption" color="text.secondary" display="block">
+                {formatIskMillions(s.iskPerJump)} / jump
+              </Typography>
+            )}
+          </>
+        )}
+      </Box>
+      <Button size="small" variant="outlined" onClick={add}>
+        Add
+      </Button>
+    </Box>
+  );
+}
+
+function SuggestionsPanel({ run }: { run: ReturnType<typeof useRun> }) {
+  const mode = run.mode;
   const TOP_N = 12;
-  const hasResults = haulingRows.length > 0;
-  const inBasket = new Set(basket.map((b) => b.key));
-  const ranked = suggestions.filter((s) => !inBasket.has(s.item.key));
-  const visible = ranked.slice(0, TOP_N);
+  const visible = run.suggestions.slice(0, TOP_N);
 
   return (
     <Stack spacing={1.5}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="subtitle2">Suggested additions</Typography>
-        {status === 'loading' && (
-          <CircularProgress size={16} thickness={5} aria-label="Updating suggestions" />
-        )}
+        <Typography variant="subtitle2">
+          {mode === 'buy' ? 'Cheap stock to buy' : 'Buyers for your cargo'}
+        </Typography>
+        {run.status === 'loading' && <CircularProgress size={16} thickness={5} aria-label="Updating suggestions" />}
       </Box>
       <Typography variant="caption" color="text.secondary">
-        Auto-updates as the list, your plan and preferences change. Ranked by the attractivity of the
-        plan with that contract added — scored like the Hauling cards, using your{' '}
-        <Box
-          component="span"
-          onClick={() => openPrefs(true)}
-          sx={{ color: 'primary.main', cursor: 'pointer', textDecoration: 'underline' }}
-        >
-          attractivity weights
-        </Box>
-        .
+        {mode === 'buy'
+          ? 'Ranked by how far under market value the sell orders are priced. Check demand and resale margin before committing.'
+          : 'The best-paying buyers for what your ship is carrying, ranked by net ISK per jump.'}
       </Typography>
 
-      {!hasResults && (
-        <Alert severity="info">
-          No hauling results yet — suggestions are drawn from the live list.
-        </Alert>
+      {run.status === 'error' && <Alert severity="error">{run.error}</Alert>}
+      {mode === 'sell' && run.considered === 0 && run.status === 'ready' && (
+        <Alert severity="info">Your hold is empty (or no buyers were found). Buy some cargo first.</Alert>
       )}
-      {status === 'error' && <Alert severity="error">{error}</Alert>}
-      {status === 'ready' && considered > 0 && ranked.length === 0 && (
-        <Alert severity="info">None of the contracts fit the current plan's cargo / ISK limits.</Alert>
+      {mode === 'buy' && run.considered === 0 && run.status === 'ready' && (
+        <Alert severity="info">No cheap-under-market stock fits your cargo/ISK right now.</Alert>
       )}
-      {ranked.length > TOP_N && (
+      {run.suggestions.length > TOP_N && (
         <Typography variant="caption" color="text.secondary">
-          Showing the top {TOP_N} of {ranked.length}.
+          Showing the top {TOP_N} of {run.suggestions.length}.
         </Typography>
       )}
 
       <Stack spacing={1}>
         {visible.map((s) => (
-          <Box
-            key={s.item.key}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              p: 1,
-              borderRadius: 1,
-              border: '1px solid',
-              borderColor: 'divider',
-            }}
-          >
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.item.label}>
-                  {s.item.kind === 'arbitrage' ? s.item.label : 'Courier contract'}
-                </Typography>
-                <Tooltip
-                  arrow
-                  slotProps={{ tooltip: { sx: { maxWidth: 360 } } }}
-                  title={
-                    <Box sx={{ py: 0.5 }}>
-                      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                        Why this rank (score {s.attractivity})
-                      </Typography>
-                      {s.attractivitySteps.map((step, k) => (
-                        <Typography key={k} variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
-                          {step}
-                        </Typography>
-                      ))}
-                    </Box>
-                  }
-                >
-                  <InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.secondary', cursor: 'help', flexShrink: 0 }} />
-                </Tooltip>
-              </Box>
-              <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                {s.item.pickup.endpoint.systemName ?? '?'} →{' '}
-                {s.item.dropoff.endpoint.systemName ?? '?'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" display="block">
-                +{formatIskMillions(s.deltaIncome)} · +{formatNumber(s.deltaJumps, 0)} jump
-                {s.deltaJumps === 1 ? '' : 's'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" display="block">
-                <Box component="span" sx={{ color: changeColor(s.deltaDanger, false) }}>
-                  {signedInt(s.deltaDanger)} danger
-                </Box>
-                {' · '}
-                <Box component="span" sx={{ color: changeColor(s.deltaIskPerJump ?? 0, true) }}>
-                  {signedIsk(s.deltaIskPerJump)} / jump
-                </Box>
-              </Typography>
-            </Box>
-            <AddToPlanButton item={s.item} />
-          </Box>
+          <SuggestionCard key={s.stop.key} s={s} />
         ))}
       </Stack>
     </Stack>
@@ -551,33 +444,45 @@ function SuggestionsPanel() {
 }
 
 export function CopilotPage() {
-  useCopilotPlanController();
-  const basket = useAtomValue(basketAtom);
-  const { status, plan, error } = usePlan();
+  const run = useRun();
+  const plan = useAtomValue(planAtom);
+  const mode = useAtomValue(runModeAtom);
 
   return (
     <Grid container spacing={2} alignItems="flex-start">
+      <Grid xs={12}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <RunModeToggle />
+          <Typography variant="caption" color="text.secondary">
+            {mode === 'buy'
+              ? 'Stock up: buy attractive cargo cheaply, then switch to a sell run to offload it.'
+              : 'Offload: sell what your ship is carrying to the best reachable buyers.'}
+          </Typography>
+        </Box>
+      </Grid>
+
       <Grid xs={12} sm={6} md={4} lg={3}>
         <Box sx={{ position: { md: 'sticky' }, top: { md: 80 } }}>
           <Stack spacing={2}>
             <PlanSettingsPanel />
             <Divider />
-            <BasketPanel />
+            <ShipInventoryPanel />
+            <Divider />
+            <RunPlanPanel />
           </Stack>
         </Box>
       </Grid>
 
-      <Grid xs={12} sm={6} md={8} lg={9}>
+      <Grid xs={12} sm={6} md={5} lg={6}>
         <Stack spacing={2}>
-          {basket.length === 0 && (
+          {plan.length === 0 && (
             <Alert severity="info">
-              Your plan is empty. On the <strong>Hauling</strong> page, use the “Add to Copilot plan”
-              button on a contract or arbitrage card to build a run, then come back here for an
-              optimized route.
+              Your {mode} run is empty. Pick {mode === 'buy' ? 'cheap stock' : 'a buyer'} from the
+              suggestions to build a route.
             </Alert>
           )}
 
-          {status === 'loading' && (
+          {run.planStatus === 'loading' && (
             <Box>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Planning the route…
@@ -586,26 +491,27 @@ export function CopilotPage() {
             </Box>
           )}
 
-          {status === 'error' && <Alert severity="error">Could not plan the route: {error}</Alert>}
+          {run.planStatus === 'error' && <Alert severity="error">Could not plan the route: {run.error}</Alert>}
 
-          {status === 'ready' && plan && plan.steps.length === 0 && (
+          {run.planStatus === 'ready' && run.plan && run.plan.steps.length === 0 && (
             <Alert severity="warning">
-              None of the basket items could be routed. Check that the locations are resolvable and
-              within your cargo/ISK limits.
+              None of the chosen stops could be routed. Check that the locations are reachable and within
+              your cargo/ISK limits.
             </Alert>
           )}
 
-          {status === 'ready' && plan && plan.steps.length > 0 && (
+          {run.planStatus === 'ready' && run.plan && run.plan.steps.length > 0 && (
             <>
-              <SummaryBanner plan={plan} />
+              <SummaryBanner plan={run.plan} />
               <Divider />
-              <Roadmap plan={plan} />
+              <Roadmap plan={run.plan} />
             </>
           )}
-
-          <Divider />
-          <SuggestionsPanel />
         </Stack>
+      </Grid>
+
+      <Grid xs={12} md={3} lg={3}>
+        <SuggestionsPanel run={run} />
       </Grid>
     </Grid>
   );

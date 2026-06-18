@@ -3,11 +3,11 @@ import { loadSde } from './sde.js';
 import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
 import { startMarketRefresh } from './market.js';
 import { startPricesRefresh } from './prices.js';
-import { getEnrichedArbitrage, resolveArbitragePlan } from './arbitrage.js';
+import { getEnrichedArbitrage, resolveArbitragePlan, resolveBuyCandidates, resolveSellOpportunities } from './arbitrage.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getShipKills } from './kills.js';
-import type { ArbitrageCommitment } from './types.js';
+import type { ArbitrageCommitment, SellHolding } from './types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -38,6 +38,21 @@ function parseCommitments(value: unknown): ArbitrageCommitment[] {
     if (![typeId, source, dest, quantity].every(Number.isFinite)) continue;
     if (quantity <= 0) continue;
     out.push({ id, typeId, source, dest, quantity });
+  }
+  return out;
+}
+
+/** Parse + validate the `holdings` body of /api/copilot/sell-candidates. */
+function parseHoldings(value: unknown): SellHolding[] {
+  if (!Array.isArray(value)) return [];
+  const out: SellHolding[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const typeId = Number(e.typeId);
+    const qty = Number(e.qty);
+    if (!Number.isFinite(typeId) || !Number.isFinite(qty) || qty <= 0) continue;
+    out.push({ typeId, qty });
   }
   return out;
 }
@@ -113,6 +128,30 @@ async function main() {
       res.json(resolveArbitragePlan(commitments));
     } catch (err) {
       console.error('POST /api/arbitrage/plan failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // Buy run: cheap stock priced under market value, with resale context. No body
+  // — it's the full cached menu; the client filters to cargo/wallet and routes.
+  app.post('/api/copilot/buy-candidates', (_req, res) => {
+    try {
+      res.json(resolveBuyCandidates());
+    } catch (err) {
+      console.error('POST /api/copilot/buy-candidates failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // Sell run: find the best-paying buyers for the ship's current cargo. Body is
+  // the holdings (typeId + qty); returns route-free sell candidates (dearest bids
+  // per held type, net of tax). The client routes them via /api/routes below.
+  app.post('/api/copilot/sell-candidates', (req, res) => {
+    try {
+      const holdings = parseHoldings(req.body?.holdings);
+      res.json(resolveSellOpportunities(holdings));
+    } catch (err) {
+      console.error('POST /api/copilot/sell-candidates failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });

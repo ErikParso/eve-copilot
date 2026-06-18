@@ -10,8 +10,6 @@ import type { ContractEndpoint } from '@/features/courierContracts/types';
 import type { ArbitrageRow } from '../types';
 import { ArbitrageRouteCell } from './ArbitrageRouteCell';
 import { OpenMarketButton } from './OpenMarketButton';
-import { AddToPlanButton } from '@/features/copilot/components/AddToPlanButton';
-import { arbitrageRowToBasketItem } from '@/features/copilot/types';
 
 // Paying more than this multiple of the item's reference market value at the
 // source is the real exposure: if the destination sale falls through (e.g. a
@@ -106,11 +104,6 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
     >
       <Box sx={{ position: 'absolute', top: -10, right: -10, zIndex: 1 }}>
         <AttractivityCell score={row.attractivity} steps={row.attractivitySteps} circle />
-      </Box>
-
-      {/* Add-to-Copilot toggle in the top-left corner */}
-      <Box sx={{ position: 'absolute', top: 4, left: 4, zIndex: 1 }}>
-        <AddToPlanButton item={arbitrageRowToBasketItem(row)} />
       </Box>
 
       <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, flex: 1, minWidth: 0 }}>

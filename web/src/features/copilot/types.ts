@@ -1,57 +1,145 @@
-// Copilot data model: a serializable basket of contracts/hauls the user wants to
-// run, plus the computed multi-stop Plan. Items are distilled from the Hauling
-// page's ResultCards into a neutral pickup→dropoff shape so courier contracts and
-// arbitrage hauls plan identically.
-import type { CourierRow, ContractEndpoint, RouteSystem } from '@/features/courierContracts/types';
-import type { ArbitrageRow } from '@/features/arbitrage/types';
-import type { ResultCard } from '@/features/courierContracts/combined';
+// Copilot data model: two mutually-exclusive runs (buy / sell) over one
+// persistent ship inventory. A run is a list of single-leg RunStops — buy a cheap
+// stack at a station, or sell a held stack into a station's bids — ordered into an
+// open-path tour. The inventory is the bridge between runs (see atoms.ts).
+import type { ContractEndpoint, RouteSystem } from '@/features/courierContracts/types';
 
 export type BasketKind = 'courier' | 'arbitrage';
 
-/** A place the route stops at: where you load/buy (pickup) or unload/sell. */
+/** Which run the Copilot is driving. Buy = acquire cargo; Sell = dispose cargo. */
+export type RunMode = 'buy' | 'sell';
+
+/** A place the route stops at: where you buy or sell. */
 export interface BasketStop {
   endpoint: ContractEndpoint;
   /** Solar-system id from the endpoint; null when the structure is unresolved. */
   systemId: number | null;
 }
 
-/** One item the user added to the plan, distilled from a ResultCard. */
-export interface BasketItem {
-  /** ResultCard.key — stable id used for dedupe/removal. */
-  key: string;
-  kind: BasketKind;
-  /** Human label (item name for arbitrage, generic for courier). */
-  label: string;
-  /** ISK upside: courier reward / arbitrage profit. */
-  income: number;
-  /** Cargo to move (m³): courier volume / arbitrage total volume. */
-  cargoM3: number;
-  /** ISK put up at pickup: courier collateral / arbitrage buy cost. */
-  capitalIsk: number;
-  /** Arbitrage: units to move — the reservation quantity sent to the plan endpoint. */
-  quantity?: number;
-  /** Arbitrage: the live book can't fully supply the reserved depth (set by resolvedBasketAtom). */
-  shortfall?: boolean;
-  /** Arbitrage: the opportunity has dried up entirely — exclude from the plan, flag in the basket. */
-  stale?: boolean;
-  /** Where you load (courier pickup) or buy (arbitrage source). */
-  pickup: BasketStop;
-  /** Where you unload (courier dropoff) or sell (arbitrage dest). */
-  dropoff: BasketStop;
-  /** Arbitrage: the item's type id, to open its in-game market window. */
-  marketTypeId?: number;
-  /** Courier: the contract id, to open its in-game contract window. */
-  contractId?: number;
+// --- Ship inventory ----------------------------------------------------------
+
+/**
+ * One stack of cargo the ship is carrying. The Copilot maintains this itself
+ * (ESI can't read an active ship's hold): a completed buy adds a lot, a completed
+ * sell shrinks one, and the user can hand-edit it when reality drifts. It is the
+ * bridge between modes — switching runs discards the plan but keeps the cargo.
+ */
+export interface Holding {
+  typeId: number;
+  itemName: string;
+  qty: number;
+  /** Per-unit packaged volume (m³). */
+  unitVolumeM3: number;
+  /** Per-unit weighted-average acquisition cost (ISK). */
+  unitCostBasis: number;
 }
 
-export type StepAction = 'pickup' | 'dropoff';
+/** Add a freshly-bought lot to the inventory, merging by type with a weighted-average cost basis. */
+export function addHolding(holdings: Holding[], lot: Holding): Holding[] {
+  if (lot.qty <= 0) return holdings;
+  const i = holdings.findIndex((h) => h.typeId === lot.typeId);
+  if (i === -1) return [...holdings, lot];
+  const existing = holdings[i];
+  const totalQty = existing.qty + lot.qty;
+  const merged: Holding = {
+    ...existing,
+    qty: totalQty,
+    unitVolumeM3: lot.unitVolumeM3 || existing.unitVolumeM3,
+    unitCostBasis:
+      totalQty > 0
+        ? (existing.qty * existing.unitCostBasis + lot.qty * lot.unitCostBasis) / totalQty
+        : existing.unitCostBasis,
+  };
+  const next = holdings.slice();
+  next[i] = merged;
+  return next;
+}
 
-/** One roadmap step: travel the leg to the stop, then do the action there. */
-export interface PlanStep {
-  action: StepAction;
-  itemKey: string;
-  kind: BasketKind;
-  /** Verb-led label, e.g. "Buy Tritanium" / "Drop off courier". */
+/** Shrink a held stack by `qty` (a completed sell); drops the stack when it hits zero. */
+export function removeHolding(holdings: Holding[], typeId: number, qty: number): Holding[] {
+  return holdings
+    .map((h) => (h.typeId === typeId ? { ...h, qty: h.qty - qty } : h))
+    .filter((h) => h.qty > 0);
+}
+
+/** Manually set a held stack's quantity (the drift escape-hatch); 0 removes it. */
+export function setHoldingQty(holdings: Holding[], typeId: number, qty: number): Holding[] {
+  return holdings
+    .map((h) => (h.typeId === typeId ? { ...h, qty } : h))
+    .filter((h) => h.qty > 0);
+}
+
+// --- Candidates from the server (FE mirrors of the route-free server shapes) --
+
+/** A cheap stack to buy: the buy-run suggestion (mirror of server BuyOpportunity). */
+export interface BuyCandidate {
+  id: string;
+  typeId: number;
+  itemName: string;
+  quantity: number;
+  unitVolume: number;
+  totalVolume: number;
+  askPrice: number;
+  buyCost: number;
+  marketPrice: number;
+  /** How far under market the ask sits (%). The primary buy-run signal. */
+  discountPct: number;
+  bestResaleNet: number;
+  resaleMarginPct: number;
+  bestResaleStation: ContractEndpoint;
+  demandUnits: number;
+  source: ContractEndpoint;
+}
+
+/** A buyer for a held stack: the sell-run suggestion (mirror of server SellOpportunity). */
+export interface SellCandidate {
+  id: string;
+  typeId: number;
+  itemName: string;
+  quantity: number;
+  requested: number;
+  unitVolume: number;
+  totalVolume: number;
+  sellPrice: number;
+  grossRevenue: number;
+  netRevenue: number;
+  marketPrice: number | null;
+  salesTax: number;
+  dest: ContractEndpoint;
+}
+
+// --- Run plan ----------------------------------------------------------------
+
+/**
+ * One chosen, single-leg item in the current run. A buy stop acquires `quantity`
+ * units (spending `capitalIsk`, gaining `cargoM3`); a sell stop disposes them
+ * (receiving `cashFlow` net ISK, freeing `cargoM3`). Persisted in the plan atom.
+ */
+export interface RunStop {
+  /** Candidate id — stable key for dedupe/removal. */
+  key: string;
+  mode: RunMode;
+  typeId: number;
+  itemName: string;
+  quantity: number;
+  cargoM3: number;
+  /** Wallet change when completed: buy → −buyCost, sell → +netRevenue. */
+  cashFlow: number;
+  /** ISK needed up front to afford this stop (buy cost; 0 for a sell). */
+  capitalIsk: number;
+  /** The single stop: the buy station (buy run) or the sell station (sell run). */
+  stop: BasketStop;
+  /** The item's type id, to open its in-game market window. */
+  marketTypeId: number;
+}
+
+/** One roadmap step: travel the leg to the stop, then buy/sell there. */
+export interface RunStep {
+  key: string;
+  mode: RunMode;
+  typeId: number;
+  quantity: number;
+  /** Verb-led label, e.g. "Buy 1 000 Tritanium". */
   label: string;
   stop: BasketStop;
   /** Route systems travelled to reach this stop (includes both endpoints). */
@@ -63,61 +151,51 @@ export interface PlanStep {
   cargoAfter: number;
 }
 
-export interface Plan {
-  steps: PlanStep[];
+export interface RunPlan {
+  mode: RunMode;
+  steps: RunStep[];
   totalJumps: number;
   /** Danger index 0–100 over the whole tour. */
   danger: number;
   dangerSteps: string[];
   /** Largest cargo (m³) held at any point. */
   peakCargo: number;
-  /** Largest ISK committed at any point (start ISK − lowest wallet). */
-  peakCapital: number;
-  totalIncome: number;
+  /** Buy run: total ISK spent acquiring stock. */
+  totalSpend: number;
+  /** Sell run: total net ISK received. */
+  totalRevenue: number;
   /** Items that couldn't be placed (unresolved / unreachable / too big / unaffordable). */
   infeasibleKeys: string[];
 }
 
-// Keys match the Hauling grid's ResultCard keys so a card and its basket entry
-// dedupe against each other.
-export function courierRowToBasketItem(r: CourierRow): BasketItem {
+/** Normalise a buy candidate into a run stop (acquisition: spend ISK, gain cargo). */
+export function buyCandidateToStop(c: BuyCandidate): RunStop {
   return {
-    key: `c:${r.id}`,
-    kind: 'courier',
-    label: 'Courier contract',
-    income: r.reward,
-    cargoM3: r.volume,
-    capitalIsk: r.collateral,
-    pickup: { endpoint: r.pickup, systemId: r.pickup.systemId },
-    dropoff: { endpoint: r.dropoff, systemId: r.dropoff.systemId },
-    contractId: r.id,
+    key: c.id,
+    mode: 'buy',
+    typeId: c.typeId,
+    itemName: c.itemName,
+    quantity: c.quantity,
+    cargoM3: c.totalVolume,
+    cashFlow: -c.buyCost,
+    capitalIsk: c.buyCost,
+    stop: { endpoint: c.source, systemId: c.source.systemId },
+    marketTypeId: c.typeId,
   };
 }
 
-/** The arbitrage fields a basket item needs — satisfied by both a scored row and a route-free opp. */
-type ArbitrageBasketSource = Pick<
-  ArbitrageRow,
-  'id' | 'typeId' | 'itemName' | 'profit' | 'totalVolume' | 'buyCost' | 'quantity' | 'source' | 'dest'
->;
-
-export function arbitrageRowToBasketItem(r: ArbitrageBasketSource): BasketItem {
+/** Normalise a sell candidate into a run stop (disposal: receive ISK, free cargo). */
+export function sellCandidateToStop(c: SellCandidate): RunStop {
   return {
-    key: `a:${r.id}`,
-    kind: 'arbitrage',
-    label: r.itemName,
-    income: r.profit,
-    cargoM3: r.totalVolume,
-    capitalIsk: r.buyCost,
-    quantity: r.quantity,
-    pickup: { endpoint: r.source, systemId: r.source.systemId },
-    dropoff: { endpoint: r.dest, systemId: r.dest.systemId },
-    marketTypeId: r.typeId,
+    key: c.id,
+    mode: 'sell',
+    typeId: c.typeId,
+    itemName: c.itemName,
+    quantity: c.quantity,
+    cargoM3: c.totalVolume,
+    cashFlow: c.netRevenue,
+    capitalIsk: 0,
+    stop: { endpoint: c.dest, systemId: c.dest.systemId },
+    marketTypeId: c.typeId,
   };
-}
-
-/** Map a Hauling result card to a basket item for the Copilot plan. */
-export function cardToBasketItem(card: ResultCard): BasketItem {
-  return card.kind === 'courier'
-    ? courierRowToBasketItem(card.row)
-    : arbitrageRowToBasketItem(card.row);
 }
