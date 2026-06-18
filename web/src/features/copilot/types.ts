@@ -81,9 +81,9 @@ export interface BuyCandidate {
   totalVolume: number;
   askPrice: number;
   buyCost: number;
-  marketPrice: number;
-  /** How far under market the ask sits (%). The primary buy-run signal. */
-  discountPct: number;
+  marketPrice: number | null;
+  /** How far under market the ask sits (%); null when there's no reference price. */
+  discountPct: number | null;
   bestResaleNet: number;
   resaleMarginPct: number;
   bestResaleStation: ContractEndpoint;

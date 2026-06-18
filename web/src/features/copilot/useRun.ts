@@ -25,10 +25,21 @@ type Status = 'idle' | 'loading' | 'ready' | 'error';
 /** A ranked addition the user can drop into the plan, with the data its card shows. */
 export interface RunSuggestion {
   stop: RunStop;
-  /** Jumps from the current location to the stop (null = unknown/unreachable). */
-  jumps: number | null;
-  /** Net ISK per jump (sell run ranking); buy run ranks by discount instead. */
+  /**
+   * ISK this move is worth: a buy's resale upside (best bid − ask) × qty, or a
+   * sell's profit (net revenue − cost basis × qty). The basis of the ranking.
+   */
+  profit: number;
+  /** Total jumps of the whole run if this item is added (the ISK/jump denominator); null if it can't be placed. */
+  runJumps: number | null;
+  /** Extra jumps this item adds to the current run. */
+  deltaJumps: number;
+  /** `profit` ÷ runJumps (profit itself at 0 jumps); null when it can't be placed. The primary rank. */
   iskPerJump: number | null;
+  /** How much the run's danger index rises if this item is added (can be negative). */
+  dangerDelta: number;
+  /** Sell run: weighted-avg cost basis per unit of the held stack (0 for buys / unknown). */
+  unitCostBasis: number;
   buy: BuyCandidate | null;
   sell: SellCandidate | null;
 }
@@ -237,23 +248,59 @@ export function useRun(): RunState {
     });
   }, [plan, routeStatus, mode, origin, capacity, startIsk, heldVolume, getLeg]);
 
+  // Cost basis per held type, so a sell's ISK/jump is true profit, not revenue.
+  const costBasisByType = useMemo(
+    () => new Map(inventory.map((h) => [h.typeId, h.unitCostBasis])),
+    [inventory],
+  );
+
   const suggestions = useMemo<RunSuggestion[]>(() => {
-    if (candidateStops.length === 0) return [];
+    if (candidateStops.length === 0 || routeStatus !== 'ready') return [];
+    const baseJumps = builtPlan?.totalJumps ?? 0;
+    const baseDanger = builtPlan?.danger ?? 0;
+
     const out = candidateStops.map(({ stop, buy, sell }) => {
-      const sys = stop.stop.systemId;
-      const leg = origin !== null && sys !== null ? getLeg(origin, sys) : null;
-      const jumps = leg ? Math.max(0, leg.length - 1) : null;
-      const net = sell ? sell.netRevenue : 0;
-      const iskPerJump = jumps !== null ? net / Math.max(1, jumps) : null;
-      return { stop, jumps, iskPerJump, buy, sell };
+      const unitCostBasis = sell ? costBasisByType.get(stop.typeId) ?? 0 : 0;
+      // Buy: resale upside (best bid − ask). Sell: profit over cost basis.
+      const profit = buy
+        ? (buy.bestResaleNet - buy.askPrice) * stop.quantity
+        : sell
+          ? sell.netRevenue - unitCostBasis * stop.quantity
+          : 0;
+
+      // Re-plan the whole run WITH this item: the denominator is the resulting
+      // total jumps, and the danger delta is how much it raises the tour's risk.
+      const planWith = buildRunPlan([...plan, stop], {
+        mode,
+        origin,
+        capacity,
+        startIsk,
+        startCargo: heldVolume,
+        getLeg,
+      });
+      const placed = !planWith.infeasibleKeys.includes(stop.key);
+      const runJumps = placed ? planWith.totalJumps : null;
+      const iskPerJump = runJumps !== null ? profit / Math.max(1, runJumps) : null;
+      return {
+        stop,
+        profit,
+        runJumps,
+        deltaJumps: planWith.totalJumps - baseJumps,
+        iskPerJump,
+        dangerDelta: planWith.danger - baseDanger,
+        unitCostBasis,
+        buy,
+        sell,
+      };
     });
-    out.sort((a, b) =>
-      mode === 'buy'
-        ? (b.buy?.discountPct ?? 0) - (a.buy?.discountPct ?? 0)
-        : (b.iskPerJump ?? -Infinity) - (a.iskPerJump ?? -Infinity),
-    );
+    // Primary: ISK per jump over the whole run (unplaceable last); tie-break on profit.
+    out.sort((a, b) => {
+      const ak = a.iskPerJump ?? Number.NEGATIVE_INFINITY;
+      const bk = b.iskPerJump ?? Number.NEGATIVE_INFINITY;
+      return bk !== ak ? bk - ak : b.profit - a.profit;
+    });
     return out;
-  }, [candidateStops, mode, origin, getLeg]);
+  }, [candidateStops, routeStatus, builtPlan, plan, mode, origin, capacity, startIsk, heldVolume, getLeg, costBasisByType]);
 
   const planStatus: Status =
     plan.length === 0 ? 'idle' : routeStatus === 'error' ? 'error' : builtPlan ? 'ready' : 'loading';

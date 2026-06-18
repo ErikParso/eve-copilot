@@ -11,15 +11,17 @@ import { addHolding, removeHolding, type Holding, type RunMode, type RunStop } f
 /** Which run is active. Buy and sell runs are mutually exclusive; both share `inventoryAtom`. */
 export const runModeAtom = atomWithStorage<RunMode>('eve-multitool.copilot.runMode.v1', 'buy');
 
+// .v2: the .v1 key held an object under an earlier (discarded) data model, which
+// crashed the array consumers — bumping the key drops that stale value.
 /** The current run's chosen stops (buy or sell), deduped by `key`. Cleared on mode switch. */
-export const planAtom = atomWithStorage<RunStop[]>('eve-multitool.copilot.plan.v1', []);
+export const planAtom = atomWithStorage<RunStop[]>('eve-multitool.copilot.plan.v2', []);
 
 /**
  * The ship's current cargo, maintained by the Copilot (ESI can't read it). Starts
  * empty, persists across reloads and mode switches, and is mutated by completing
  * buy/sell steps or by hand-editing the inventory panel.
  */
-export const inventoryAtom = atomWithStorage<Holding[]>('eve-multitool.copilot.inventory.v1', []);
+export const inventoryAtom = atomWithStorage<Holding[]>('eve-multitool.copilot.inventory.v2', []);
 
 /** Total cargo volume currently held (m³). */
 export const inventoryVolumeAtom = atom<number>((get) =>

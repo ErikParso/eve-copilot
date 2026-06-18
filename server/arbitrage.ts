@@ -397,76 +397,52 @@ export function resolveSellOpportunities(holdings: SellHolding[]): SellPlan {
   return { candidates, meta };
 }
 
-// --- Buy run: cheap stock priced under market value ---------------------------
+// --- Buy run: the arbitrage menu, framed as "buy here, resell there" ----------
 //
-// The buy run stocks the hold with cargo the trader can resell. Candidates are
-// individual cheap ASK stations whose price sits below CCP's reference value
-// (the primary signal: how far under market it's listed), enriched with the
-// context to judge resale — current demand (total bid volume) and the best-paying
-// bid + where it sits. Route-free; the client routes/ranks. Cached per snapshot.
+// Buy candidates are the SAME profitable buy-here/sell-there opportunities the
+// Hauling page shows (so the quality matches), reframed for the buy run: you
+// commit only the buy leg into inventory now, and the opportunity's destination
+// is the resale context (best-paying bid + margin) — the actual sale happens in a
+// later sell run. Deduped to the best resale per (item, buy-station). Cached per
+// snapshot via getOpportunities. Route-free; the client routes/ranks.
 
-// Global ceiling on the cached buy menu (best discount first).
+// Global ceiling on the cached buy menu (best resale upside first).
 const MAX_BUY_CANDIDATES = 1500;
 
-/** Walk asks (cheapest first) priced strictly under `ceiling`; returns units + total cost. */
-function walkAsksUnder(asks: Order[], ceiling: number): { quantity: number; cost: number } {
-  let quantity = 0;
-  let cost = 0;
-  for (const o of asks) {
-    if (o.price >= ceiling) break; // asks ascending — nothing cheaper remains
-    if (o.volume <= 0) continue;
-    quantity += o.volume;
-    cost += o.volume * o.price;
+/** Map the cached arbitrage opportunities into buy candidates (best per item+source). */
+function resolveBuyOpportunities(): BuyOpportunity[] {
+  const bestBySource = new Map<string, ArbitrageOpportunity>();
+  for (const o of getOpportunities()) {
+    const key = `${o.typeId}:${o.source.locationId}`;
+    const cur = bestBySource.get(key);
+    if (!cur || o.profit > cur.profit) bestBySource.set(key, o);
   }
-  return { quantity, cost };
-}
 
-/** Resolve the cheap-under-market buy candidates across the whole snapshot. */
-function resolveBuyOpportunities(byType: Map<number, TypeBook>): BuyOpportunity[] {
-  const tax = DEFAULT_SALES_TAX;
   const out: BuyOpportunity[] = [];
-
-  for (const [typeId, book] of byType) {
-    const marketPrice = getMarketPrice(typeId);
-    if (marketPrice === null || marketPrice <= 0) continue;
-    const cheapest = book.sells[0];
-    if (!cheapest || cheapest.best >= marketPrice) continue; // nothing under market
-    const bestBid = book.buys[0];
-    if (!bestBid) continue; // no buyers anywhere → not worth stocking
-    const type = getType(typeId);
-    if (!type) continue;
-
-    const { quantity, cost } = walkAsksUnder(cheapest.orders, marketPrice);
-    if (quantity <= 0) continue;
-    const askPrice = cost / quantity;
-    const bestResaleNet = bestBid.best * (1 - tax);
-
-    // Demand proxy: units bid for across the (capped) best-paying stations.
-    let demandUnits = 0;
-    for (const b of book.buys.slice(0, MAX_DESTS_PER_TYPE)) {
-      for (const o of b.orders) demandUnits += o.volume;
-    }
-
+  for (const [key, o] of bestBySource) {
+    const bestResaleNet = o.sellPrice * (1 - o.salesTax);
     out.push({
-      id: `${typeId}:${cheapest.station}`,
-      typeId,
-      itemName: type.name,
-      quantity,
-      unitVolume: type.volume,
-      totalVolume: quantity * type.volume,
-      askPrice,
-      buyCost: cost,
-      marketPrice,
-      discountPct: ((marketPrice - askPrice) / marketPrice) * 100,
+      id: key,
+      typeId: o.typeId,
+      itemName: o.itemName,
+      quantity: o.quantity,
+      unitVolume: o.unitVolume,
+      totalVolume: o.totalVolume,
+      askPrice: o.buyPrice,
+      buyCost: o.buyCost,
+      marketPrice: o.marketPrice,
+      discountPct:
+        o.marketPrice && o.marketPrice > 0 ? ((o.marketPrice - o.buyPrice) / o.marketPrice) * 100 : null,
       bestResaleNet,
-      resaleMarginPct: askPrice > 0 ? ((bestResaleNet - askPrice) / askPrice) * 100 : 0,
-      bestResaleStation: resolveEndpoint(bestBid.station, bestBid.system),
-      demandUnits,
-      source: resolveEndpoint(cheapest.station, cheapest.system),
+      resaleMarginPct: o.marginPct,
+      bestResaleStation: o.dest,
+      demandUnits: o.quantity,
+      source: o.source,
     });
   }
 
-  out.sort((a, b) => b.discountPct - a.discountPct);
+  // Best resale upside first; the client re-ranks by ISK-per-jump.
+  out.sort((a, b) => (b.bestResaleNet - b.askPrice) * b.quantity - (a.bestResaleNet - a.askPrice) * a.quantity);
   return out.length > MAX_BUY_CANDIDATES ? out.slice(0, MAX_BUY_CANDIDATES) : out;
 }
 
@@ -478,13 +454,13 @@ export interface BuyPlan {
   meta: MarketMeta;
 }
 
-/** Cached buy candidates (cheap-under-market stock), rebuilt only when the snapshot changes. */
+/** Cached buy candidates (the arbitrage menu framed as buy-leg + resale), rebuilt per snapshot. */
 export function resolveBuyCandidates(): BuyPlan {
   const meta = getMarketMeta();
   const snap = getSnapshot();
   if (!snap) return { candidates: [], meta };
   if (snap.builtAt !== buyCandidatesSnapshotAt) {
-    buyCandidates = resolveBuyOpportunities(snap.byType);
+    buyCandidates = resolveBuyOpportunities();
     buyCandidatesSnapshotAt = snap.builtAt;
   }
   return { candidates: buyCandidates, meta };
