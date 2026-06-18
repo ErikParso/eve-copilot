@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Divider,
@@ -21,7 +23,10 @@ import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { openMarketWindow, setWaypoint } from '@/api/ui';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
-import type { RouteSystem } from '@/features/courierContracts/types';
+import { LocationCell } from '@/features/courierContracts/components/LocationCell';
+import { OpenMarketButton } from '@/features/arbitrage/components/OpenMarketButton';
+import type { ContractEndpoint, RouteSystem } from '@/features/courierContracts/types';
+import arbitrageBg from '@/assets/card-arbitrage.jpg';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import { completeStopAtom, planAtom, runModeAtom } from './atoms';
 import { useRun, type RunSuggestion } from './useRun';
@@ -165,7 +170,7 @@ function SummaryBanner({ plan }: { plan: RunPlan }) {
         <Metric label="Peak cargo" value={formatVolume(plan.peakCargo)} />
         <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
           <Typography variant="caption" color="text.secondary">
-            Danger
+            Danger index
           </Typography>
           <DangerText score={plan.danger} steps={plan.dangerSteps} />
         </Box>
@@ -350,55 +355,160 @@ function Roadmap({ plan }: { plan: RunPlan }) {
   );
 }
 
-/** One suggestion card — mode-aware: buy leads with discount, sell with net price. */
+/** Label/value row, mirroring the Hauling arbitrage card's stat list. */
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'center' }}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="caption" sx={{ fontWeight: 600, textAlign: 'right', color }}>
+        {value}
+      </Typography>
+    </Box>
+  );
+}
+
+/** A pickup/dropoff endpoint row with an optional trailing control. */
+function Endpoint({ label, endpoint, action }: { label: string; endpoint: ContractEndpoint; action?: ReactNode }) {
+  return (
+    <Box sx={{ display: 'flex', gap: 1 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ width: 40, flexShrink: 0, mt: 0.25 }}>
+        {label}
+      </Typography>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <LocationCell endpoint={endpoint} />
+      </Box>
+      {action}
+    </Box>
+  );
+}
+
+/** A full suggestion card — Hauling-style, with the complete price/margin breakdown. */
 function SuggestionCard({ s }: { s: RunSuggestion }) {
   const setPlan = useSetAtom(planAtom);
   const add = () => setPlan((prev) => (prev.some((p) => p.key === s.stop.key) ? prev : [...prev, s.stop]));
 
-  const jumpsText = s.jumps === null ? 'route unknown' : `${formatNumber(s.jumps, 0)} jump${s.jumps === 1 ? '' : 's'}`;
+  const dangerColor = s.dangerDelta > 0 ? 'warning.main' : s.dangerDelta < 0 ? 'success.main' : 'text.secondary';
+  const dangerText = `${s.dangerDelta >= 0 ? '+' : '−'}${formatNumber(Math.abs(s.dangerDelta), 0)}`;
+  const addsJumps = `+${formatNumber(s.deltaJumps, 0)}`;
+  const sellMarginPct =
+    s.sell && s.unitCostBasis > 0 ? (s.profit / (s.unitCostBasis * s.stop.quantity)) * 100 : null;
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700 }} noWrap title={s.stop.itemName}>
-          {formatNumber(s.stop.quantity, 0)} × {s.stop.itemName}
-        </Typography>
+    <Card
+      variant="outlined"
+      sx={{
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundImage: `url(${arbitrageBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'left top',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
+      <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, '&:last-child': { pb: 1.5 } }}>
+        {/* Headline: the value this move makes + the primary ISK/jump rank. */}
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="caption" color="text.secondary">
+            {s.buy ? 'Resale upside' : 'Profit'}
+          </Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: 'primary.main' }}>
+            {formatIskMillions(s.profit)}
+          </Typography>
+          <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+            {s.iskPerJump === null ? 'unplaceable' : `${formatIskMillions(s.iskPerJump)} / jump`}
+          </Typography>
+        </Box>
+
+        <Divider />
+
+        {/* Item + quantity + volume */}
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap title={s.stop.itemName}>
+            {s.stop.itemName}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {formatNumber(s.stop.quantity, 0)} unit{s.stop.quantity === 1 ? '' : 's'} · {formatVolume(s.stop.cargoM3)}
+          </Typography>
+        </Box>
 
         {s.buy && (
           <>
-            <Typography variant="caption" color="success.main" display="block" sx={{ fontWeight: 700 }}>
-              {s.buy.discountPct.toFixed(1)}% under market · {formatIsk(s.buy.askPrice)}/u
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block" noWrap>
-              Buy at {s.buy.source.systemName ?? '?'} · {jumpsText}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Resale {s.buy.resaleMarginPct.toFixed(0)}% @ {s.buy.bestResaleStation.systemName ?? '?'} · demand{' '}
-              {formatNumber(s.buy.demandUnits, 0)} u
-            </Typography>
+            <Endpoint label="Buy" endpoint={s.buy.source} action={<OpenMarketButton typeId={s.stop.typeId} />} />
+            <Endpoint label="Resale" endpoint={s.buy.bestResaleStation} />
           </>
         )}
+        {s.sell && <Endpoint label="Sell" endpoint={s.sell.dest} action={<OpenMarketButton typeId={s.stop.typeId} />} />}
 
-        {s.sell && (
-          <>
-            <Typography variant="caption" color="success.main" display="block" sx={{ fontWeight: 700 }}>
-              {formatIskMillions(s.sell.netRevenue)} net · {formatIsk(s.sell.sellPrice)}/u
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block" noWrap>
-              Sell at {s.sell.dest.systemName ?? '?'} · {jumpsText}
-            </Typography>
-            {s.iskPerJump !== null && (
-              <Typography variant="caption" color="text.secondary" display="block">
-                {formatIskMillions(s.iskPerJump)} / jump
-              </Typography>
-            )}
-          </>
-        )}
-      </Box>
-      <Button size="small" variant="outlined" onClick={add}>
-        Add
-      </Button>
-    </Box>
+        {/* Run impact: jumps the whole run would take + danger increase. */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'center' }}>
+          <Typography variant="caption" color="text.secondary">
+            {s.runJumps === null ? 'no route' : `${formatNumber(s.runJumps, 0)} jumps run (${addsJumps})`}
+          </Typography>
+          <Typography variant="caption" sx={{ color: dangerColor, fontWeight: 600 }}>
+            {dangerText} danger
+          </Typography>
+        </Box>
+
+        <Divider />
+
+        {/* Full price / margin breakdown. */}
+        <Stack spacing={0.5}>
+          {s.buy && (
+            <>
+              <Stat label="Total price" value={formatIskMillions(s.buy.buyCost)} />
+              <Stat label="Buy / unit" value={`${formatIsk(s.buy.askPrice)} / unit`} />
+              <Stat
+                label="Market value"
+                value={s.buy.marketPrice === null ? '—' : `${formatIsk(s.buy.marketPrice)} / unit`}
+              />
+              <Stat
+                label="Under market"
+                value={s.buy.discountPct === null ? '—' : `${s.buy.discountPct.toFixed(1)}%`}
+                color={s.buy.discountPct !== null && s.buy.discountPct > 0 ? 'success.main' : undefined}
+              />
+              <Stat label="Best bid / unit" value={`${formatIsk(s.buy.bestResaleNet)} / unit`} />
+              <Stat label="Resale margin" value={`${s.buy.resaleMarginPct.toFixed(1)}%`} color="success.main" />
+              <Stat label="Demand (bids)" value={`${formatNumber(s.buy.demandUnits, 0)} u`} />
+            </>
+          )}
+          {s.sell && (
+            <>
+              <Stat label="Net revenue" value={formatIskMillions(s.sell.netRevenue)} />
+              <Stat label="Gross revenue" value={formatIskMillions(s.sell.grossRevenue)} />
+              <Stat label="Sell / unit" value={`${formatIsk(s.sell.sellPrice)} / unit`} />
+              <Stat
+                label="Market value"
+                value={s.sell.marketPrice === null ? '—' : `${formatIsk(s.sell.marketPrice)} / unit`}
+              />
+              <Stat
+                label="Cost basis / unit"
+                value={s.unitCostBasis > 0 ? `${formatIsk(s.unitCostBasis)} / unit` : '—'}
+              />
+              <Stat
+                label="Profit"
+                value={formatIskMillions(s.profit)}
+                color={s.profit >= 0 ? 'success.main' : 'warning.main'}
+              />
+              {sellMarginPct !== null && (
+                <Stat
+                  label="Margin"
+                  value={`${sellMarginPct.toFixed(1)}%`}
+                  color={sellMarginPct >= 0 ? 'success.main' : 'warning.main'}
+                />
+              )}
+              <Stat label="Sales tax" value={`${(s.sell.salesTax * 100).toFixed(1)}%`} />
+            </>
+          )}
+        </Stack>
+
+        <Button size="small" variant="contained" onClick={add} sx={{ mt: 0.5 }}>
+          Add to run
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -417,8 +527,8 @@ function SuggestionsPanel({ run }: { run: ReturnType<typeof useRun> }) {
       </Box>
       <Typography variant="caption" color="text.secondary">
         {mode === 'buy'
-          ? 'Ranked by how far under market value the sell orders are priced. Check demand and resale margin before committing.'
-          : 'The best-paying buyers for what your ship is carrying, ranked by net ISK per jump.'}
+          ? "Ranked by ISK per jump — resale upside ÷ the whole run's jumps if added. Each card shows the jumps & danger it adds, plus discount, demand and resale margin."
+          : "Ranked by ISK per jump — profit over your cost basis ÷ the whole run's jumps if added. Each card shows the jumps & danger it adds."}
       </Typography>
 
       {run.status === 'error' && <Alert severity="error">{run.error}</Alert>}

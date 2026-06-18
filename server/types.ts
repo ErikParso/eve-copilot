@@ -223,10 +223,10 @@ export interface BuyOpportunity {
   askPrice: number;
   /** quantity × askPrice (the capital this candidate ties up). */
   buyCost: number;
-  /** CCP's reference value per unit (ISK). Always present here — it's the basis of the score. */
-  marketPrice: number;
-  /** How far under market the ask sits: (marketPrice − askPrice) / marketPrice × 100. The primary score. */
-  discountPct: number;
+  /** CCP's reference value per unit (ISK), or null when unknown. */
+  marketPrice: number | null;
+  /** How far under market the ask sits: (marketPrice − askPrice) / marketPrice × 100; null when no reference. */
+  discountPct: number | null;
   /** Best (dearest) bid for this item anywhere, net of sales tax — the likely resale price. */
   bestResaleNet: number;
   /** Margin if resold into the best bid: (bestResaleNet − askPrice) / askPrice × 100. */
