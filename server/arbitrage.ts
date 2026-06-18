@@ -24,7 +24,10 @@ import type {
   ArbitrageItem,
   ArbitrageOpportunity,
   ArbitrageRung,
+  BuyOpportunity,
   CommittedEconomics,
+  SellHolding,
+  SellOpportunity,
 } from './types.js';
 
 // Sales tax assumed when scoring profit (mid Accounting skill). Baked in, not a
@@ -319,6 +322,172 @@ export function resolveArbitragePlan(commitments: ArbitrageCommitment[]): Arbitr
     committed,
     meta,
   };
+}
+
+// --- Sell run: find buyers for what the ship is carrying ----------------------
+//
+// The mirror of the buy/arbitrage discovery above, but disposal-only: given the
+// ship's holdings, emit one candidate per buy-order station that wants the item,
+// priced at what its bids yield (net of sales tax) for up to the held quantity.
+// No buy leg, no cost basis — the client knows what it paid and computes profit.
+// Route-free; the client routes via /api/routes and ranks by ISK-per-jump.
+
+// Cap buy-order stations considered per held type. Buys are pre-sorted
+// dearest-first, so the first N stations are the best-paying.
+const MAX_SELL_STATIONS_PER_TYPE = 12;
+
+/** Walk bids (dearest first) absorbing up to `maxUnits`; returns units sold + gross revenue. */
+function walkBids(bids: Order[], maxUnits: number): { quantity: number; grossRevenue: number } {
+  let quantity = 0;
+  let grossRevenue = 0;
+  for (const o of bids) {
+    if (quantity >= maxUnits) break;
+    const batch = Math.min(o.volume, maxUnits - quantity);
+    if (batch <= 0) continue;
+    quantity += batch;
+    grossRevenue += batch * o.price;
+  }
+  return { quantity, grossRevenue };
+}
+
+export interface SellPlan {
+  candidates: SellOpportunity[];
+  meta: MarketMeta;
+}
+
+/** For each held stack, the best-paying buy-order stations (dearest bids, net of tax). */
+export function resolveSellOpportunities(holdings: SellHolding[]): SellPlan {
+  const meta = getMarketMeta();
+  const snap = getSnapshot();
+  if (!snap) return { candidates: [], meta };
+  const tax = DEFAULT_SALES_TAX;
+  const candidates: SellOpportunity[] = [];
+
+  for (const h of holdings) {
+    if (h.qty <= 0) continue;
+    const book = snap.byType.get(h.typeId);
+    if (!book || book.buys.length === 0) continue;
+    const type = getType(h.typeId);
+    if (!type) continue;
+    const marketPrice = getMarketPrice(h.typeId);
+
+    for (const station of book.buys.slice(0, MAX_SELL_STATIONS_PER_TYPE)) {
+      const { quantity, grossRevenue } = walkBids(station.orders, h.qty);
+      if (quantity <= 0) continue;
+      candidates.push({
+        id: `${h.typeId}:${station.station}`,
+        typeId: h.typeId,
+        itemName: type.name,
+        quantity,
+        requested: h.qty,
+        unitVolume: type.volume,
+        totalVolume: quantity * type.volume,
+        sellPrice: grossRevenue / quantity,
+        grossRevenue,
+        netRevenue: grossRevenue * (1 - tax),
+        marketPrice,
+        salesTax: tax,
+        dest: resolveEndpoint(station.station, station.system),
+      });
+    }
+  }
+
+  // Best net revenue first; the client re-ranks by ISK-per-jump once routed.
+  candidates.sort((a, b) => b.netRevenue - a.netRevenue);
+  return { candidates, meta };
+}
+
+// --- Buy run: cheap stock priced under market value ---------------------------
+//
+// The buy run stocks the hold with cargo the trader can resell. Candidates are
+// individual cheap ASK stations whose price sits below CCP's reference value
+// (the primary signal: how far under market it's listed), enriched with the
+// context to judge resale — current demand (total bid volume) and the best-paying
+// bid + where it sits. Route-free; the client routes/ranks. Cached per snapshot.
+
+// Global ceiling on the cached buy menu (best discount first).
+const MAX_BUY_CANDIDATES = 1500;
+
+/** Walk asks (cheapest first) priced strictly under `ceiling`; returns units + total cost. */
+function walkAsksUnder(asks: Order[], ceiling: number): { quantity: number; cost: number } {
+  let quantity = 0;
+  let cost = 0;
+  for (const o of asks) {
+    if (o.price >= ceiling) break; // asks ascending — nothing cheaper remains
+    if (o.volume <= 0) continue;
+    quantity += o.volume;
+    cost += o.volume * o.price;
+  }
+  return { quantity, cost };
+}
+
+/** Resolve the cheap-under-market buy candidates across the whole snapshot. */
+function resolveBuyOpportunities(byType: Map<number, TypeBook>): BuyOpportunity[] {
+  const tax = DEFAULT_SALES_TAX;
+  const out: BuyOpportunity[] = [];
+
+  for (const [typeId, book] of byType) {
+    const marketPrice = getMarketPrice(typeId);
+    if (marketPrice === null || marketPrice <= 0) continue;
+    const cheapest = book.sells[0];
+    if (!cheapest || cheapest.best >= marketPrice) continue; // nothing under market
+    const bestBid = book.buys[0];
+    if (!bestBid) continue; // no buyers anywhere → not worth stocking
+    const type = getType(typeId);
+    if (!type) continue;
+
+    const { quantity, cost } = walkAsksUnder(cheapest.orders, marketPrice);
+    if (quantity <= 0) continue;
+    const askPrice = cost / quantity;
+    const bestResaleNet = bestBid.best * (1 - tax);
+
+    // Demand proxy: units bid for across the (capped) best-paying stations.
+    let demandUnits = 0;
+    for (const b of book.buys.slice(0, MAX_DESTS_PER_TYPE)) {
+      for (const o of b.orders) demandUnits += o.volume;
+    }
+
+    out.push({
+      id: `${typeId}:${cheapest.station}`,
+      typeId,
+      itemName: type.name,
+      quantity,
+      unitVolume: type.volume,
+      totalVolume: quantity * type.volume,
+      askPrice,
+      buyCost: cost,
+      marketPrice,
+      discountPct: ((marketPrice - askPrice) / marketPrice) * 100,
+      bestResaleNet,
+      resaleMarginPct: askPrice > 0 ? ((bestResaleNet - askPrice) / askPrice) * 100 : 0,
+      bestResaleStation: resolveEndpoint(bestBid.station, bestBid.system),
+      demandUnits,
+      source: resolveEndpoint(cheapest.station, cheapest.system),
+    });
+  }
+
+  out.sort((a, b) => b.discountPct - a.discountPct);
+  return out.length > MAX_BUY_CANDIDATES ? out.slice(0, MAX_BUY_CANDIDATES) : out;
+}
+
+let buyCandidatesSnapshotAt = -1;
+let buyCandidates: BuyOpportunity[] = [];
+
+export interface BuyPlan {
+  candidates: BuyOpportunity[];
+  meta: MarketMeta;
+}
+
+/** Cached buy candidates (cheap-under-market stock), rebuilt only when the snapshot changes. */
+export function resolveBuyCandidates(): BuyPlan {
+  const meta = getMarketMeta();
+  const snap = getSnapshot();
+  if (!snap) return { candidates: [], meta };
+  if (snap.builtAt !== buyCandidatesSnapshotAt) {
+    buyCandidates = resolveBuyOpportunities(snap.byType);
+    buyCandidatesSnapshotAt = snap.builtAt;
+  }
+  return { candidates: buyCandidates, meta };
 }
 
 // --- Step 3: resolve routes into items (every request) ------------------------

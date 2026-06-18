@@ -1,113 +1,68 @@
-// Copilot state (jotai). The basket is persisted to localStorage so a plan
-// survives reloads. Cargo/route/contract-type come from the global preferences;
-// the plan's start ISK comes from the live wallet (frozen once a run begins).
+// Copilot state (jotai). The plan (the current run's chosen stops) and the ship
+// inventory are persisted to localStorage so a run survives reloads. Cargo/route
+// come from the global preferences; the plan's start ISK comes from the live
+// wallet (frozen once a run begins). Buy and sell runs are mutually exclusive and
+// share the inventory — switching modes clears the plan but keeps the cargo.
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import { characterWalletAtom } from '@/features/auth/atoms';
-import type { ArbitrageOpportunity, CommittedEconomics } from '@/features/arbitrage/types';
-import type { BasketItem } from './types';
+import { addHolding, removeHolding, type Holding, type RunMode, type RunStop } from './types';
 
-/** Contracts/hauls the user has collected to run, deduped by `key`. */
-export const basketAtom = atomWithStorage<BasketItem[]>('eve-multitool.copilot.basket.v1', []);
+/** Which run is active. Buy and sell runs are mutually exclusive; both share `inventoryAtom`. */
+export const runModeAtom = atomWithStorage<RunMode>('eve-multitool.copilot.runMode.v1', 'buy');
 
-/** One arbitrage reservation sent to the plan endpoint so it can subtract its depth. */
-export interface ArbitrageCommitment {
-  id: string;
-  typeId: number;
-  source: number;
-  dest: number;
-  quantity: number;
-}
+/** The current run's chosen stops (buy or sell), deduped by `key`. Cleared on mode switch. */
+export const planAtom = atomWithStorage<RunStop[]>('eve-multitool.copilot.plan.v1', []);
 
 /**
- * The basket's arbitrage reservations, distilled for the plan endpoint. Courier
- * contracts are atomic (taken whole, deduped by key) so they don't consume shared
- * order depth and aren't sent. Referentially stable until the basket changes.
+ * The ship's current cargo, maintained by the Copilot (ESI can't read it). Starts
+ * empty, persists across reloads and mode switches, and is mutated by completing
+ * buy/sell steps or by hand-editing the inventory panel.
  */
-export const commitmentsAtom = atom<ArbitrageCommitment[]>((get) => {
-  const basket = get(basketAtom);
-  const out: ArbitrageCommitment[] = [];
-  for (const it of basket) {
-    if (it.kind !== 'arbitrage') continue;
-    const typeId = it.marketTypeId;
-    const source = it.pickup.endpoint.locationId;
-    const dest = it.dropoff.endpoint.locationId;
-    const quantity = it.quantity;
-    if (typeId == null || quantity == null || quantity <= 0) continue;
-    out.push({ id: it.key, typeId, source, dest, quantity });
+export const inventoryAtom = atomWithStorage<Holding[]>('eve-multitool.copilot.inventory.v1', []);
+
+/** Total cargo volume currently held (m³). */
+export const inventoryVolumeAtom = atom<number>((get) =>
+  get(inventoryAtom).reduce((sum, h) => sum + h.qty * h.unitVolumeM3, 0),
+);
+
+/** Record a completed buy: merge the lot into inventory with a weighted-average cost basis. */
+export const recordBuyAtom = atom(null, (_get, set, lot: Holding) => {
+  set(inventoryAtom, (prev) => addHolding(prev, lot));
+});
+
+/** Record a completed sell: shrink the held stack by `qty`. */
+export const recordSellAtom = atom(null, (_get, set, p: { typeId: number; qty: number }) => {
+  set(inventoryAtom, (prev) => removeHolding(prev, p.typeId, p.qty));
+});
+
+/**
+ * The ISK the plan simulates from: the live wallet balance (null = no wallet /
+ * unconstrained). No freeze is needed — completing a buy step removes it from the
+ * plan and lands the stock in inventory, so a spent buy is never double-counted.
+ */
+export const effectiveStartIskAtom = atom<number | null>(
+  (get) => get(characterWalletAtom)?.balance ?? null,
+);
+
+/**
+ * Complete a step: drop it from the plan and mutate the inventory (a buy lands its
+ * lot in the hold; a sell shrinks the held stack). The planner then re-optimises
+ * the remaining stops from the live wallet/cargo.
+ */
+export const completeStopAtom = atom(null, (_get, set, stop: RunStop) => {
+  set(planAtom, (prev) => prev.filter((s) => s.key !== stop.key));
+  if (stop.mode === 'buy') {
+    set(inventoryAtom, (prev) =>
+      addHolding(prev, {
+        typeId: stop.typeId,
+        itemName: stop.itemName,
+        qty: stop.quantity,
+        unitVolumeM3: stop.quantity > 0 ? stop.cargoM3 / stop.quantity : 0,
+        unitCostBasis: stop.quantity > 0 ? stop.capitalIsk / stop.quantity : 0,
+      }),
+    );
+  } else {
+    set(inventoryAtom, (prev) => removeHolding(prev, stop.typeId, stop.quantity));
   }
-  return out;
-});
-
-/** Plan-aware arbitrage from the server: opportunities net of the basket + each reservation's live worth. */
-export interface CopilotPlanData {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  /** Opportunities still available after the basket's reservations took their depth (route-free). */
-  available: ArbitrageOpportunity[];
-  /** Each reservation's economics re-derived over the live book, keyed by basket key. */
-  committed: CommittedEconomics[];
-  error: string | null;
-}
-
-export const copilotPlanDataAtom = atom<CopilotPlanData>({
-  status: 'idle',
-  available: [],
-  committed: [],
-  error: null,
-});
-
-/**
- * The basket with arbitrage economics refreshed from the live book (income /
- * cargo / capital re-derived by the plan endpoint), flagged `shortfall` when the
- * book can't fully supply a reservation and `stale` when it's dried up entirely.
- * Courier items pass through unchanged. The plan/suggestions consume this, not the
- * raw stored basket, so a market refresh keeps the plan honest.
- */
-export const resolvedBasketAtom = atom<BasketItem[]>((get) => {
-  const basket = get(basketAtom);
-  const { committed } = get(copilotPlanDataAtom);
-  const byId = new Map(committed.map((c) => [c.id, c]));
-  return basket.map((it) => {
-    if (it.kind !== 'arbitrage') return it;
-    const c = byId.get(it.key);
-    if (!c) return it; // no live data yet (loading) — keep last-known economics
-    return {
-      ...it,
-      income: c.profit,
-      cargoM3: c.totalVolume,
-      capitalIsk: c.buyCost,
-      quantity: c.quantity,
-      shortfall: c.shortfall,
-      stale: c.quantity <= 0,
-    };
-  });
-});
-
-/**
- * Live progress through the roadmap. `index` is the current step (steps before it
- * are done); `signature` ties it to a specific plan step sequence so progress
- * resets when the plan changes. `startIsk` freezes the wallet balance at the
- * moment the run started, so the forward simulation doesn't double-count buys you
- * make mid-run (null while still at step 0). Persisted so a run survives reload.
- */
-export interface RunProgress {
-  signature: string;
-  index: number;
-  startIsk: number | null;
-}
-
-export const runProgressAtom = atomWithStorage<RunProgress>('eve-multitool.copilot.progress.v1', {
-  signature: '',
-  index: 0,
-  startIsk: null,
-});
-
-/**
- * The ISK the plan simulates from: the frozen balance once a run is underway,
- * otherwise the live wallet balance (null = no wallet / unconstrained).
- */
-export const effectiveStartIskAtom = atom<number | null>((get) => {
-  const p = get(runProgressAtom);
-  if (p.index > 0 && p.startIsk !== null) return p.startIsk;
-  return get(characterWalletAtom)?.balance ?? null;
 });

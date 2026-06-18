@@ -160,6 +160,86 @@ export interface CommittedEconomics {
 }
 
 /**
+ * One stack of cargo the Copilot's ship is carrying, sent to the sell-candidates
+ * endpoint so the server can find buyers for it. `typeId` + `qty` only — the
+ * server prices it against the live buy book; cost basis stays on the client.
+ */
+export interface SellHolding {
+  typeId: number;
+  qty: number;
+}
+
+/**
+ * One place to sell a held stack, BEFORE routing: a single buy-order station and
+ * the revenue its bids yield for up to the held quantity, at the default sales
+ * tax. Route-free (the client routes via /api/routes) — the sell-run mirror of
+ * ArbitrageOpportunity, but disposal-only (no buy leg, no cost basis).
+ */
+export interface SellOpportunity {
+  /** `${typeId}:${station}`. */
+  id: string;
+  typeId: number;
+  itemName: string;
+  /** Units this station's bids can absorb, capped at the held quantity. */
+  quantity: number;
+  /** Units the holding offered (held qty). */
+  requested: number;
+  /** Volume of one unit (m³). */
+  unitVolume: number;
+  /** quantity × unitVolume (m³). */
+  totalVolume: number;
+  /** Volume-weighted gross bid price per unit. */
+  sellPrice: number;
+  /** Gross revenue before tax (Σ bid × units). */
+  grossRevenue: number;
+  /** Revenue after the default sales tax — what actually lands in the wallet. */
+  netRevenue: number;
+  /** CCP's reference value per unit (ISK), or null — lets the client show demand vs fair value. */
+  marketPrice: number | null;
+  /** Sales tax baked into netRevenue. */
+  salesTax: number;
+  /** Where you sell — the buy-order station. */
+  dest: ContractEndpoint;
+}
+
+/**
+ * One place to BUY a cheap stack, BEFORE routing: the cheapest ask station for an
+ * item whose asks sit below CCP's reference value, plus context to judge resale
+ * (demand and the best-paying bid). Route-free; the client routes via /api/routes
+ * and ranks. The buy-run mirror of SellOpportunity — acquisition-only.
+ */
+export interface BuyOpportunity {
+  /** `${typeId}:${station}`. */
+  id: string;
+  typeId: number;
+  itemName: string;
+  /** Units available at this station priced under market (the cheap stock). */
+  quantity: number;
+  /** Volume of one unit (m³). */
+  unitVolume: number;
+  /** quantity × unitVolume (m³). */
+  totalVolume: number;
+  /** Volume-weighted ask price per unit (what you pay). */
+  askPrice: number;
+  /** quantity × askPrice (the capital this candidate ties up). */
+  buyCost: number;
+  /** CCP's reference value per unit (ISK). Always present here — it's the basis of the score. */
+  marketPrice: number;
+  /** How far under market the ask sits: (marketPrice − askPrice) / marketPrice × 100. The primary score. */
+  discountPct: number;
+  /** Best (dearest) bid for this item anywhere, net of sales tax — the likely resale price. */
+  bestResaleNet: number;
+  /** Margin if resold into the best bid: (bestResaleNet − askPrice) / askPrice × 100. */
+  resaleMarginPct: number;
+  /** Where that best bid sits, so the user knows where to take it. */
+  bestResaleStation: ContractEndpoint;
+  /** Total units bid for across the book — a demand proxy. */
+  demandUnits: number;
+  /** Where you buy — the cheap ask's station. */
+  source: ContractEndpoint;
+}
+
+/**
  * An arbitrage opportunity enhanced with its route legs (the per-request,
  * authoritative stage). Unreachable hauls are filtered out before this is built,
  * so `deliveryRoute` is always present and `approachRoute` is null only when no

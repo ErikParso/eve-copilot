@@ -8,8 +8,6 @@ import { LocationCell } from './LocationCell';
 import { AttractivityCell } from './AttractivityCell';
 import { DangerText } from './DangerCell';
 import { RouteCell } from './RouteCell';
-import { AddToPlanButton } from '@/features/copilot/components/AddToPlanButton';
-import { courierRowToBasketItem } from '@/features/copilot/types';
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -64,11 +62,6 @@ export const ContractCard = memo(function ContractCard({ row }: { row: CourierRo
       {/* Attractivity score as a bubble popping out of the top-right corner */}
       <Box sx={{ position: 'absolute', top: -10, right: -10, zIndex: 1 }}>
         <AttractivityCell score={row.attractivity} steps={row.attractivitySteps} circle />
-      </Box>
-
-      {/* Add-to-Copilot toggle in the top-left corner */}
-      <Box sx={{ position: 'absolute', top: 4, left: 4, zIndex: 1 }}>
-        <AddToPlanButton item={courierRowToBasketItem(row)} />
       </Box>
 
       <CardContent
