@@ -8,9 +8,10 @@ import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { attractivityWeightsAtom, haulingRowsAtom } from '@/features/courierContracts/atoms';
+import { scaleArbitrage } from '@/features/arbitrage/scale';
 import type { RouteSystem } from '@/features/courierContracts/types';
-import { basketAtom, effectiveStartIskAtom } from './atoms';
-import { cardToBasketItem, type BasketItem } from './types';
+import { copilotPlanDataAtom, effectiveStartIskAtom, resolvedBasketAtom } from './atoms';
+import { arbitrageRowToBasketItem, cardToBasketItem, type BasketItem } from './types';
 import { rankSuggestions, type Suggestion } from './suggestions';
 
 type RoutesMap = Record<string, RouteSystem[] | null>;
@@ -24,10 +25,11 @@ export interface SuggestionsState {
 }
 
 export function useSuggestions(): SuggestionsState {
-  const basket = useAtomValue(basketAtom);
   const prefs = useAtomValue(preferencesAtom);
   const weights = useAtomValue(attractivityWeightsAtom);
   const rows = useAtomValue(haulingRowsAtom);
+  const planData = useAtomValue(copilotPlanDataAtom);
+  const resolvedBasket = useAtomValue(resolvedBasketAtom);
   const status = useAtomValue(characterStatusAtom);
   const effectiveStartIsk = useAtomValue(effectiveStartIskAtom);
 
@@ -36,14 +38,31 @@ export function useSuggestions(): SuggestionsState {
   const capacity = prefs.cargoM3 ?? Number.POSITIVE_INFINITY;
   const startIsk = effectiveStartIsk ?? Number.POSITIVE_INFINITY;
 
-  // Candidates: every hauling row not already in the basket, resolvable.
+  // The plan's basket, minus reservations whose orders have dried up.
+  const basket = useMemo(() => resolvedBasket.filter((b) => !b.stale), [resolvedBasket]);
+
+  // Candidates, resolvable and not already basketed. Courier comes from the
+  // hauling list; arbitrage comes from `available` — opportunities NET of the
+  // basket's reservations — scaled to what fits, so a haul whose depth the plan
+  // already consumes shrinks (or disappears) here automatically.
+  // Respect the contract-type preference (empty = both). Courier comes from the
+  // hauling list, which already applies it; gate the arbitrage side here.
+  const types = prefs.contractTypes;
+  const showArbitrage = types.length === 0 || types.includes('arbitrage');
+
   const candidates = useMemo<BasketItem[]>(() => {
     const inBasket = new Set(basket.map((b) => b.key));
-    return rows
-      .filter((c) => !inBasket.has(c.key))
-      .map(cardToBasketItem)
+    const courier = rows.filter((c) => c.kind === 'courier').map(cardToBasketItem);
+    const arbitrage = showArbitrage
+      ? planData.available
+          .map((o) => scaleArbitrage(o, capacity, startIsk))
+          .filter((o): o is NonNullable<typeof o> => o !== null)
+          .map(arbitrageRowToBasketItem)
+      : [];
+    return [...courier, ...arbitrage]
+      .filter((it) => !inBasket.has(it.key))
       .filter((it) => it.pickup.systemId !== null && it.dropoff.systemId !== null);
-  }, [rows, basket]);
+  }, [rows, planData.available, basket, capacity, startIsk, showArbitrage]);
 
   const [routes, setRoutes] = useState<RoutesMap>({});
   const [fetchStatus, setFetchStatus] = useState<SuggestionsState['status']>('idle');

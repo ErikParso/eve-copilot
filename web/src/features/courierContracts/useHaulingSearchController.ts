@@ -45,6 +45,8 @@ type ApiArbitrageItem = Pick<
   | 'buyCost'
   | 'profit'
   | 'marginPct'
+  | 'ladder'
+  | 'salesTax'
   | 'source'
   | 'dest'
   | 'approachRoute'

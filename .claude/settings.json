@@ -9,7 +9,8 @@
       "Bash(rtk git *)",
       "Bash(rtk read *)",
       "Bash(rtk curl *)",
-      "WebFetch(domain:skoli.ru)"
+      "WebFetch(domain:skoli.ru)",
+      "Bash(rtk tsc *)"
     ]
   }
 }

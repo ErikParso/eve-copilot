@@ -7,7 +7,7 @@ import { courierToScorable } from './attractivity';
 import { arbitrageToScorable } from '@/features/arbitrage/attractivity';
 import type { CourierRow, SortOptionId } from './types';
 import { SORT_OPTIONS } from './sortContracts';
-import type { ArbitrageItem, ArbitrageRow } from '@/features/arbitrage/types';
+import type { ArbitrageRow, ScaledArbitrage } from '@/features/arbitrage/types';
 
 export type ResultCard =
   | { kind: 'courier'; key: string; row: CourierRow }
@@ -24,7 +24,7 @@ type CourierBase = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>;
  */
 export function scoreCombined(
   courier: CourierBase[],
-  arbitrage: ArbitrageItem[],
+  arbitrage: ScaledArbitrage[],
   weights: AttractivityWeights,
 ): ResultCard[] {
   const inputs = [

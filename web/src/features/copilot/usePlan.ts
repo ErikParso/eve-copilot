@@ -8,7 +8,7 @@ import { useAtomValue } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import type { RouteSystem } from '@/features/courierContracts/types';
-import { basketAtom, effectiveStartIskAtom } from './atoms';
+import { resolvedBasketAtom, effectiveStartIskAtom } from './atoms';
 import { buildPlan } from './planner';
 import type { Plan } from './types';
 
@@ -21,7 +21,10 @@ export type PlanState =
   | { status: 'error'; plan: null; error: string };
 
 export function usePlan(): PlanState {
-  const basket = useAtomValue(basketAtom);
+  // Live-economics basket, minus reservations whose orders have dried up.
+  // Memoised so the route-fetch effect doesn't re-run on every render.
+  const resolved = useAtomValue(resolvedBasketAtom);
+  const basket = useMemo(() => resolved.filter((b) => !b.stale), [resolved]);
   const prefs = useAtomValue(preferencesAtom);
   const startIsk = useAtomValue(effectiveStartIskAtom);
   const status = useAtomValue(characterStatusAtom);

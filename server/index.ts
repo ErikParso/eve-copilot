@@ -3,10 +3,11 @@ import { loadSde } from './sde.js';
 import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
 import { startMarketRefresh } from './market.js';
 import { startPricesRefresh } from './prices.js';
-import { getEnrichedArbitrage } from './arbitrage.js';
+import { getEnrichedArbitrage, resolveArbitragePlan } from './arbitrage.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getShipKills } from './kills.js';
+import type { ArbitrageCommitment } from './types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -19,6 +20,26 @@ function parseOptionalNumber(value: unknown): number | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Parse + validate the `commitments` body of /api/arbitrage/plan. */
+function parseCommitments(value: unknown): ArbitrageCommitment[] {
+  if (!Array.isArray(value)) return [];
+  const out: ArbitrageCommitment[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const id = e.id;
+    const typeId = Number(e.typeId);
+    const source = Number(e.source);
+    const dest = Number(e.dest);
+    const quantity = Number(e.quantity);
+    if (typeof id !== 'string') continue;
+    if (![typeId, source, dest, quantity].every(Number.isFinite)) continue;
+    if (quantity <= 0) continue;
+    out.push({ id, typeId, source, dest, quantity });
+  }
+  return out;
 }
 
 /** Parse + validate the `pairs` body of /api/routes into [origin, dest] tuples. */
@@ -79,6 +100,19 @@ async function main() {
       res.json(result);
     } catch (err) {
       console.error('GET /api/arbitrage failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // Plan-aware arbitrage for the Copilot: subtract the basket's reservations from
+  // the live book, then return each reservation's current economics + what's
+  // still available. Route-free — the client routes via /api/routes below.
+  app.post('/api/arbitrage/plan', (req, res) => {
+    try {
+      const commitments = parseCommitments(req.body?.commitments);
+      res.json(resolveArbitragePlan(commitments));
+    } catch (err) {
+      console.error('POST /api/arbitrage/plan failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });
