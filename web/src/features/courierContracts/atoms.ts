@@ -8,6 +8,7 @@ import { characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import { scoreCombined, type ResultCard } from './combined';
+import { scaleArbitrage } from '@/features/arbitrage/scale';
 import type { CourierRow, SearchStatus, SortOptionId } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
 
@@ -81,8 +82,13 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const courierRows = showCourier
     ? data.courier.filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo)
     : [];
+  // Arbitrage scales rather than hides: an opportunity deeper than your hold or
+  // wallet is trimmed to the (most profitable) units that fit, not dropped — only
+  // hauls where not even one unit fits fall away (scaleArbitrage returns null).
   const arbRows = showArbitrage
-    ? data.arbitrage.filter((a) => a.buyCost <= maxCollateral && a.totalVolume <= maxCargo)
+    ? data.arbitrage
+        .map((a) => scaleArbitrage(a, maxCargo, maxCollateral))
+        .filter((a): a is NonNullable<typeof a> => a !== null)
     : [];
 
   return scoreCombined(courierRows, arbRows, weights);

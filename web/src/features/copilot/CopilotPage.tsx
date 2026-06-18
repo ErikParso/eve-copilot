@@ -25,9 +25,10 @@ import { haulingRowsAtom } from '@/features/courierContracts/atoms';
 import { preferencesAtom, preferencesOpenAtom } from '@/features/preferences/atoms';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
-import { basketAtom, effectiveStartIskAtom, runProgressAtom } from './atoms';
+import { basketAtom, effectiveStartIskAtom, resolvedBasketAtom, runProgressAtom } from './atoms';
 import { usePlan } from './usePlan';
 import { useSuggestions } from './useSuggestions';
+import { useCopilotPlanController } from './useCopilotPlanController';
 import { AddToPlanButton } from './components/AddToPlanButton';
 import type { BasketStop, Plan, PlanStep } from './types';
 
@@ -118,7 +119,10 @@ function PlanSettingsPanel() {
 }
 
 function BasketPanel() {
-  const [basket, setBasket] = useAtom(basketAtom);
+  // Display the live-economics basket (with stale/shortfall flags); edits write
+  // back to the stored basket so we never persist the derived fields.
+  const basket = useAtomValue(resolvedBasketAtom);
+  const setBasket = useSetAtom(basketAtom);
   if (basket.length === 0) return null;
 
   return (
@@ -140,6 +144,7 @@ function BasketPanel() {
               p: 1,
               borderRadius: 1,
               bgcolor: 'action.hover',
+              opacity: item.stale ? 0.6 : 1,
             }}
           >
             <Box sx={{ minWidth: 0, flex: 1 }}>
@@ -149,11 +154,21 @@ function BasketPanel() {
               <Typography variant="caption" color="text.secondary" display="block" noWrap>
                 {item.pickup.endpoint.systemName ?? '?'} → {item.dropoff.endpoint.systemName ?? '?'}
               </Typography>
+              {item.stale && (
+                <Typography variant="caption" color="error.main" display="block" sx={{ fontWeight: 600 }}>
+                  No longer available — the orders are gone
+                </Typography>
+              )}
+              {!item.stale && item.shortfall && (
+                <Typography variant="caption" color="warning.main" display="block" sx={{ fontWeight: 600 }}>
+                  Partly available — {formatNumber(item.quantity ?? 0, 0)} units fit the live book
+                </Typography>
+              )}
             </Box>
             <Tooltip title="Remove" arrow>
               <IconButton
                 size="small"
-                onClick={() => setBasket(basket.filter((b) => b.key !== item.key))}
+                onClick={() => setBasket((prev) => prev.filter((b) => b.key !== item.key))}
               >
                 <DeleteOutlineIcon fontSize="small" />
               </IconButton>
@@ -536,6 +551,7 @@ function SuggestionsPanel() {
 }
 
 export function CopilotPage() {
+  useCopilotPlanController();
   const basket = useAtomValue(basketAtom);
   const { status, plan, error } = usePlan();
 

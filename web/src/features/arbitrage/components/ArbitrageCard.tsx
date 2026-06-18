@@ -129,14 +129,22 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
 
         <Divider />
 
-        {/* Item + quantity to move */}
+        {/* Item + quantity to move (scaled to what fits your hold + wallet) */}
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap title={row.itemName}>
             {row.itemName}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {formatNumber(row.quantity, 0)} unit{row.quantity === 1 ? '' : 's'} · {formatVolume(row.totalVolume)}
+            {row.limited
+              ? `${formatNumber(row.quantity, 0)} of ${formatNumber(row.fullQuantity, 0)} units`
+              : `${formatNumber(row.quantity, 0)} unit${row.quantity === 1 ? '' : 's'}`}{' '}
+            · {formatVolume(row.totalVolume)}
           </Typography>
+          {row.limited && (
+            <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontWeight: 600 }}>
+              Limited to what fits your hold + wallet
+            </Typography>
+          )}
         </Box>
 
         <Endpoint label="Buy" endpoint={row.source} action={<OpenMarketButton typeId={row.typeId} />} />

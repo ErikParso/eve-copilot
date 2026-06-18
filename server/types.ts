@@ -67,6 +67,19 @@ export interface EnrichedContract extends ContractOpportunity {
 }
 
 /**
+ * One matched batch of the profitable order-book walk: `units` bought at `buy`
+ * ISK/unit (a single ask price) and sold at `sell` ISK/unit (a single bid
+ * price). The ladder lists these most-profitable-first, so a client with a
+ * limited hold or wallet can re-walk the top rungs and price exactly the units
+ * it can actually carry, instead of linearly scaling the (non-linear) average.
+ */
+export interface ArbitrageRung {
+  units: number;
+  buy: number;
+  sell: number;
+}
+
+/**
  * One buy-here/sell-there opportunity for a single item type, BEFORE routing:
  * the full profitable haul (entire profitable order-book depth) at a default
  * sales tax, with endpoints + economics only. This is the cached middle stage.
@@ -96,8 +109,54 @@ export interface ArbitrageOpportunity {
   profit: number;
   /** profit ÷ buyCost × 100. */
   marginPct: number;
+  /**
+   * The matched batches of the profitable walk (most profitable first), capped
+   * for payload. Lets the client price the exact units that fit its hold/wallet.
+   * Truncated ladders are reconciled against the full aggregates above (the tail
+   * beyond the cap is priced at the remainder's average).
+   */
+  ladder: ArbitrageRung[];
+  /** Sales tax baked into `profit` — so the client can recompute it when scaling. */
+  salesTax: number;
   source: ContractEndpoint;
   dest: ContractEndpoint;
+}
+
+/**
+ * A haul the Copilot has reserved, sent back to the plan endpoint so the server
+ * can subtract its order-book depth before computing what's still available. The
+ * `id` is the basket key, echoed back on the matching CommittedEconomics. Source
+ * and dest are STATION ids; quantity is the units the plan wants to move.
+ */
+export interface ArbitrageCommitment {
+  id: string;
+  typeId: number;
+  source: number;
+  dest: number;
+  quantity: number;
+}
+
+/**
+ * One commitment's economics re-derived over the CURRENT book (after the
+ * higher-priority commitments ahead of it in the list took their depth). Lean by
+ * design — the client already holds the endpoints/routes; only the volatile
+ * numbers come back. `shortfall` is true when the live book can no longer supply
+ * the full `requested` depth (orders filled/cancelled, or no longer profitable).
+ */
+export interface CommittedEconomics {
+  id: string;
+  /** Units the basket asked for. */
+  requested: number;
+  /** Units actually available now (≤ requested). */
+  quantity: number;
+  totalVolume: number;
+  buyCost: number;
+  profit: number;
+  marginPct: number;
+  buyPrice: number;
+  sellPrice: number;
+  ladder: ArbitrageRung[];
+  shortfall: boolean;
 }
 
 /**

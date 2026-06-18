@@ -28,6 +28,12 @@ export interface BasketItem {
   cargoM3: number;
   /** ISK put up at pickup: courier collateral / arbitrage buy cost. */
   capitalIsk: number;
+  /** Arbitrage: units to move — the reservation quantity sent to the plan endpoint. */
+  quantity?: number;
+  /** Arbitrage: the live book can't fully supply the reserved depth (set by resolvedBasketAtom). */
+  shortfall?: boolean;
+  /** Arbitrage: the opportunity has dried up entirely — exclude from the plan, flag in the basket. */
+  stale?: boolean;
   /** Where you load (courier pickup) or buy (arbitrage source). */
   pickup: BasketStop;
   /** Where you unload (courier dropoff) or sell (arbitrage dest). */
@@ -88,7 +94,13 @@ export function courierRowToBasketItem(r: CourierRow): BasketItem {
   };
 }
 
-export function arbitrageRowToBasketItem(r: ArbitrageRow): BasketItem {
+/** The arbitrage fields a basket item needs — satisfied by both a scored row and a route-free opp. */
+type ArbitrageBasketSource = Pick<
+  ArbitrageRow,
+  'id' | 'typeId' | 'itemName' | 'profit' | 'totalVolume' | 'buyCost' | 'quantity' | 'source' | 'dest'
+>;
+
+export function arbitrageRowToBasketItem(r: ArbitrageBasketSource): BasketItem {
   return {
     key: `a:${r.id}`,
     kind: 'arbitrage',
@@ -96,6 +108,7 @@ export function arbitrageRowToBasketItem(r: ArbitrageRow): BasketItem {
     income: r.profit,
     cargoM3: r.totalVolume,
     capitalIsk: r.buyCost,
+    quantity: r.quantity,
     pickup: { endpoint: r.source, systemId: r.source.systemId },
     dropoff: { endpoint: r.dest, systemId: r.dest.systemId },
     marketTypeId: r.typeId,
