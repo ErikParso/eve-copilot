@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from 'react';
 import { Box, Card, CardContent, Divider, Stack, Tooltip, Typography } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import SegmentIcon from '@mui/icons-material/Segment';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import arbitrageBg from '@/assets/card-arbitrage.jpg';
 import { LocationCell } from '@/features/courierContracts/components/LocationCell';
@@ -28,12 +29,13 @@ function Stat({
   value,
   color,
   adornment,
+  tooltip,
 }: {
   label: string;
   value: string;
   color?: string;
-  /** Optional element rendered right after the value (e.g. a warning icon). */
   adornment?: ReactNode;
+  tooltip?: ReactNode;
 }) {
   return (
     <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'center' }}>
@@ -44,6 +46,11 @@ function Stat({
         <Typography variant="caption" sx={{ fontWeight: 600, textAlign: 'right', color }}>
           {value}
         </Typography>
+        {tooltip && (
+          <Tooltip arrow title={tooltip} slotProps={{ tooltip: { sx: { maxWidth: 'none' } } }}>
+            <SegmentIcon sx={{ fontSize: 13, color: 'text.secondary', cursor: 'help', opacity: 0.8, '&:hover': { opacity: 1 } }} />
+          </Tooltip>
+        )}
         {adornment}
       </Box>
     </Box>
@@ -73,6 +80,77 @@ function Endpoint({
   );
 }
 
+interface DisplayRung {
+  units: number;
+  buy: number;
+  sell: number;
+}
+
+function getDisplayRungs(row: ArbitrageRow): DisplayRung[] {
+  let remaining = row.quantity;
+  const displayRungs: DisplayRung[] = [];
+  let ladderUnits = 0;
+  let ladderBuyCost = 0;
+  let ladderSellGross = 0;
+
+  for (const rung of row.ladder) {
+    if (remaining <= 0) break;
+    const take = Math.min(rung.units, remaining);
+    displayRungs.push({ units: take, buy: rung.buy, sell: rung.sell });
+    remaining -= take;
+    ladderUnits += rung.units;
+    ladderBuyCost += take * rung.buy;
+    ladderSellGross += take * rung.sell;
+  }
+
+  if (remaining > 0) {
+    const tailUnits = remaining;
+    const totalSellGross = row.sellPrice * row.quantity;
+    const tailBuyCost = Math.max(0, row.buyCost - ladderBuyCost);
+    const tailSellGross = Math.max(0, totalSellGross - ladderSellGross);
+    displayRungs.push({
+      units: tailUnits,
+      buy: tailBuyCost / tailUnits,
+      sell: tailSellGross / tailUnits,
+    });
+  }
+
+  return displayRungs;
+}
+
+const RungBreakdownTooltip = ({ rungs }: { rungs: DisplayRung[] }) => {
+  return (
+    <Box sx={{ p: 0.5 }}>
+      <Typography
+        variant="subtitle2"
+        sx={{
+          fontWeight: 700,
+          mb: 1,
+          borderBottom: '1px solid rgba(255,255,255,0.2)',
+          pb: 0.5,
+        }}
+      >
+        Order Depth Breakdown
+      </Typography>
+      <Stack spacing={0.75}>
+        {rungs.map((r, i) => (
+          <Box key={i} sx={{ display: 'flex', gap: 2, justifyContent: 'space-between' }}>
+            <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+              {formatNumber(r.units, 0)} units
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'warning.light', fontFamily: 'monospace' }}>
+              Buy: {formatIsk(r.buy)}
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'success.light', fontFamily: 'monospace' }}>
+              Sell: {formatIsk(r.sell)}
+            </Typography>
+          </Box>
+        ))}
+      </Stack>
+    </Box>
+  );
+};
+
 /** One arbitrage opportunity rendered as a card for the results grid. */
 export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: ArbitrageRow }) {
   const overpaying = isOverpaying(row.buyPrice, row.marketPrice);
@@ -84,6 +162,10 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
     `falls through — e.g. a bait buy order cancelled before you arrive — you'd be left ` +
     `holding stock worth less than you paid, a real loss. A buy below market value would ` +
     `protect you. Verify the deal before committing.`;
+
+  const displayRungs = getDisplayRungs(row);
+  const breakdownTooltip = <RungBreakdownTooltip rungs={displayRungs} />;
+
   return (
     <Card
       variant="outlined"
@@ -124,15 +206,33 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
 
         {/* Item + quantity to move (scaled to what fits your hold + wallet) */}
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap title={row.itemName}>
-            {row.itemName}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {row.limited
-              ? `${formatNumber(row.quantity, 0)} of ${formatNumber(row.fullQuantity, 0)} units`
-              : `${formatNumber(row.quantity, 0)} unit${row.quantity === 1 ? '' : 's'}`}{' '}
-            · {formatVolume(row.totalVolume)}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 700,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={row.itemName}
+            >
+              {row.itemName}
+            </Typography>
+            <OpenMarketButton typeId={row.typeId} />
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Typography variant="caption" color="text.secondary">
+              {row.limited
+                ? `${formatNumber(row.quantity, 0)} of ${formatNumber(row.fullQuantity, 0)} units`
+                : `${formatNumber(row.quantity, 0)} unit${row.quantity === 1 ? '' : 's'}`}{' '}
+              · {formatVolume(row.totalVolume)}
+            </Typography>
+            <Tooltip arrow title={breakdownTooltip} slotProps={{ tooltip: { sx: { maxWidth: 'none' } } }}>
+              <SegmentIcon sx={{ fontSize: 13, color: 'text.secondary', cursor: 'help', opacity: 0.8, '&:hover': { opacity: 1 } }} />
+            </Tooltip>
+          </Box>
           {row.limited && (
             <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontWeight: 600 }}>
               Limited to what fits your hold + wallet
@@ -140,7 +240,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
           )}
         </Box>
 
-        <Endpoint label="Buy" endpoint={row.source} action={<OpenMarketButton typeId={row.typeId} />} />
+        <Endpoint label="Buy" endpoint={row.source} />
         <Endpoint label="Sell" endpoint={row.dest} />
 
         <ArbitrageRouteCell row={row} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
@@ -152,6 +252,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
             label="Buy (you pay)"
             value={`${formatIsk(row.buyPrice)} / unit`}
             color={overpaying ? 'warning.main' : undefined}
+            tooltip={breakdownTooltip}
             adornment={
               overpaying ? (
                 <Tooltip arrow title={overpayWarning}>
@@ -162,7 +263,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
               ) : undefined
             }
           />
-          <Stat label="Sell (you get)" value={`${formatIsk(row.sellPrice)} / unit`} />
+          <Stat label="Sell (you get)" value={`${formatIsk(row.sellPrice)} / unit`} tooltip={breakdownTooltip} />
           <Stat
             label="Market value"
             value={row.marketPrice === null ? '—' : `${formatIsk(row.marketPrice)} / unit`}
