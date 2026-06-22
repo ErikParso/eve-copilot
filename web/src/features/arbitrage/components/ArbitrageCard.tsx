@@ -1,6 +1,6 @@
 import { useState, memo, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Box, Card, CardContent, Divider, Stack, Tooltip, Typography, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
+import { Box, Card, CardContent, Divider, Stack, Tooltip, Typography, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, alpha } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import SegmentIcon from '@mui/icons-material/Segment';
 import PushPinIcon from '@mui/icons-material/PushPin';
@@ -297,8 +297,18 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           backgroundSize: 'cover',
           backgroundPosition: 'left top',
           backgroundRepeat: 'no-repeat',
-          border: isPinnedMode ? '2px solid' : undefined,
           borderColor: getPinnedBorderColor(),
+          boxShadow: (theme) => {
+            if (!isPinnedMode) return undefined;
+            const colorKey = getPinnedBorderColor();
+            if (!colorKey) return undefined;
+            const parts = colorKey.split('.');
+            let color = theme.palette as any;
+            for (const part of parts) {
+              color = color?.[part];
+            }
+            return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color || '#000', 0.35)}`;
+          },
         }}
       >
         {/* Top-right actions: Pin button and Attractivity bubble */}
