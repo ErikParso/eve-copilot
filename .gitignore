@@ -12,3 +12,4 @@ dist-ssr
 *.log
 npm-debug.log*
 graphify-out
+.aider*
