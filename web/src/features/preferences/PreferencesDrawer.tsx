@@ -14,7 +14,7 @@ import type { ContractType, RouteType } from '@/features/courierContracts/types'
 import { RouteTypeSelect } from '@/features/courierContracts/components/RouteTypeSelect';
 import { ContractTypeSelect } from '@/features/courierContracts/components/ContractTypeSelect';
 import { AttractivityWeightsControl } from '@/features/courierContracts/components/AttractivityWeightsControl';
-import { preferencesAtom, preferencesOpenAtom } from './atoms';
+import { preferencesAtom, preferencesOpenAtom, DEFAULT_SALES_TAX_PCT } from './atoms';
 
 /** Parse a numeric text input into a non-negative number or null (empty). */
 function parseOptionalNumber(raw: string): number | null {
@@ -100,6 +100,14 @@ export function PreferencesDrawer() {
             unit="m³"
             helperText="Your hold — hides oversized hauls."
             onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
+          />
+
+          <NumberPrefField
+            label="Sales tax"
+            value={prefs.salesTaxPct ?? DEFAULT_SALES_TAX_PCT}
+            unit="%"
+            helperText="Lower it to match your Accounting skill."
+            onCommit={(pct) => setPrefs({ ...prefs, salesTaxPct: pct ?? DEFAULT_SALES_TAX_PCT })}
           />
 
           <RouteTypeSelect

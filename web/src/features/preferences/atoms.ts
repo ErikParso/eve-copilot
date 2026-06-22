@@ -14,7 +14,17 @@ export interface Preferences {
   routeType: RouteType;
   /** Opportunity kinds to consider; empty = all. */
   contractTypes: ContractType[];
+  /**
+   * Sales tax applied to arbitrage sell revenue, as a percentage (e.g. 4.5).
+   * Defaults to the server's baked-in rate; lower it to match your Accounting
+   * skill. Read defensively (`?? DEFAULT_SALES_TAX_PCT`) since older persisted
+   * preferences predate this field.
+   */
+  salesTaxPct?: number;
 }
+
+/** Mid-Accounting sales tax the server bakes into profit; the FE default too. */
+export const DEFAULT_SALES_TAX_PCT = 4.5;
 
 // Note: available ISK is no longer a preference — it comes from the live wallet
 // balance (esi-wallet scope), see characterWalletAtom / effectiveStartIskAtom.
@@ -22,6 +32,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   cargoM3: null,
   routeType: 'safest',
   contractTypes: [],
+  salesTaxPct: DEFAULT_SALES_TAX_PCT,
 };
 
 export const preferencesAtom = atomWithStorage<Preferences>(

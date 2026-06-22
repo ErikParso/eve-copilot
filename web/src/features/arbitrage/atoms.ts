@@ -30,7 +30,14 @@ export interface PinnedHaul extends ArbitrageItem {
   liveMarginPct?: number;
   liveLadder?: ArbitrageRung[];
   buyerGone?: boolean;
+  /** No asks left at the source (supply gone; planning hauls only). */
+  supplyGone?: boolean;
   shortfall?: boolean;
+  /** The specific orders backing this haul changed since the last check. */
+  stale?: boolean;
+  /** Live order IDs backing the haul — echoed back so the server can flag `stale`. */
+  sourceOrderIds?: number[];
+  destOrderIds?: number[];
 }
 
 export interface PinnedCourier extends CourierRow {
@@ -154,7 +161,7 @@ export const executeHaulAtom = atom(null, (_get, set, id: string) => {
 /**
  * Update live check results on pinned items.
  */
-export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: Array<{
+export interface PinnedHaulStatus {
   id: string;
   quantity: number;
   buyPrice: number;
@@ -163,34 +170,21 @@ export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: Array<{
   marginPct: number;
   shortfall: boolean;
   buyerGone: boolean;
+  supplyGone: boolean;
+  stale: boolean;
   ladder: ArbitrageRung[];
-}>) => {
+  sourceOrderIds: number[];
+  destOrderIds: number[];
+}
+
+export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: PinnedHaulStatus[]) => {
   const map = new Map(statuses.map((s) => [s.id, s]));
   set(pinnedHaulsAtom, (prev) =>
     prev.map((h) => {
       const live = map.get(h.id);
       if (!live) return h;
-      if (h.status === 'planning') {
-        return {
-          ...h,
-          quantity: live.quantity,
-          buyPrice: live.buyPrice,
-          sellPrice: live.sellPrice,
-          profit: live.profit,
-          marginPct: live.marginPct,
-          ladder: live.ladder,
-          liveQuantity: live.quantity,
-          liveBuyPrice: live.buyPrice,
-          liveSellPrice: live.sellPrice,
-          liveProfit: live.profit,
-          liveMarginPct: live.marginPct,
-          liveLadder: live.ladder,
-          shortfall: live.shortfall,
-          buyerGone: live.buyerGone,
-        };
-      }
-      return {
-        ...h,
+      // Common live fields tracked for every status.
+      const common = {
         liveQuantity: live.quantity,
         liveBuyPrice: live.buyPrice,
         liveSellPrice: live.sellPrice,
@@ -199,7 +193,26 @@ export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: Array<{
         liveLadder: live.ladder,
         shortfall: live.shortfall,
         buyerGone: live.buyerGone,
+        supplyGone: live.supplyGone,
+        stale: live.stale,
+        sourceOrderIds: live.sourceOrderIds,
+        destOrderIds: live.destOrderIds,
       };
+      // While planning, the live values ARE the displayed economics; in transit
+      // the pinned (bought) economics stand and live values are advisory only.
+      if (h.status === 'planning') {
+        return {
+          ...h,
+          ...common,
+          quantity: live.quantity,
+          buyPrice: live.buyPrice,
+          sellPrice: live.sellPrice,
+          profit: live.profit,
+          marginPct: live.marginPct,
+          ladder: live.ladder,
+        };
+      }
+      return { ...h, ...common };
     })
   );
 });

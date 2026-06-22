@@ -247,17 +247,22 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const pinnedWithLive = isPinnedMode ? (row as PinnedHaul) : null;
   const hasLiveUpdates = pinnedWithLive && pinnedWithLive.liveProfit !== undefined;
   const buyerGone = !!(pinnedWithLive && pinnedWithLive.buyerGone);
+  const supplyGone = !!(pinnedWithLive && pinnedWithLive.supplyGone);
   const shortfall = !!(pinnedWithLive && pinnedWithLive.shortfall);
-  
+  const stale = !!(pinnedWithLive && pinnedWithLive.stale);
+  // A missing endpoint (no asks at source, or no bids at dest) zeroes the haul.
+  const endpointGone = buyerGone || supplyGone;
+
   // Calculate if degraded
   const liveProfit = pinnedWithLive?.liveProfit;
   const liveQuantity = pinnedWithLive?.liveQuantity;
   const originalProfit = pinnedWithLive?.originalProfit ?? dispProfit;
   const baselineProfitForComparison = isTransit ? dispProfit : originalProfit;
-  
+
   const isDegraded = hasLiveUpdates && (
-    buyerGone ||
+    endpointGone ||
     shortfall ||
+    stale ||
     (liveProfit !== undefined && liveProfit < baselineProfitForComparison)
   );
 
@@ -276,7 +281,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
 
   const getPinnedBorderColor = () => {
     if (!isPinnedMode) return undefined;
-    if (buyerGone) return 'error.main';
+    if (endpointGone) return 'error.main';
     if (isDegraded) return 'warning.main';
     if (hasLiveUpdates) return 'success.main';
     return 'primary.main';
@@ -353,8 +358,8 @@ export const ArbitrageCard = memo(function ArbitrageCard({
             <Typography variant="caption" color="text.secondary">
               Expected Profit
             </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: buyerGone ? 'error.main' : 'primary.main' }}>
-              {buyerGone ? '0.00 ISK' : formatIskMillions(dispProfit)}
+            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: endpointGone ? 'error.main' : 'primary.main' }}>
+              {endpointGone ? '0.00 ISK' : formatIskMillions(dispProfit)}
             </Typography>
             <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
               {formatNumber(dispMarginPct, 1)}% margin
@@ -412,17 +417,29 @@ export const ArbitrageCard = memo(function ArbitrageCard({
 
           {/* Degraded Market Warnings */}
           {isDegraded && (
-            <Box sx={{ p: 1, borderRadius: 1, bgcolor: buyerGone ? 'error.light' : 'warning.light', color: 'background.paper', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <Box sx={{ p: 1, borderRadius: 1, bgcolor: endpointGone ? 'error.light' : 'warning.light', color: 'background.paper', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <WarningAmberIcon fontSize="inherit" />
-                {buyerGone ? 'Buyer Gone!' : shortfall ? 'Demand Reduced' : 'Price Reduced'}
+                {buyerGone
+                  ? 'Buyer Gone!'
+                  : supplyGone
+                    ? 'Supply Gone!'
+                    : shortfall
+                      ? 'Demand Reduced'
+                      : stale
+                        ? 'Orders Changed'
+                        : 'Price Reduced'}
               </Typography>
               <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                {buyerGone 
-                  ? 'Bids at destination no longer exist.' 
-                  : isTransit 
-                    ? `Live destination: ${formatNumber(liveQuantity ?? 0, 0)} units · Profit: ${formatIskMillions(liveProfit ?? 0)}`
-                    : `Originally pinned profit: ${formatIskMillions(originalProfit)}`}
+                {buyerGone
+                  ? 'Bids at the destination no longer exist.'
+                  : supplyGone
+                    ? 'Sell orders at the source no longer exist.'
+                    : stale && !shortfall
+                      ? 'The specific orders backing this haul changed — re-check before committing.'
+                      : isTransit
+                        ? `Live destination: ${formatNumber(liveQuantity ?? 0, 0)} units · Profit: ${formatIskMillions(liveProfit ?? 0)}`
+                        : `Originally pinned profit: ${formatIskMillions(originalProfit)}`}
               </Typography>
             </Box>
           )}

@@ -143,6 +143,13 @@ export interface PinnedHaulStatusRequest {
   quantity: number;
   status: 'planning' | 'transit';
   boughtPrice?: number;
+  /**
+   * The order IDs that backed this haul on the previous check (echoed back from
+   * the last response). When present, the server flags `stale` if the live set
+   * of backing orders has changed since — i.e. specific orders filled/cancelled.
+   */
+  knownSourceOrderIds?: number[];
+  knownDestOrderIds?: number[];
 }
 
 export interface PinnedHaulStatusResponse {
@@ -152,7 +159,16 @@ export interface PinnedHaulStatusResponse {
   sellPrice: number;
   profit: number;
   marginPct: number;
+  /** Live depth can't supply the full requested quantity. */
   shortfall: boolean;
+  /** No bids reach the destination any more (demand gone). */
   buyerGone: boolean;
+  /** No asks left at the source any more (supply gone; planning hauls only). */
+  supplyGone: boolean;
+  /** The specific orders backing this haul changed since the last check. */
+  stale: boolean;
   ladder: ArbitrageRung[];
+  /** Live order IDs currently backing the haul — echo back next check for `stale`. */
+  sourceOrderIds: number[];
+  destOrderIds: number[];
 }

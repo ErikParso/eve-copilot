@@ -25,6 +25,27 @@ export type ScalableArbitrage = Pick<
 export type Scaled<T> = T & { fullQuantity: number; fullTotalVolume: number; limited: boolean };
 
 /**
+ * Re-price an opportunity's profit at a different sales tax than the server
+ * baked in (e.g. the user's Accounting-skill rate). Recovers gross sell revenue
+ * from the server's profit/tax, then re-applies `taxFraction`. The ladder's
+ * per-unit prices are tax-independent, so scaling still works on the result.
+ */
+export function repriceForTax<T extends Pick<ArbitrageItem, 'profit' | 'buyCost' | 'salesTax' | 'marginPct'>>(
+  item: T,
+  taxFraction: number,
+): T {
+  if (taxFraction === item.salesTax) return item;
+  const gross = (item.profit + item.buyCost) / (1 - item.salesTax);
+  const profit = gross * (1 - taxFraction) - item.buyCost;
+  return {
+    ...item,
+    profit,
+    marginPct: item.buyCost > 0 ? (profit / item.buyCost) * 100 : 0,
+    salesTax: taxFraction,
+  };
+}
+
+/**
  * Scale an opportunity to the units that fit within `maxVolume` m³ of cargo and
  * `maxIsk` of spend. Returns the full opportunity (limited = false) when neither
  * constraint binds. Returns null when not even one unit fits (drop it). Generic
