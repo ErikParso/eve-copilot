@@ -1,9 +1,10 @@
 import { memo, ReactNode } from 'react';
-import { Box, Card, CardContent, Divider, Stack, Typography, Tooltip, IconButton, Button } from '@mui/material';
+import { Box, Card, CardContent, Divider, Stack, Typography, Tooltip, IconButton, Button, alpha } from '@mui/material';
 import { useAtomValue, useSetAtom } from 'jotai';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { pinnedCouriersAtom, pinCourierAtom, unpinCourierAtom, secureCourierAtom, executeCourierAtom } from '@/features/arbitrage/atoms';
 import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
 import courierBg from '@/assets/card-courier.jpg';
@@ -113,8 +114,18 @@ export const ContractCard = memo(function ContractCard({
         backgroundSize: 'cover',
         backgroundPosition: 'left top',
         backgroundRepeat: 'no-repeat',
-        border: isPinned ? '2px solid' : undefined,
         borderColor: getPinnedBorderColor(),
+        boxShadow: (theme) => {
+          if (!isPinned) return undefined;
+          const colorKey = getPinnedBorderColor();
+          if (!colorKey) return undefined;
+          const parts = colorKey.split('.');
+          let color = theme.palette as any;
+          for (const part of parts) {
+            color = color?.[part];
+          }
+          return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color || '#000', 0.35)}`;
+        },
       }}
     >
       {/* Top-right actions: Pin button and Attractivity bubble */}
@@ -184,6 +195,11 @@ export const ContractCard = memo(function ContractCard({
             >
               {`Package for ${row.dropoff.systemName ?? 'Unknown'}`}
             </Typography>
+            {isPinned && row.unavailable && (
+              <Tooltip title="Contract Unavailable: No longer in public EVE feed. It may have been accepted, cancelled, or expired." arrow>
+                <WarningAmberIcon sx={{ fontSize: 18, color: 'error.main', cursor: 'help' }} />
+              </Tooltip>
+            )}
             <OpenContractButton contractId={row.id} />
           </Box>
           <Typography variant="caption" color="text.secondary">

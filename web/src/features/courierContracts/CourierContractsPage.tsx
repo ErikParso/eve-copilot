@@ -8,6 +8,7 @@ import {
   TextField,
   Typography,
   InputAdornment,
+  Paper,
 } from '@mui/material';
 import { haulingDataAtom, haulingRowsAtom } from './atoms';
 import { sortCombined } from './combined';
@@ -156,41 +157,64 @@ export function CourierContractsPage() {
 
         {status === 'success' && (
           <>
-            <Box
+            <Paper
+              elevation={0}
+              variant="outlined"
               sx={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 2,
-                alignItems: 'flex-start',
-                mb: 1,
+                p: 2.5,
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                boxShadow: (theme) => theme.palette.mode === 'light' 
+                  ? '0 2px 8px rgba(0,0,0,0.04)' 
+                  : '0 2px 8px rgba(0,0,0,0.16)',
               }}
             >
-              <Box sx={{ flexGrow: 1, flexBasis: 1, minWidth: 200 }}>
-                <NumberPrefField
-                  label="Cargo capacity"
-                  value={prefs.cargoM3}
-                  unit="m³"
-                  helperText="Your hold — hides oversized hauls."
-                  onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
-                />
-              </Box>
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexWrap: { xs: 'wrap' },
+                  gap: 2,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <Box sx={{ flex: '1 1 140px', minWidth: 140 }}>
+                  <NumberPrefField
+                    label="Cargo capacity"
+                    value={prefs.cargoM3}
+                    unit="m³"
+                    helperText="Your hold — hides oversized hauls."
+                    onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
+                  />
+                </Box>
 
-              <Box sx={{ flexGrow: 1, flexBasis: 1,  minWidth: 200 }}>
-                <RouteTypeSelect
-                  value={prefs.routeType}
-                  onChange={(routeType) => setPrefs({ ...prefs, routeType })}
-                />
-              </Box>
+                <Box sx={{ flex: '1 1 180px', minWidth: 180 }}>
+                  <RouteTypeSelect
+                    value={prefs.routeType}
+                    onChange={(routeType) => setPrefs({ ...prefs, routeType })}
+                  />
+                </Box>
 
-              <Box sx={{ flexGrow: 1, flexShrink: {xs: 1, md: 0} }}>
-                <AttractivityWeightsControl />
+                <Box sx={{ flex: { xs: '1 1 auto', sm: '2 0 440px' }, minWidth: { xs: 0, sm: 440 } }}>
+                  <AttractivityWeightsControl />
+                </Box>
               </Box>
-            </Box>
+            </Paper>
+
+            {rows.length > 0 && (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
+                  Available Opportunities
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {rows.length} {rows.length === 1 ? 'opportunity' : 'opportunities'} found
+                </Typography>
+              </Box>
+            )}
 
             {rows.length > 0 ? (
               <CombinedGrid rows={sortedRows} />
             ) : (
-              <Alert severity="info">
+              <Alert severity="info" sx={{ mt: 2 }}>
                 Nothing matches. Widen the cargo / ISK / contract-type limits in Preferences.
               </Alert>
             )}
