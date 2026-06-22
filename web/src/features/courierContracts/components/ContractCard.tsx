@@ -1,5 +1,10 @@
-import { memo } from 'react';
-import { Box, Card, CardContent, Divider, Stack, Typography } from '@mui/material';
+import { memo, ReactNode } from 'react';
+import { Box, Card, CardContent, Divider, Stack, Typography, Tooltip, IconButton, Button } from '@mui/material';
+import { useAtomValue, useSetAtom } from 'jotai';
+import PushPinIcon from '@mui/icons-material/PushPin';
+import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import { pinnedCouriersAtom, pinCourierAtom, unpinCourierAtom, secureCourierAtom, executeCourierAtom } from '@/features/arbitrage/atoms';
 import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
 import courierBg from '@/assets/card-courier.jpg';
 import type { CourierRow } from '../types';
@@ -8,6 +13,8 @@ import { LocationCell } from './LocationCell';
 import { AttractivityCell } from './AttractivityCell';
 import { DangerText } from './DangerCell';
 import { RouteCell } from './RouteCell';
+import { WaypointButton } from '@/features/arbitrage/components/WaypointButton';
+import { OpenContractButton } from './OpenContractButton';
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -22,7 +29,15 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Endpoint({ label, endpoint }: { label: string; endpoint: ContractEndpoint }) {
+function Endpoint({
+  label,
+  endpoint,
+  action,
+}: {
+  label: string;
+  endpoint: ContractEndpoint;
+  action?: ReactNode;
+}) {
   return (
     <Box sx={{ display: 'flex', gap: 1 }}>
       <Typography
@@ -35,12 +50,53 @@ function Endpoint({ label, endpoint }: { label: string; endpoint: ContractEndpoi
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <LocationCell endpoint={endpoint} />
       </Box>
+      {action}
     </Box>
   );
 }
 
 /** One courier contract rendered as a card for the results grid. */
-export const ContractCard = memo(function ContractCard({ row }: { row: CourierRow }) {
+export const ContractCard = memo(function ContractCard({
+  row,
+}: {
+  row: CourierRow & { status?: 'planned' | 'secured' | 'executed'; unavailable?: boolean };
+}) {
+  const pinnedCouriers = useAtomValue(pinnedCouriersAtom);
+  const pinCourier = useSetAtom(pinCourierAtom);
+  const unpinCourier = useSetAtom(unpinCourierAtom);
+  const secureCourier = useSetAtom(secureCourierAtom);
+  const executeCourier = useSetAtom(executeCourierAtom);
+
+  const isPinned = pinnedCouriers.some((c) => c.id === row.id);
+
+  const handlePinClick = () => {
+    if (isPinned) {
+      unpinCourier(row.id);
+    } else {
+      pinCourier(row);
+    }
+  };
+
+  const getRemainingSeconds = () => {
+    if ('expiresAt' in row && typeof row.expiresAt === 'number') {
+      return Math.max(0, (row.expiresAt - Date.now()) / 1000);
+    }
+    return row.remainingSeconds;
+  };
+
+  const getAgeSeconds = () => {
+    if ('issuedAt' in row && typeof row.issuedAt === 'number') {
+      return Math.max(0, (Date.now() - row.issuedAt) / 1000);
+    }
+    return row.ageSeconds;
+  };
+
+  const getPinnedBorderColor = () => {
+    if (!isPinned) return undefined;
+    if (row.unavailable) return 'error.main'; // Red if unavailable (taken by someone else)
+    return 'success.main'; // Green if fresh or secured
+  };
+
   return (
     <Card
       variant="outlined"
@@ -57,11 +113,44 @@ export const ContractCard = memo(function ContractCard({ row }: { row: CourierRo
         backgroundSize: 'cover',
         backgroundPosition: 'left top',
         backgroundRepeat: 'no-repeat',
+        border: isPinned ? '2px solid' : undefined,
+        borderColor: getPinnedBorderColor(),
       }}
     >
-      {/* Attractivity score as a bubble popping out of the top-right corner */}
-      <Box sx={{ position: 'absolute', top: -10, right: -10, zIndex: 1 }}>
-        <AttractivityCell score={row.attractivity} steps={row.attractivitySteps} circle />
+      {/* Top-right actions: Pin button and Attractivity bubble */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: -10,
+          right: -10,
+          zIndex: 2,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+        }}
+      >
+        <Tooltip title={isPinned ? "Unpin contract" : "Pin contract"} arrow>
+          <IconButton
+            size="small"
+            onClick={handlePinClick}
+            sx={{
+              color: isPinned ? 'primary.main' : 'text.secondary',
+              bgcolor: 'background.paper',
+              boxShadow: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              width: 32,
+              height: 32,
+              '&:hover': { bgcolor: 'action.hover' },
+            }}
+          >
+            {isPinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+
+        {!isPinned && (
+          <AttractivityCell score={row.attractivity} steps={row.attractivitySteps} circle />
+        )}
       </Box>
 
       <CardContent
@@ -79,8 +168,50 @@ export const ContractCard = memo(function ContractCard({ row }: { row: CourierRo
 
         <Divider />
 
-        <Endpoint label="From" endpoint={row.pickup} />
-        <Endpoint label="To" endpoint={row.dropoff} />
+        {/* Package title */}
+        <Box sx={{ minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 700,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={`Package for ${row.dropoff.systemName ?? 'Unknown'}`}
+            >
+              {`Package for ${row.dropoff.systemName ?? 'Unknown'}`}
+            </Typography>
+            <OpenContractButton contractId={row.id} />
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            {`1 units · ${formatVolume(row.volume)}`}
+          </Typography>
+        </Box>
+
+        {row.status === 'secured' ? (
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ width: 28, flexShrink: 0, mt: 0.25 }}>
+              From
+            </Typography>
+            <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', mt: 0.25 }}>
+              In ship
+            </Typography>
+          </Box>
+        ) : (
+          <Endpoint
+            label="From"
+            endpoint={row.pickup}
+            action={<WaypointButton endpoint={row.pickup} add={false} />}
+          />
+        )}
+        <Endpoint
+          label="To"
+          endpoint={row.dropoff}
+          action={<WaypointButton endpoint={row.dropoff} add={true} />}
+        />
 
         <RouteCell row={row} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
 
@@ -88,15 +219,60 @@ export const ContractCard = memo(function ContractCard({ row }: { row: CourierRo
 
         <Stack spacing={0.5}>
           <Stat label="Collateral" value={formatIskMillions(row.collateral)} />
-          <Stat label="Cargo" value={formatVolume(row.volume)} />
           <Stat
             label="ISK / jump"
             value={row.incomePerJump === null ? '—' : formatIsk(row.incomePerJump)}
           />
-          <Stat label="Listed for" value={formatDuration(row.ageSeconds)} />
-          <Stat label="Time left" value={formatDuration(row.remainingSeconds)} />
+          <Stat label="Listed for" value={formatDuration(getAgeSeconds())} />
+          <Stat label="Time left" value={formatDuration(getRemainingSeconds())} />
           <Stat label="To complete" value={`${row.daysToComplete} days`} />
         </Stack>
+
+        {/* Action buttons for Pinned Courier Mode */}
+        {isPinned && (
+          <Box sx={{ mt: 'auto', pt: 1.25 }}>
+            {row.status === 'secured' ? (
+              <Button
+                variant="contained"
+                color="success"
+                size="small"
+                fullWidth
+                onClick={() => executeCourier(row.id)}
+                startIcon={<CheckCircleOutlineIcon />}
+              >
+                Confirm Deliver
+              </Button>
+            ) : row.status === 'executed' ? (
+              <Button
+                variant="contained"
+                color="success"
+                size="small"
+                fullWidth
+                disabled
+                startIcon={<CheckCircleOutlineIcon />}
+              >
+                Executed
+              </Button>
+            ) : (
+              <Button
+                variant="outlined"
+                size="small"
+                fullWidth
+                onClick={() => secureCourier(row.id)}
+                sx={{
+                  borderColor: row.unavailable ? 'error.main' : 'primary.main',
+                  color: row.unavailable ? 'error.main' : 'primary.main',
+                  '&:hover': {
+                    borderColor: row.unavailable ? 'error.light' : 'primary.light',
+                    bgcolor: row.unavailable ? 'rgba(211, 47, 47, 0.05)' : undefined,
+                  }
+                }}
+              >
+                Confirm Accept
+              </Button>
+            )}
+          </Box>
+        )}
       </CardContent>
     </Card>
   );

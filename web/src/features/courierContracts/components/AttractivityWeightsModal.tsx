@@ -3,12 +3,10 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import {
   Box,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   IconButton,
   Slider,
   Stack,
@@ -53,7 +51,7 @@ export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsM
     if (open) setDraft(committed);
   }, [open, committed]);
 
-  const activePreset = ATTRACTIVITY_PRESETS.find((p) => weightsEqual(p.weights, draft));
+
 
   const setWeight = (id: FactorId, value: number) =>
     setDraft((prev) => ({ ...prev, [id]: value }));
@@ -73,29 +71,6 @@ export function AttractivityWeightsModal({ open, onClose }: AttractivityWeightsM
       </DialogTitle>
 
       <DialogContent dividers>
-        <Typography variant="subtitle2" gutterBottom>
-          Presets
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          {ATTRACTIVITY_PRESETS.map((preset) => (
-            <Tooltip key={preset.id} title={preset.description} arrow>
-              <Chip
-                label={preset.label}
-                color={activePreset?.id === preset.id ? 'primary' : 'default'}
-                variant={activePreset?.id === preset.id ? 'filled' : 'outlined'}
-                onClick={() => setDraft(preset.weights)}
-              />
-            </Tooltip>
-          ))}
-        </Box>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-          {activePreset
-            ? activePreset.description
-            : 'Custom weights. Pick a preset above or tune each factor below.'}
-        </Typography>
-
-        <Divider sx={{ mb: 2 }} />
-
         <Typography variant="subtitle2" gutterBottom>
           Factors — weight 0 (off) to 10
         </Typography>

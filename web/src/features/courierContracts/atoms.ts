@@ -4,13 +4,14 @@
 // and re-scores instantly without a re-fetch.
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import { characterWalletAtom } from '@/features/auth/atoms';
+import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import { scoreCombined, type ResultCard } from './combined';
 import { scaleArbitrage } from '@/features/arbitrage/scale';
 import type { CourierRow, SearchStatus, SortOptionId } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
+import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
 
 /** Contextual Hauling-page view state (the grid's sort order). */
 export interface HaulingView {
@@ -75,21 +76,68 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   // ISK ceiling = your live wallet (hide what you can't cover); no wallet = no cap.
   const maxCollateral = get(characterWalletAtom)?.balance ?? Infinity;
   const maxCargo = prefs.cargoM3 ?? Infinity;
-  const types = prefs.contractTypes;
-  const showCourier = types.length === 0 || types.includes('courier');
-  const showArbitrage = types.length === 0 || types.includes('arbitrage');
 
-  const courierRows = showCourier
-    ? data.courier.filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo)
-    : [];
-  // Arbitrage scales rather than hides: an opportunity deeper than your hold or
-  // wallet is trimmed to the (most profitable) units that fit, not dropped — only
-  // hauls where not even one unit fits fall away (scaleArbitrage returns null).
-  const arbRows = showArbitrage
-    ? data.arbitrage
-        .map((a) => scaleArbitrage(a, maxCargo, maxCollateral))
-        .filter((a): a is NonNullable<typeof a> => a !== null)
-    : [];
+  const courierRows = data.courier.filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo);
+  const arbRows = data.arbitrage
+      .map((a) => scaleArbitrage(a, maxCargo, maxCollateral))
+      .filter((a): a is NonNullable<typeof a> => a !== null);
 
-  return scoreCombined(courierRows, arbRows, weights);
+  const origin = get(characterStatusAtom)?.systemId ?? null;
+  const routeType = prefs.routeType;
+  const routesCache = get(pinnedRoutesAtom);
+
+  const pinnedCouriers = get(pinnedCouriersAtom);
+  const liveCourierIds = new Set(data.courier.map((c) => c.id));
+  const updatedPinnedCouriers = pinnedCouriers.map((c) => {
+    const isSecured = c.status === 'secured';
+    const isUnavailable = c.status === 'planned' && !liveCourierIds.has(c.id);
+    let item = {
+      ...c,
+      unavailable: isUnavailable,
+    };
+    if (isSecured && origin !== null && c.dropoff?.systemId) {
+      const cacheKey = `${origin}-${c.dropoff.systemId}-${routeType}`;
+      const cached = routesCache[cacheKey];
+      if (cached) {
+        item = {
+          ...item,
+          approachRoute: null,
+          deliveryRoute: cached.route,
+          jumpsFromCurrent: null,
+          jumpsToDropoff: cached.jumps,
+          totalJumps: cached.jumps,
+          incomePerJump: cached.jumps !== null && cached.jumps > 0 ? c.reward / cached.jumps : c.reward,
+        };
+      }
+    }
+    return item;
+  });
+  const pinnedCourierIds = new Set(pinnedCouriers.map((c) => c.id));
+  const filteredCourierRows = courierRows.filter((c) => !pinnedCourierIds.has(c.id));
+
+  const pinnedHauls = get(pinnedHaulsAtom);
+  const updatedPinnedHauls = pinnedHauls.map((h) => {
+    const isTransit = h.status === 'transit';
+    let item = { ...h };
+    if (isTransit && origin !== null && h.dest?.systemId) {
+      const cacheKey = `${origin}-${h.dest.systemId}-${routeType}`;
+      const cached = routesCache[cacheKey];
+      if (cached) {
+        item = {
+          ...item,
+          approachRoute: null,
+          deliveryRoute: cached.route,
+          jumpsFromCurrent: null,
+          jumpsToDest: cached.jumps,
+          totalJumps: cached.jumps,
+          profitPerJump: cached.jumps !== null && cached.jumps > 0 ? (h.profit ?? 0) / cached.jumps : (h.profit ?? 0),
+        };
+      }
+    }
+    return item;
+  });
+  const pinnedIds = new Set(pinnedHauls.map((h) => h.id));
+  const filteredArbRows = arbRows.filter((a) => !pinnedIds.has(a.id));
+
+  return scoreCombined(filteredCourierRows, filteredArbRows, updatedPinnedHauls, updatedPinnedCouriers, weights);
 });

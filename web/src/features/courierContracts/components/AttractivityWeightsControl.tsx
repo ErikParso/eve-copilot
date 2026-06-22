@@ -1,50 +1,92 @@
 import { useState } from 'react';
-import { useAtomValue } from 'jotai';
-import { Box, Button, Typography } from '@mui/material';
+import { useAtom } from 'jotai';
+import { Box, Chip, Tooltip, Typography, FormHelperText } from '@mui/material';
 import TuneIcon from '@mui/icons-material/Tune';
 import { attractivityWeightsAtom } from '../atoms';
-import { ATTRACTIVITY_PRESETS, FACTORS, factorLabel, type FactorId } from '../attractivity';
+import { ATTRACTIVITY_PRESETS, FACTORS, type AttractivityWeights } from '../attractivity';
 import { AttractivityWeightsModal } from './AttractivityWeightsModal';
 
-/** Summarise the active weights: the matching preset name, or top factors. */
-function summarise(weights: Record<FactorId, number>): string {
-  const preset = ATTRACTIVITY_PRESETS.find((p) =>
-    FACTORS.every((f) => (p.weights[f.id] ?? 0) === (weights[f.id] ?? 0)),
-  );
-  if (preset) return `Preset: ${preset.label}`;
-
-  const top = FACTORS.filter((f) => (weights[f.id] ?? 0) > 0)
-    .sort((a, b) => (weights[b.id] ?? 0) - (weights[a.id] ?? 0))
-    .slice(0, 3)
-    .map((f) => factorLabel(f.id));
-
-  if (top.length === 0) return 'No factors weighted';
-  return `Custom: ${top.join(', ')}${top.length < FACTORS.filter((f) => weights[f.id] > 0).length ? '…' : ''}`;
+function weightsEqual(a: AttractivityWeights, b: AttractivityWeights): boolean {
+  return FACTORS.every((f) => (a[f.id] ?? 0) === (b[f.id] ?? 0));
 }
 
-/** Button + summary that opens the attractivity weights modal. */
+/** Directly displays attractivity presets as chips, and opens custom sliders on 'Custom' click. */
 export function AttractivityWeightsControl() {
+  const [weights, setWeights] = useAtom(attractivityWeightsAtom);
   const [open, setOpen] = useState(false);
-  const weights = useAtomValue(attractivityWeightsAtom);
+
+  const activePreset = ATTRACTIVITY_PRESETS.find((p) => weightsEqual(p.weights, weights));
+  const isCustom = !activePreset;
 
   return (
     <Box>
-      <Button
-        variant="outlined"
-        startIcon={<TuneIcon />}
-        onClick={() => setOpen(true)}
-        fullWidth
-        sx={{ justifyContent: 'flex-start' }}
+      <Box
+        sx={{
+          border: '1px solid',
+          borderColor: (theme) => theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.23)' : 'rgba(255, 255, 255, 0.23)',
+          borderRadius: 1,
+          px: 1.5,
+          py: 0,
+          position: 'relative',
+          minHeight: 56,
+          display: 'flex',
+          alignItems: 'center',
+          boxSizing: 'border-box',
+          '&:hover': {
+            borderColor: (theme) => theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.87)' : 'rgba(255, 255, 255, 0.87)',
+          },
+          '&:focus-within': {
+            borderColor: 'primary.main',
+            borderWidth: '2px',
+            px: '11px',
+          },
+        }}
       >
-        Attractivity weights
-      </Button>
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        sx={{ display: 'block', mt: 0.5, lineHeight: 1.4 }}
-      >
-        {summarise(weights)}
-      </Typography>
+        <Typography
+          variant="caption"
+          sx={{
+            position: 'absolute',
+            top: -9,
+            left: 9,
+            bgcolor: 'background.paper',
+            px: 0.5,
+            color: 'text.secondary',
+            fontSize: '0.75rem',
+            lineHeight: 1,
+            pointerEvents: 'none',
+          }}
+        >
+          Attractivity Preset
+        </Typography>
+        <Box sx={{ display: 'flex', flexWrap: { xs: 'wrap', md: 'nowrap' }, gap: 1, py: 1 }}>
+          {ATTRACTIVITY_PRESETS.map((preset) => (
+            <Tooltip key={preset.id} title={preset.description} arrow>
+              <Chip
+                label={preset.label}
+                color={activePreset?.id === preset.id ? 'primary' : 'default'}
+                variant={activePreset?.id === preset.id ? 'filled' : 'outlined'}
+                size="small"
+                onClick={() => setWeights(preset.weights)}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Tooltip>
+          ))}
+          <Tooltip title="Configure custom weights using factor sliders" arrow>
+            <Chip
+              label="Custom..."
+              icon={<TuneIcon sx={{ fontSize: 14 }} />}
+              color={isCustom ? 'primary' : 'default'}
+              variant={isCustom ? 'filled' : 'outlined'}
+              size="small"
+              onClick={() => setOpen(true)}
+              sx={{ cursor: 'pointer' }}
+            />
+          </Tooltip>
+        </Box>
+      </Box>
+      <FormHelperText sx={{ mx: 1.75, mt: 0.5, minHeight: 20 }}>
+        {activePreset?.description ?? 'Custom weights adjusted via factor sliders.'}
+      </FormHelperText>
       <AttractivityWeightsModal open={open} onClose={() => setOpen(false)} />
     </Box>
   );

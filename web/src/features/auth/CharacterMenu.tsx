@@ -3,15 +3,13 @@ import { useAtomValue } from 'jotai';
 import {
   Avatar,
   Box,
-  Divider,
   IconButton,
   Menu,
   MenuItem,
-  Stack,
   Tooltip,
   Typography,
+  Badge,
 } from '@mui/material';
-import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import { portraitUrl } from '@/api/character';
@@ -20,9 +18,7 @@ import { formatIskMillions, formatNumber } from '@/utils/format';
 import { characterStatusAtom, characterWalletAtom } from './atoms';
 import { useAuth } from './useAuth';
 
-function ageSeconds(fetchedAt: number): number {
-  return Math.max(0, Math.round((Date.now() - fetchedAt) / 1000));
-}
+
 
 /** Avatar button + dropdown with the active character's live status. */
 export function CharacterMenu() {
@@ -38,86 +34,70 @@ export function CharacterMenu() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Box sx={{ textAlign: 'right', display: { xs: 'none', sm: 'block' }, lineHeight: 1.25 }}>
-          <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
             {active.name}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            {status?.systemName ?? 'Locating…'}
-            {status?.security != null && (
-              <Box
-                component="span"
-                sx={{ color: securityColor(status.security), fontWeight: 600, ml: 0.5 }}
-              >
-                {formatNumber(status.security, 1)}
+            {status?.systemName && (
+              <Box component="span" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '0.75rem' }}>
+                · {status.systemName}
+                {status.security != null && (
+                  <Box component="span" sx={{ color: securityColor(status.security), fontWeight: 600, ml: 0.5 }}>
+                    ({formatNumber(status.security, 1)})
+                  </Box>
+                )}
               </Box>
             )}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 600 }}>
+            {wallet ? `${formatIskMillions(wallet.balance)}` : '—'}
           </Typography>
         </Box>
         <Tooltip title={active.name} arrow>
           <IconButton onClick={(e) => setAnchor(e.currentTarget)} size="small" sx={{ p: 0.5 }}>
-            <Avatar src={portraitUrl(active.characterId)} sx={{ width: 32, height: 32 }} />
+            <Badge
+              overlap="circular"
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              variant="dot"
+              sx={{
+                '& .MuiBadge-badge': {
+                  backgroundColor: status?.online ? '#4caf50' : '#9e9e9e',
+                  color: status?.online ? '#4caf50' : '#9e9e9e',
+                  boxShadow: (theme) => `0 0 0 2px ${theme.palette.background.paper}`,
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  '&::after': status?.online ? {
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: '50%',
+                    animation: 'ripple 1.2s infinite ease-in-out',
+                    border: '1px solid currentColor',
+                    content: '""',
+                  } : undefined,
+                },
+                '@keyframes ripple': {
+                  '0%': {
+                    transform: 'scale(.8)',
+                    opacity: 1,
+                  },
+                  '100%': {
+                    transform: 'scale(2.4)',
+                    opacity: 0,
+                  },
+                },
+              }}
+            >
+              <Avatar src={portraitUrl(active.characterId)} sx={{ width: 40, height: 40 }} />
+            </Badge>
           </IconButton>
         </Tooltip>
       </Box>
 
       <Menu anchorEl={anchor} open={!!anchor} onClose={close}>
-        <Box sx={{ px: 2, py: 1, minWidth: 240 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-            {active.name}
-          </Typography>
-
-          {status ? (
-            <Stack spacing={0.5} sx={{ mt: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <FiberManualRecordIcon
-                  sx={{ fontSize: 10, color: status.online ? 'success.main' : 'text.disabled' }}
-                />
-                <Typography variant="caption" color="text.secondary">
-                  {status.online ? 'Online' : 'Offline'}
-                </Typography>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" color="text.secondary">
-                  System:
-                </Typography>
-                <Typography variant="caption">{status.systemName ?? '—'}</Typography>
-                {status.security !== null && (
-                  <Typography
-                    variant="caption"
-                    sx={{ color: securityColor(status.security), fontWeight: 600 }}
-                  >
-                    {formatNumber(status.security, 1)}
-                  </Typography>
-                )}
-              </Box>
-
-              <Typography variant="caption" color="text.secondary">
-                Ship: <Box component="span" sx={{ color: 'text.primary' }}>{status.shipTypeName ?? '—'}</Box>
-              </Typography>
-
-              <Typography variant="caption" color="text.secondary">
-                Wallet:{' '}
-                <Box component="span" sx={{ color: 'text.primary' }}>
-                  {wallet ? formatIskMillions(wallet.balance) : '—'}
-                </Box>
-              </Typography>
-
-              <Typography variant="caption" color="text.disabled">
-                updated {ageSeconds(status.fetchedAt)} s ago
-              </Typography>
-            </Stack>
-          ) : (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Loading status…
-            </Typography>
-          )}
-        </Box>
-
-        <Divider />
-
         {others.map((c) => (
           <MenuItem
             key={c.characterId}

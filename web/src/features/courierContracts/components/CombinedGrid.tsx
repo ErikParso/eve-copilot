@@ -14,10 +14,11 @@ const PAGE_SIZE = 16;
 export function CombinedGrid({ rows }: { rows: ResultCard[] }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
 
-  // Reset to the first page whenever a new result set arrives.
+  // Reset to the first page only when the set or order of items changes.
+  const keysStr = rows.map((r) => r.key).join(',');
   useEffect(() => {
     setVisible(PAGE_SIZE);
-  }, [rows]);
+  }, [keysStr]);
 
   const shown = rows.slice(0, visible);
 
@@ -27,7 +28,7 @@ export function CombinedGrid({ rows }: { rows: ResultCard[] }) {
       <Grid container spacing={2} sx={{ pt: '10px' }}>
         {shown.map((card) => (
           <Grid key={card.key} xs={12} sm={6} md={4} lg={3}>
-            {card.kind === 'courier' ? (
+            {card.kind === 'courier' || card.kind === 'pinned-courier' ? (
               <ContractCard row={card.row} />
             ) : (
               <ArbitrageCard row={card.row} />

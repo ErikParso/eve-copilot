@@ -91,14 +91,14 @@ export function PreferencesDrawer() {
 
         <Stack spacing={2.5}>
           <Typography variant="caption" color="text.secondary">
-            How you haul — shared by the Hauling search and the Copilot plan.
+            How you haul — used by the Hauling search.
           </Typography>
 
           <NumberPrefField
             label="Cargo capacity"
             value={prefs.cargoM3}
             unit="m³"
-            helperText="Your hold — hides oversized hauls; the plan's capacity."
+            helperText="Your hold — hides oversized hauls."
             onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
           />
 

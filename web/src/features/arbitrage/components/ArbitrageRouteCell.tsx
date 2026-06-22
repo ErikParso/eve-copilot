@@ -3,20 +3,24 @@ import { Box } from '@mui/material';
 import { formatNumber } from '@/utils/format';
 import { RouteSquares, type RouteNode } from '@/features/courierContracts/components/RouteSquares';
 import type { ArbitrageRow } from '../types';
+import type { PinnedHaul } from '../atoms';
 
 /**
  * The whole journey as one strip of security-coloured squares: an optional
  * approach leg (current system → buy station) followed by the delivery leg
  * (buy → sell), with an up arrow on the buy system and a down arrow on the sell
  * system. `trailing` renders to the right of the jump-count line.
+ * If the cargo is already in transit (bought), the approach leg is omitted.
  */
-export function ArbitrageRouteCell({ row, trailing }: { row: ArbitrageRow; trailing?: ReactNode }) {
+export function ArbitrageRouteCell({ row, trailing }: { row: ArbitrageRow | PinnedHaul; trailing?: ReactNode }) {
   const { approachRoute, deliveryRoute, jumpsFromCurrent, jumpsToDest } = row;
 
   if (!deliveryRoute) return <>—</>;
 
+  const isTransit = 'status' in row && row.status === 'transit';
+
   const nodes: RouteNode[] = [];
-  if (approachRoute) {
+  if (approachRoute && !isTransit) {
     approachRoute.forEach((system, i) => {
       // Last approach system is the buy station; the first is the current location.
       const marker = i === approachRoute.length - 1 ? 'pickup' : i === 0 ? 'current' : undefined;
@@ -27,13 +31,13 @@ export function ArbitrageRouteCell({ row, trailing }: { row: ArbitrageRow; trail
     });
   } else {
     deliveryRoute.forEach((system, i) => {
-      const marker = i === 0 ? 'pickup' : i === deliveryRoute.length - 1 ? 'dropoff' : undefined;
+      const marker = i === 0 ? (isTransit ? 'current' : 'pickup') : i === deliveryRoute.length - 1 ? 'dropoff' : undefined;
       nodes.push({ system, marker });
     });
   }
 
   const label =
-    jumpsFromCurrent !== null
+    jumpsFromCurrent !== null && !isTransit
       ? `${formatNumber(jumpsFromCurrent, 0)} + ${formatNumber(jumpsToDest ?? 0, 0)} jumps`
       : `${formatNumber(jumpsToDest ?? 0, 0)} jumps`;
 

@@ -7,10 +7,14 @@ import type { ArbitrageItem } from './types';
 
 /** A haul's metrics in the shared scoring vocabulary. */
 export function arbitrageToScorable(
-  r: Pick<ArbitrageItem, 'profit' | 'totalJumps' | 'danger'>,
+  r: Pick<ArbitrageItem, 'profit' | 'totalJumps' | 'danger'> & {
+    buyerGone?: boolean;
+    liveProfit?: number;
+  },
 ): Scorable {
+  const activeProfit = r.buyerGone ? 0 : (r.liveProfit ?? r.profit);
   return {
-    income: r.profit,
+    income: activeProfit,
     totalJumps: r.totalJumps,
     danger: r.danger,
   };
