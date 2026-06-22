@@ -11,6 +11,7 @@ import type { ContractEndpoint } from '@/features/courierContracts/types';
 import type { ArbitrageRow } from '../types';
 import { ArbitrageRouteCell } from './ArbitrageRouteCell';
 import { OpenMarketButton } from './OpenMarketButton';
+import { WaypointButton } from './WaypointButton';
 
 // Paying more than this multiple of the item's reference market value at the
 // source is the real exposure: if the destination sale falls through (e.g. a
@@ -43,6 +44,7 @@ function Stat({
         {label}
       </Typography>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+        {adornment}
         <Typography variant="caption" sx={{ fontWeight: 600, textAlign: 'right', color }}>
           {value}
         </Typography>
@@ -51,7 +53,6 @@ function Stat({
             <SegmentIcon sx={{ fontSize: 13, color: 'text.secondary', cursor: 'help', opacity: 0.8, '&:hover': { opacity: 1 } }} />
           </Tooltip>
         )}
-        {adornment}
       </Box>
     </Box>
   );
@@ -224,24 +225,16 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Typography variant="caption" color="text.secondary">
-              {row.limited
-                ? `${formatNumber(row.quantity, 0)} of ${formatNumber(row.fullQuantity, 0)} units`
-                : `${formatNumber(row.quantity, 0)} unit${row.quantity === 1 ? '' : 's'}`}{' '}
-              · {formatVolume(row.totalVolume)}
+              {`${formatNumber(row.quantity, 0)} unit${row.quantity === 1 ? '' : 's'}`} · {formatVolume(row.totalVolume)}
             </Typography>
             <Tooltip arrow title={breakdownTooltip} slotProps={{ tooltip: { sx: { maxWidth: 'none' } } }}>
               <SegmentIcon sx={{ fontSize: 13, color: 'text.secondary', cursor: 'help', opacity: 0.8, '&:hover': { opacity: 1 } }} />
             </Tooltip>
           </Box>
-          {row.limited && (
-            <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontWeight: 600 }}>
-              Limited to what fits your hold + wallet
-            </Typography>
-          )}
         </Box>
 
-        <Endpoint label="Buy" endpoint={row.source} />
-        <Endpoint label="Sell" endpoint={row.dest} />
+        <Endpoint label="Buy" endpoint={row.source} action={<WaypointButton endpoint={row.source} add={false} />} />
+        <Endpoint label="Sell" endpoint={row.dest} action={<WaypointButton endpoint={row.dest} add={true} />} />
 
         <ArbitrageRouteCell row={row} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
 
@@ -252,7 +245,6 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
             label="Buy (you pay)"
             value={`${formatIsk(row.buyPrice)} / unit`}
             color={overpaying ? 'warning.main' : undefined}
-            tooltip={breakdownTooltip}
             adornment={
               overpaying ? (
                 <Tooltip arrow title={overpayWarning}>
@@ -263,7 +255,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({ row }: { row: Arbitra
               ) : undefined
             }
           />
-          <Stat label="Sell (you get)" value={`${formatIsk(row.sellPrice)} / unit`} tooltip={breakdownTooltip} />
+          <Stat label="Sell (you get)" value={`${formatIsk(row.sellPrice)} / unit`} />
           <Stat
             label="Market value"
             value={row.marketPrice === null ? '—' : `${formatIsk(row.marketPrice)} / unit`}
