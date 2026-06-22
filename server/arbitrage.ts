@@ -18,16 +18,13 @@ import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import { getType } from './sde.js';
 import { getMarketPrice } from './prices.js';
-import { getMarketMeta, getSnapshot, type MarketMeta, type Order, type StationOrders, type TypeBook } from './market.js';
+import { getMarketMeta, getSnapshot, type MarketMeta, type Order, type TypeBook } from './market.js';
 import type {
-  ArbitrageCommitment,
   ArbitrageItem,
   ArbitrageOpportunity,
   ArbitrageRung,
-  BuyOpportunity,
-  CommittedEconomics,
-  SellHolding,
-  SellOpportunity,
+  PinnedHaulStatusRequest,
+  PinnedHaulStatusResponse,
 } from './types.js';
 
 // Sales tax assumed when scoring profit (mid Accounting skill). Baked in, not a
@@ -176,295 +173,6 @@ function getOpportunities(): ArbitrageOpportunity[] {
   return opportunities;
 }
 
-// --- Plan-aware resolution: subtract the Copilot's reservations ---------------
-//
-// The full menu above treats every opportunity in isolation, so overlapping
-// hauls (same item at the same station) double-count the shared orders. The
-// Copilot sends what it has reserved; we consume that depth from a clone of the
-// book, then report each reservation's CURRENT worth + recompute the remaining
-// opportunities for the (few) affected item types. Untouched types reuse the
-// cached menu. Route-free by design — the client routes via /api/routes.
-
-/** Per-station mutable order pools for one item type, cloned from the snapshot. */
-interface TypePools {
-  sells: Map<number, Order[]>;
-  buys: Map<number, Order[]>;
-}
-
-/** Clone a type's station orders so we can decrement volumes without touching the snapshot. */
-function clonePools(book: TypeBook): TypePools {
-  const sells = new Map<number, Order[]>();
-  for (const s of book.sells) sells.set(s.station, s.orders.map((o) => ({ ...o })));
-  const buys = new Map<number, Order[]>();
-  for (const b of book.buys) buys.set(b.station, b.orders.map((o) => ({ ...o })));
-  return { sells, buys };
-}
-
-/** Rebuild best-price-sorted StationOrders from a mutated pool, dropping emptied orders. */
-function stationsFromPool(pool: Map<number, Order[]>, ascending: boolean): StationOrders[] {
-  const stations: StationOrders[] = [];
-  for (const orders of pool.values()) {
-    const live = orders.filter((o) => o.volume > 0);
-    if (live.length === 0) continue;
-    live.sort((a, b) => (ascending ? a.price - b.price : b.price - a.price));
-    stations.push({ station: live[0].locationId, system: live[0].systemId, best: live[0].price, orders: live });
-  }
-  stations.sort((a, b) => (ascending ? a.best - b.best : b.best - a.best));
-  return stations;
-}
-
-/**
- * Like walkDepth but for ONE source station vs ONE dest station, capped at
- * `maxUnits` and MUTATING the order volumes in place (so later reservations and
- * the remaining-opportunity recompute see the consumed depth).
- */
-function consumeWalk(
-  asks: Order[],
-  bids: Order[],
-  maxUnits: number,
-): { quantity: number; buyCost: number; sellRevenueGross: number; ladder: ArbitrageRung[] } {
-  const tax = DEFAULT_SALES_TAX;
-  let ai = 0;
-  let bi = 0;
-  let quantity = 0;
-  let buyCost = 0;
-  let sellRevenueGross = 0;
-  const ladder: ArbitrageRung[] = [];
-
-  while (ai < asks.length && bi < bids.length && quantity < maxUnits) {
-    if (asks[ai].volume <= 0) { ai++; continue; }
-    if (bids[bi].volume <= 0) { bi++; continue; }
-    const ask = asks[ai].price;
-    const bid = bids[bi].price;
-    if (bid * (1 - tax) <= ask) break; // marginal unit no longer profitable
-    const batch = Math.min(asks[ai].volume, bids[bi].volume, maxUnits - quantity);
-    if (batch <= 0) break;
-    quantity += batch;
-    buyCost += batch * ask;
-    sellRevenueGross += batch * bid;
-    if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: ask, sell: bid });
-    asks[ai].volume -= batch;
-    bids[bi].volume -= batch;
-  }
-  return { quantity, buyCost, sellRevenueGross, ladder };
-}
-
-export interface ArbitragePlan {
-  available: ArbitrageOpportunity[];
-  committed: CommittedEconomics[];
-  meta: MarketMeta;
-}
-
-/**
- * Resolve the Copilot's reservations against the live book: returns each
- * reservation's current economics (route-free) plus the opportunities still
- * available after the reservations took their depth.
- */
-export function resolveArbitragePlan(commitments: ArbitrageCommitment[]): ArbitragePlan {
-  const meta = getMarketMeta();
-  const snap = getSnapshot();
-  if (!snap) return { available: [], committed: [], meta };
-  const tax = DEFAULT_SALES_TAX;
-
-  // Clone pools lazily, once per affected type, and keep consuming from them.
-  const poolsByType = new Map<number, TypePools>();
-  const getPools = (typeId: number): TypePools => {
-    let p = poolsByType.get(typeId);
-    if (!p) {
-      const book = snap.byType.get(typeId);
-      p = book ? clonePools(book) : { sells: new Map(), buys: new Map() };
-      poolsByType.set(typeId, p);
-    }
-    return p;
-  };
-
-  // Process reservations in basket order — earlier ones get the cheaper depth.
-  const committed: CommittedEconomics[] = [];
-  for (const c of commitments) {
-    const pools = getPools(c.typeId);
-    const asks = pools.sells.get(c.source) ?? [];
-    const bids = pools.buys.get(c.dest) ?? [];
-    const { quantity, buyCost, sellRevenueGross, ladder } = consumeWalk(asks, bids, c.quantity);
-    const unitVolume = getType(c.typeId)?.volume ?? 0;
-    const profit = quantity > 0 ? sellRevenueGross * (1 - tax) - buyCost : 0;
-    committed.push({
-      id: c.id,
-      requested: c.quantity,
-      quantity,
-      totalVolume: quantity * unitVolume,
-      buyCost,
-      profit,
-      marginPct: buyCost > 0 ? (profit / buyCost) * 100 : 0,
-      buyPrice: quantity > 0 ? buyCost / quantity : 0,
-      sellPrice: quantity > 0 ? sellRevenueGross / quantity : 0,
-      ladder,
-      shortfall: quantity < c.quantity,
-    });
-  }
-
-  // Available = cached menu for untouched types + a fresh walk over the reduced
-  // pools for the touched ones, re-sorted and re-capped.
-  const cached = getOpportunities();
-  const available = cached.filter((o) => !poolsByType.has(o.typeId));
-  for (const [typeId, pools] of poolsByType) {
-    const type = getType(typeId);
-    if (!type) continue;
-    const reduced: TypeBook = {
-      sells: stationsFromPool(pools.sells, true),
-      buys: stationsFromPool(pools.buys, false),
-    };
-    available.push(...opportunitiesForType(typeId, type.name, type.volume, reduced));
-  }
-  available.sort((a, b) => b.profit - a.profit);
-
-  return {
-    available: available.length > MAX_OPPORTUNITIES ? available.slice(0, MAX_OPPORTUNITIES) : available,
-    committed,
-    meta,
-  };
-}
-
-// --- Sell run: find buyers for what the ship is carrying ----------------------
-//
-// The mirror of the buy/arbitrage discovery above, but disposal-only: given the
-// ship's holdings, emit one candidate per buy-order station that wants the item,
-// priced at what its bids yield (net of sales tax) for up to the held quantity.
-// No buy leg, no cost basis — the client knows what it paid and computes profit.
-// Route-free; the client routes via /api/routes and ranks by ISK-per-jump.
-
-// Cap buy-order stations considered per held type. Buys are pre-sorted
-// dearest-first, so the first N stations are the best-paying.
-const MAX_SELL_STATIONS_PER_TYPE = 12;
-
-/** Walk bids (dearest first) absorbing up to `maxUnits`; returns units sold + gross revenue. */
-function walkBids(bids: Order[], maxUnits: number): { quantity: number; grossRevenue: number } {
-  let quantity = 0;
-  let grossRevenue = 0;
-  for (const o of bids) {
-    if (quantity >= maxUnits) break;
-    const batch = Math.min(o.volume, maxUnits - quantity);
-    if (batch <= 0) continue;
-    quantity += batch;
-    grossRevenue += batch * o.price;
-  }
-  return { quantity, grossRevenue };
-}
-
-export interface SellPlan {
-  candidates: SellOpportunity[];
-  meta: MarketMeta;
-}
-
-/** For each held stack, the best-paying buy-order stations (dearest bids, net of tax). */
-export function resolveSellOpportunities(holdings: SellHolding[]): SellPlan {
-  const meta = getMarketMeta();
-  const snap = getSnapshot();
-  if (!snap) return { candidates: [], meta };
-  const tax = DEFAULT_SALES_TAX;
-  const candidates: SellOpportunity[] = [];
-
-  for (const h of holdings) {
-    if (h.qty <= 0) continue;
-    const book = snap.byType.get(h.typeId);
-    if (!book || book.buys.length === 0) continue;
-    const type = getType(h.typeId);
-    if (!type) continue;
-    const marketPrice = getMarketPrice(h.typeId);
-
-    for (const station of book.buys.slice(0, MAX_SELL_STATIONS_PER_TYPE)) {
-      const { quantity, grossRevenue } = walkBids(station.orders, h.qty);
-      if (quantity <= 0) continue;
-      candidates.push({
-        id: `${h.typeId}:${station.station}`,
-        typeId: h.typeId,
-        itemName: type.name,
-        quantity,
-        requested: h.qty,
-        unitVolume: type.volume,
-        totalVolume: quantity * type.volume,
-        sellPrice: grossRevenue / quantity,
-        grossRevenue,
-        netRevenue: grossRevenue * (1 - tax),
-        marketPrice,
-        salesTax: tax,
-        dest: resolveEndpoint(station.station, station.system),
-      });
-    }
-  }
-
-  // Best net revenue first; the client re-ranks by ISK-per-jump once routed.
-  candidates.sort((a, b) => b.netRevenue - a.netRevenue);
-  return { candidates, meta };
-}
-
-// --- Buy run: the arbitrage menu, framed as "buy here, resell there" ----------
-//
-// Buy candidates are the SAME profitable buy-here/sell-there opportunities the
-// Hauling page shows (so the quality matches), reframed for the buy run: you
-// commit only the buy leg into inventory now, and the opportunity's destination
-// is the resale context (best-paying bid + margin) — the actual sale happens in a
-// later sell run. Deduped to the best resale per (item, buy-station). Cached per
-// snapshot via getOpportunities. Route-free; the client routes/ranks.
-
-// Global ceiling on the cached buy menu (best resale upside first).
-const MAX_BUY_CANDIDATES = 1500;
-
-/** Map the cached arbitrage opportunities into buy candidates (best per item+source). */
-function resolveBuyOpportunities(): BuyOpportunity[] {
-  const bestBySource = new Map<string, ArbitrageOpportunity>();
-  for (const o of getOpportunities()) {
-    const key = `${o.typeId}:${o.source.locationId}`;
-    const cur = bestBySource.get(key);
-    if (!cur || o.profit > cur.profit) bestBySource.set(key, o);
-  }
-
-  const out: BuyOpportunity[] = [];
-  for (const [key, o] of bestBySource) {
-    const bestResaleNet = o.sellPrice * (1 - o.salesTax);
-    out.push({
-      id: key,
-      typeId: o.typeId,
-      itemName: o.itemName,
-      quantity: o.quantity,
-      unitVolume: o.unitVolume,
-      totalVolume: o.totalVolume,
-      askPrice: o.buyPrice,
-      buyCost: o.buyCost,
-      marketPrice: o.marketPrice,
-      discountPct:
-        o.marketPrice && o.marketPrice > 0 ? ((o.marketPrice - o.buyPrice) / o.marketPrice) * 100 : null,
-      bestResaleNet,
-      resaleMarginPct: o.marginPct,
-      bestResaleStation: o.dest,
-      demandUnits: o.quantity,
-      source: o.source,
-    });
-  }
-
-  // Best resale upside first; the client re-ranks by ISK-per-jump.
-  out.sort((a, b) => (b.bestResaleNet - b.askPrice) * b.quantity - (a.bestResaleNet - a.askPrice) * a.quantity);
-  return out.length > MAX_BUY_CANDIDATES ? out.slice(0, MAX_BUY_CANDIDATES) : out;
-}
-
-let buyCandidatesSnapshotAt = -1;
-let buyCandidates: BuyOpportunity[] = [];
-
-export interface BuyPlan {
-  candidates: BuyOpportunity[];
-  meta: MarketMeta;
-}
-
-/** Cached buy candidates (the arbitrage menu framed as buy-leg + resale), rebuilt per snapshot. */
-export function resolveBuyCandidates(): BuyPlan {
-  const meta = getMarketMeta();
-  const snap = getSnapshot();
-  if (!snap) return { candidates: [], meta };
-  if (snap.builtAt !== buyCandidatesSnapshotAt) {
-    buyCandidates = resolveBuyOpportunities();
-    buyCandidatesSnapshotAt = snap.builtAt;
-  }
-  return { candidates: buyCandidates, meta };
-}
 
 // --- Step 3: resolve routes into items (every request) ------------------------
 
@@ -521,4 +229,116 @@ export async function getEnrichedArbitrage(routeType: RouteType, origin: number 
     if (item) items.push(item);
   }
   return { items, meta };
+}
+
+function walkPlanning(
+  asks: Order[],
+  bids: Order[],
+  targetQty: number
+): { quantity: number; buyCost: number; sellRevenueGross: number; ladder: ArbitrageRung[] } {
+  const tax = DEFAULT_SALES_TAX;
+  let ai = 0;
+  let bi = 0;
+  let askRem = asks[0]?.volume ?? 0;
+  let bidRem = bids[0]?.volume ?? 0;
+  let quantity = 0;
+  let buyCost = 0;
+  let sellRevenueGross = 0;
+  const ladder: ArbitrageRung[] = [];
+
+  while (ai < asks.length && bi < bids.length && quantity < targetQty) {
+    const ask = asks[ai].price;
+    const bid = bids[bi].price;
+    if (bid * (1 - tax) <= ask) break;
+    const batch = Math.min(askRem, bidRem, targetQty - quantity);
+    if (batch <= 0) break;
+    quantity += batch;
+    buyCost += batch * ask;
+    sellRevenueGross += batch * bid;
+    if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: ask, sell: bid });
+    askRem -= batch;
+    bidRem -= batch;
+    if (askRem === 0) askRem = asks[++ai]?.volume ?? 0;
+    if (bidRem === 0) bidRem = bids[++bi]?.volume ?? 0;
+  }
+  return { quantity, buyCost, sellRevenueGross, ladder };
+}
+
+function walkTransit(
+  bids: Order[],
+  boughtPrice: number,
+  targetQty: number
+): { quantity: number; buyCost: number; sellRevenueGross: number; ladder: ArbitrageRung[] } {
+  let bi = 0;
+  let bidRem = bids[0]?.volume ?? 0;
+  let quantity = 0;
+  let sellRevenueGross = 0;
+  const ladder: ArbitrageRung[] = [];
+
+  while (bi < bids.length && quantity < targetQty) {
+    const bid = bids[bi].price;
+    const batch = Math.min(bidRem, targetQty - quantity);
+    if (batch <= 0) break;
+    quantity += batch;
+    sellRevenueGross += batch * bid;
+    if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: boughtPrice, sell: bid });
+    bidRem -= batch;
+    if (bidRem === 0) bidRem = bids[++bi]?.volume ?? 0;
+  }
+  const buyCost = quantity * boughtPrice;
+  return { quantity, buyCost, sellRevenueGross, ladder };
+}
+
+export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): PinnedHaulStatusResponse[] {
+  const snap = getSnapshot();
+  if (!snap) return [];
+  const tax = DEFAULT_SALES_TAX;
+  const out: PinnedHaulStatusResponse[] = [];
+
+  for (const h of hauls) {
+    const book = snap.byType.get(h.typeId);
+    const sourceStation = book?.sells.find((s) => s.station === h.source);
+    const destStation = book?.buys.find((b) => b.station === h.dest);
+    const asks = sourceStation?.orders ?? [];
+    const bids = destStation?.orders ?? [];
+
+    let quantity = 0;
+    let buyCost = 0;
+    let sellRevenueGross = 0;
+    let ladder: ArbitrageRung[] = [];
+
+    if (h.status === 'planning') {
+      const walk = walkPlanning(asks, bids, h.quantity);
+      quantity = walk.quantity;
+      buyCost = walk.buyCost;
+      sellRevenueGross = walk.sellRevenueGross;
+      ladder = walk.ladder;
+    } else {
+      const bp = h.boughtPrice ?? 0;
+      const walk = walkTransit(bids, bp, h.quantity);
+      quantity = walk.quantity;
+      buyCost = walk.buyCost;
+      sellRevenueGross = walk.sellRevenueGross;
+      ladder = walk.ladder;
+    }
+
+    const profit = quantity > 0 ? sellRevenueGross * (1 - tax) - buyCost : 0;
+    const buyPrice = h.status === 'planning' ? (quantity > 0 ? buyCost / quantity : 0) : (h.boughtPrice ?? 0);
+    const sellPrice = quantity > 0 ? sellRevenueGross / quantity : 0;
+    const marginPct = buyCost > 0 ? (profit / buyCost) * 100 : 0;
+
+    out.push({
+      id: h.id,
+      quantity,
+      buyPrice,
+      sellPrice,
+      profit,
+      marginPct,
+      shortfall: quantity < h.quantity,
+      buyerGone: quantity === 0,
+      ladder,
+    });
+  }
+
+  return out;
 }

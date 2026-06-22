@@ -8,10 +8,13 @@ import { arbitrageToScorable } from '@/features/arbitrage/attractivity';
 import type { CourierRow, SortOptionId } from './types';
 import { SORT_OPTIONS } from './sortContracts';
 import type { ArbitrageRow, ScaledArbitrage } from '@/features/arbitrage/types';
+import type { PinnedHaul, PinnedCourier } from '@/features/arbitrage/atoms';
 
 export type ResultCard =
   | { kind: 'courier'; key: string; row: CourierRow }
-  | { kind: 'arbitrage'; key: string; row: ArbitrageRow };
+  | { kind: 'arbitrage'; key: string; row: ArbitrageRow }
+  | { kind: 'pinned-arbitrage'; key: string; row: PinnedHaul & { attractivity: number; attractivitySteps: string[] } }
+  | { kind: 'pinned-courier'; key: string; row: PinnedCourier & { attractivity: number; attractivitySteps: string[] } };
 
 /** A hydrated row before attractivity is added (the scorer fills those in). */
 type CourierBase = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>;
@@ -25,28 +28,40 @@ type CourierBase = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>;
 export function scoreCombined(
   courier: CourierBase[],
   arbitrage: ScaledArbitrage[],
+  pinnedArb: PinnedHaul[],
+  pinnedCourier: PinnedCourier[],
   weights: AttractivityWeights,
 ): ResultCard[] {
   const inputs = [
     ...courier.map((row) => ({ kind: 'courier' as const, row })),
     ...arbitrage.map((row) => ({ kind: 'arbitrage' as const, row })),
+    ...pinnedArb.map((row) => ({ kind: 'pinned-arbitrage' as const, row })),
+    ...pinnedCourier.map((row) => ({ kind: 'pinned-courier' as const, row })),
   ];
 
   const scored = score(inputs, weights, (e) =>
-    e.kind === 'courier' ? courierToScorable(e.row) : arbitrageToScorable(e.row),
+    e.kind === 'courier' || e.kind === 'pinned-courier'
+      ? courierToScorable(e.row)
+      : arbitrageToScorable(e.row),
   );
 
   return scored.map((e) => {
     const { attractivity, attractivitySteps } = e;
-    return e.kind === 'courier'
-      ? { kind: 'courier', key: `c:${e.row.id}`, row: { ...e.row, attractivity, attractivitySteps } }
-      : { kind: 'arbitrage', key: `a:${e.row.id}`, row: { ...e.row, attractivity, attractivitySteps } };
+    if (e.kind === 'courier') {
+      return { kind: 'courier', key: `c:${e.row.id}`, row: { ...e.row, attractivity, attractivitySteps } };
+    } else if (e.kind === 'pinned-courier') {
+      return { kind: 'pinned-courier', key: `pc:${e.row.id}`, row: { ...e.row, attractivity, attractivitySteps } };
+    } else if (e.kind === 'pinned-arbitrage') {
+      return { kind: 'pinned-arbitrage', key: `p:${e.row.id}`, row: { ...e.row, attractivity, attractivitySteps } };
+    } else {
+      return { kind: 'arbitrage', key: `a:${e.row.id}`, row: { ...e.row, attractivity, attractivitySteps } };
+    }
   });
 }
 
 /** Sort value for a card under a given option (null sorts last). */
 function sortValue(card: ResultCard, sortBy: SortOptionId): number | null {
-  if (card.kind === 'courier') {
+  if (card.kind === 'courier' || card.kind === 'pinned-courier') {
     const opt = SORT_OPTIONS.find((o) => o.id === sortBy);
     return opt ? opt.get(card.row) : card.row.attractivity;
   }
@@ -82,6 +97,11 @@ const DIRECTION = new Map(SORT_OPTIONS.map((o) => [o.id, o.direction]));
 export function sortCombined(cards: ResultCard[], sortBy: SortOptionId): ResultCard[] {
   const factor = (DIRECTION.get(sortBy) ?? 'desc') === 'asc' ? 1 : -1;
   return [...cards].sort((a, b) => {
+    const aPinned = a.kind === 'pinned-arbitrage' || a.kind === 'pinned-courier';
+    const bPinned = b.kind === 'pinned-arbitrage' || b.kind === 'pinned-courier';
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+
     const va = sortValue(a, sortBy);
     const vb = sortValue(b, sortBy);
     const aNull = va === null || va === undefined;

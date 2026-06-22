@@ -1,9 +1,9 @@
 // Drives the global hauling fetch: runs once on load, refreshes in the
 // background on the server's crawl cadence, and re-fetches when the route type
 // or the character's current system changes (both alter server-resolved routes).
-// Mount this exactly once (in the app shell). Results land in haulingDataAtom,
-// shared by the Hauling and Copilot tabs. Filtering/scoring is derived from the
-// preferences in haulingRowsAtom, so preference tweaks don't trigger a re-fetch.
+// Mount this exactly once (in the app shell). Results land in haulingDataAtom.
+// Filtering/scoring is derived from the preferences in haulingRowsAtom, so
+// preference tweaks don't trigger a re-fetch.
 import { useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { characterStatusAtom } from '@/features/auth/atoms';
@@ -12,6 +12,7 @@ import { deriveJourney, perJump } from './journey';
 import { haulingDataAtom, type CourierBase } from './atoms';
 import type { ContractEndpoint, RouteSystem } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
+import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
 
 // Background refresh aligns to the server crawl cadence (~10 min); retry sooner
 // while the market crawl is still warming up on a cold server.
@@ -135,6 +136,60 @@ export function useHaulingSearchController(): void {
         contractsAsOf: contractData.lastModifiedAt,
         market: arbData.meta,
       });
+
+      // Fetch dynamic routes for in-transit/secured pinned items
+      const pinnedHauls = store.get(pinnedHaulsAtom);
+      const pinnedCouriers = store.get(pinnedCouriersAtom);
+      const transitHauls = pinnedHauls.filter((h) => h.status === 'transit');
+      const securedCouriers = pinnedCouriers.filter((c) => c.status === 'secured');
+
+      const queries: { id: string; destSys: number }[] = [];
+      transitHauls.forEach((h) => {
+        if (h.dest?.systemId) {
+          queries.push({ id: `a:${h.id}`, destSys: h.dest.systemId });
+        }
+      });
+      securedCouriers.forEach((c) => {
+        if (c.dropoff?.systemId) {
+          queries.push({ id: `c:${c.id}`, destSys: c.dropoff.systemId });
+        }
+      });
+
+      if (org !== null && queries.length > 0) {
+        const currentCache = store.get(pinnedRoutesAtom);
+        const newCache = { ...currentCache };
+        let updated = false;
+
+        await Promise.all(
+          queries.map(async ({ id, destSys }) => {
+            const cacheKey = `${org}-${destSys}-${rt}`;
+            if (newCache[cacheKey]) return; // already cached
+
+            try {
+              const routeParams = new URLSearchParams({
+                origin: String(org),
+                dest: String(destSys),
+                routeType: rt,
+              });
+              const res = await fetch(`/api/route?${routeParams.toString()}`, { signal });
+              if (res.ok) {
+                const data = (await res.json()) as { route: RouteSystem[] | null; jumps: number | null };
+                if (data.route !== undefined) {
+                  newCache[cacheKey] = { route: data.route, jumps: data.jumps };
+                  updated = true;
+                }
+              }
+            } catch (err) {
+              console.error(`Failed to fetch route for ${id}`, err);
+            }
+          })
+        );
+
+        if (updated && !signal.aborted) {
+          store.set(pinnedRoutesAtom, newCache);
+        }
+      }
+
       return arbData.meta;
     } catch (err) {
       if (signal.aborted) return null;
