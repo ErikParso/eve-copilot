@@ -4,8 +4,19 @@
 // ~5 min) and merge it. Refreshed on a timer so all clients share one crawl.
 import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
 
+/**
+ * Buy-order reach, normalised so arbitrage can resolve which sell location can
+ * fill a bid (see RANGE_* constants). Sell orders are always RANGE_STATION.
+ */
+export const RANGE_REGION = -1;
+export const RANGE_SYSTEM = -2;
+export const RANGE_STATION = 0;
+// n > 0 = within n stargate jumps of the order's station.
+
 /** One market order, trimmed to what arbitrage needs. */
 export interface Order {
+  /** ESI order_id — stable across crawls, so a pinned order can be tracked. */
+  id: number;
   price: number;
   /** Units still available on this order. */
   volume: number;
@@ -13,8 +24,8 @@ export interface Order {
   locationId: number;
   systemId: number;
   /**
-   * Buy-order reach, normalised: -1 = region-wide, 0 = station/solar-system,
-   * n>0 = within n jumps. Irrelevant for sell orders (always 0).
+   * Buy-order reach: RANGE_REGION (-1), RANGE_SYSTEM (-2), RANGE_STATION (0), or
+   * n>0 jumps. Irrelevant for sell orders (always RANGE_STATION).
    */
   rangeCode: number;
 }
@@ -39,6 +50,7 @@ export interface TypeBook {
 }
 
 interface RawOrder {
+  order_id: number;
   type_id: number;
   price: number;
   volume_remain: number;
@@ -72,10 +84,11 @@ let status: MarketStatus = 'cold';
 let crawling: Promise<void> | null = null;
 
 function rangeCode(range: string): number {
-  if (range === 'region') return -1;
-  if (range === 'station' || range === 'solarsystem') return 0;
+  if (range === 'region') return RANGE_REGION;
+  if (range === 'solarsystem') return RANGE_SYSTEM;
+  if (range === 'station') return RANGE_STATION;
   const n = Number(range);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) && n > 0 ? n : RANGE_STATION;
 }
 
 async function fetchRegionOrders(
@@ -143,11 +156,12 @@ async function crawl(): Promise<Snapshot> {
     }
     for (const o of orders) {
       const entry: Order = {
+        id: o.order_id,
         price: o.price,
         volume: o.volume_remain,
         locationId: o.location_id,
         systemId: o.system_id,
-        rangeCode: o.is_buy_order ? rangeCode(o.range) : 0,
+        rangeCode: o.is_buy_order ? rangeCode(o.range) : RANGE_STATION,
       };
       const byStation = (o.is_buy_order ? buildFor(o.type_id).buys : buildFor(o.type_id).sells);
       const arr = byStation.get(o.location_id);

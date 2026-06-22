@@ -16,9 +16,18 @@
 import { getShipKills } from './kills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import { getType } from './sde.js';
+import { getType, getRegion, getStation } from './sde.js';
 import { getMarketPrice } from './prices.js';
-import { getMarketMeta, getSnapshot, type MarketMeta, type Order, type TypeBook } from './market.js';
+import {
+  getMarketMeta,
+  getSnapshot,
+  RANGE_REGION,
+  RANGE_SYSTEM,
+  type MarketMeta,
+  type Order,
+  type StationOrders,
+  type TypeBook,
+} from './market.js';
 import type {
   ArbitrageItem,
   ArbitrageOpportunity,
@@ -30,20 +39,20 @@ import type {
 // Sales tax assumed when scoring profit (mid Accounting skill). Baked in, not a
 // filter — the client can't realistically influence it without a backend skill
 // lookup, and there's no tax input on the page.
-const DEFAULT_SALES_TAX = 0.045;
+export const DEFAULT_SALES_TAX = 0.045;
 
 // Perf guards. Books are pre-sorted (sells cheapest-first, buys dearest-first),
 // so the first N stations on each side ARE the most profitable — these caps are
 // generous enough to be a no-op for normal items while keeping a hot item like
 // Tritanium (thousands of stations) from emitting a combinatorial blow-up.
-const MAX_SOURCES_PER_TYPE = 40;
-const MAX_DESTS_PER_TYPE = 40;
+export const MAX_SOURCES_PER_TYPE = 40;
+export const MAX_DESTS_PER_TYPE = 40;
 // Keep at most this many pairs per item type (most profitable first) so a single
 // deep item can't crowd everything else out of the global set.
-const MAX_PAIRS_PER_TYPE = 12;
+export const MAX_PAIRS_PER_TYPE = 12;
 // Global ceiling on the cached set (most profitable first). Bounds both the JSON
 // we ship and the number of routes we resolve per request.
-const MAX_OPPORTUNITIES = 1500;
+export const MAX_OPPORTUNITIES = 1500;
 // Most ladder rungs we keep per opportunity. Generous enough that normal items
 // ship their full depth; pathologically deep items (Tritanium &c.) keep only the
 // most-profitable top — the client reconciles any uncaptured tail against the
@@ -55,7 +64,7 @@ const MAX_LADDER_RUNGS = 80;
  * the aggregates). Also records the matched batches as a ladder (capped) so the
  * client can re-price the units that fit a limited hold/wallet.
  */
-function walkDepth(
+export function walkDepth(
   asks: Order[],
   bids: Order[],
 ): { quantity: number; buyCost: number; sellRevenueGross: number; ladder: ArbitrageRung[] } {
@@ -90,6 +99,45 @@ function walkDepth(
 
 // --- Step 1: route-free opportunities ----------------------------------------
 
+/**
+ * Whether a buy `order` can be filled by a seller standing at the drop station
+ * `dropStation` (in `dropSystem` / `dropRegion`), per the order's range. Lets a
+ * drop point pool every reachable bid, not just the ones physically at it:
+ *   - region: any bid in the same region;
+ *   - solar-system / n-jumps: any bid in the same system (a buy order's own
+ *     system is always within an n≥1 jump range, so this is conservative — it
+ *     ignores the extra cross-system reach of jump-range orders);
+ *   - station: only bids physically at the drop station.
+ */
+function bidReaches(order: Order, dropStation: number, dropSystem: number, dropRegion: number | null): boolean {
+  if (order.rangeCode === RANGE_REGION) {
+    return dropRegion !== null && getRegion(order.systemId) === dropRegion;
+  }
+  if (order.rangeCode === RANGE_SYSTEM || order.rangeCode > 0) {
+    return order.systemId === dropSystem;
+  }
+  // RANGE_STATION
+  return order.locationId === dropStation;
+}
+
+/**
+ * Pool every bid (from the candidate dest stations) that can be filled from
+ * `drop`, sorted dearest-first. This is the range-aware destination book: a
+ * region- or system-range buy order resting at another station is fillable from
+ * `drop` and so adds to the sellable depth there.
+ */
+function poolBidsForDrop(dests: StationOrders[], drop: StationOrders): Order[] {
+  const dropRegion = getRegion(drop.system);
+  const pooled: Order[] = [];
+  for (const station of dests) {
+    for (const order of station.orders) {
+      if (bidReaches(order, drop.station, drop.system, dropRegion)) pooled.push(order);
+    }
+  }
+  pooled.sort((a, b) => b.price - a.price);
+  return pooled;
+}
+
 /** Every profitable source→dest pair for one item type (most profitable first). */
 function opportunitiesForType(typeId: number, name: string, unitVolume: number, book: TypeBook): ArbitrageOpportunity[] {
   const tax = DEFAULT_SALES_TAX;
@@ -99,24 +147,35 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
 
   const sources = book.sells.slice(0, MAX_SOURCES_PER_TYPE);
   const dests = book.buys.slice(0, MAX_DESTS_PER_TYPE);
+  // Range-aware destination books are pooled once per drop station (independent
+  // of source), then reused for every source.
+  const pooledByDrop = dests.map((drop) => ({ drop, bids: poolBidsForDrop(dests, drop) }));
   const marketPrice = getMarketPrice(typeId);
   const out: ArbitrageOpportunity[] = [];
 
   for (const source of sources) {
     // Sells ascending: once the cheapest remaining source can't be beaten by the
-    // dearest buy, no dearer source can be either.
+    // dearest buy anywhere, no dearer source can be either.
     if (dearestBuy * (1 - tax) <= source.best) break;
-    for (const dest of dests) {
-      if (dest.station === source.station) continue;
-      // Buys descending: once this dest can't beat the source, none after it can.
-      if (dest.best * (1 - tax) <= source.best) break;
-      const { quantity, buyCost, sellRevenueGross, ladder } = walkDepth(source.orders, dest.orders);
+    // One opportunity per destination *system*: pooling makes a second station in
+    // the same system a near-duplicate (it sees the same system/region depth), so
+    // the dearest drop in each system represents it.
+    const emittedSystems = new Set<number>();
+    for (const { drop, bids } of pooledByDrop) {
+      if (drop.station === source.station) continue;
+      if (emittedSystems.has(drop.system)) continue;
+      // Effective best bid at this drop is the dearest pooled order (may exceed
+      // the drop's own best when a dearer region/system order reaches it).
+      const bestBid = bids[0]?.price ?? -Infinity;
+      if (bestBid * (1 - tax) <= source.best) continue;
+      const { quantity, buyCost, sellRevenueGross, ladder } = walkDepth(source.orders, bids);
       if (quantity <= 0) continue;
       const profit = sellRevenueGross * (1 - tax) - buyCost;
       if (profit <= 0) continue;
+      emittedSystems.add(drop.system);
 
       out.push({
-        id: `${typeId}:${source.station}:${dest.station}`,
+        id: `${typeId}:${source.station}:${drop.station}`,
         typeId,
         itemName: name,
         quantity,
@@ -131,7 +190,7 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
         ladder,
         salesTax: tax,
         source: resolveEndpoint(source.station, source.system),
-        dest: resolveEndpoint(dest.station, dest.system),
+        dest: resolveEndpoint(drop.station, drop.system),
       });
     }
   }
@@ -141,7 +200,7 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
 }
 
 /** Resolve every profitable haul in the current snapshot (no routes). */
-function resolveOpportunities(byType: Map<number, TypeBook>): ArbitrageOpportunity[] {
+export function resolveOpportunities(byType: Map<number, TypeBook>): ArbitrageOpportunity[] {
   const all: ArbitrageOpportunity[] = [];
   for (const [typeId, book] of byType) {
     const type = getType(typeId);
@@ -231,101 +290,121 @@ export async function getEnrichedArbitrage(routeType: RouteType, origin: number 
   return { items, meta };
 }
 
-function walkPlanning(
-  asks: Order[],
-  bids: Order[],
-  targetQty: number
-): { quantity: number; buyCost: number; sellRevenueGross: number; ladder: ArbitrageRung[] } {
-  const tax = DEFAULT_SALES_TAX;
-  let ai = 0;
-  let bi = 0;
-  let askRem = asks[0]?.volume ?? 0;
-  let bidRem = bids[0]?.volume ?? 0;
-  let quantity = 0;
-  let buyCost = 0;
-  let sellRevenueGross = 0;
-  const ladder: ArbitrageRung[] = [];
-
-  while (ai < asks.length && bi < bids.length && quantity < targetQty) {
-    const ask = asks[ai].price;
-    const bid = bids[bi].price;
-    if (bid * (1 - tax) <= ask) break;
-    const batch = Math.min(askRem, bidRem, targetQty - quantity);
-    if (batch <= 0) break;
-    quantity += batch;
-    buyCost += batch * ask;
-    sellRevenueGross += batch * bid;
-    if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: ask, sell: bid });
-    askRem -= batch;
-    bidRem -= batch;
-    if (askRem === 0) askRem = asks[++ai]?.volume ?? 0;
-    if (bidRem === 0) bidRem = bids[++bi]?.volume ?? 0;
-  }
-  return { quantity, buyCost, sellRevenueGross, ladder };
-}
-
-function walkTransit(
-  bids: Order[],
-  boughtPrice: number,
-  targetQty: number
-): { quantity: number; buyCost: number; sellRevenueGross: number; ladder: ArbitrageRung[] } {
-  let bi = 0;
-  let bidRem = bids[0]?.volume ?? 0;
-  let quantity = 0;
-  let sellRevenueGross = 0;
-  const ladder: ArbitrageRung[] = [];
-
-  while (bi < bids.length && quantity < targetQty) {
-    const bid = bids[bi].price;
-    const batch = Math.min(bidRem, targetQty - quantity);
-    if (batch <= 0) break;
-    quantity += batch;
-    sellRevenueGross += batch * bid;
-    if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: boughtPrice, sell: bid });
-    bidRem -= batch;
-    if (bidRem === 0) bidRem = bids[++bi]?.volume ?? 0;
-  }
-  const buyCost = quantity * boughtPrice;
-  return { quantity, buyCost, sellRevenueGross, ladder };
-}
-
+/**
+ * Recheck pinned hauls against the live book, NETTING shared depth: hauls are
+ * walked in pin order against one shared pool of remaining order volume (keyed by
+ * ESI order id), so two hauls leaning on the same cheap asks/dearest bids don't
+ * both claim them — the first reserves the cheap depth, the next prices up the
+ * ladder. Each haul also reports the live order IDs backing it, so identity-based
+ * staleness (specific orders gone) can be flagged against the IDs last seen.
+ */
 export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): PinnedHaulStatusResponse[] {
   const snap = getSnapshot();
   if (!snap) return [];
   const tax = DEFAULT_SALES_TAX;
+
+  // Shared remaining-volume ledger across all hauls in this request (order id →
+  // units left). Lazily seeded from the snapshot the first time an order is hit.
+  const remaining = new Map<number, number>();
+  const remOf = (o: Order): number => {
+    let v = remaining.get(o.id);
+    if (v === undefined) {
+      v = o.volume;
+      remaining.set(o.id, v);
+    }
+    return v;
+  };
+  const consume = (o: Order, n: number) => remaining.set(o.id, remOf(o) - n);
+
   const out: PinnedHaulStatusResponse[] = [];
 
   for (const h of hauls) {
     const book = snap.byType.get(h.typeId);
-    const sourceStation = book?.sells.find((s) => s.station === h.source);
-    const destStation = book?.buys.find((b) => b.station === h.dest);
-    const asks = sourceStation?.orders ?? [];
-    const bids = destStation?.orders ?? [];
+    const asks = book?.sells.find((s) => s.station === h.source)?.orders ?? [];
+    // Range-aware destination depth: every bid reachable from the drop station,
+    // not just those physically resting at it.
+    const dropSystem = book?.buys.find((b) => b.station === h.dest)?.system ?? getStation(h.dest)?.systemId ?? null;
+    // Pool from the full buy book (not the MAX_DESTS perf-guard slice): there are
+    // only a handful of pinned hauls, so accuracy beats the bound here.
+    const bids =
+      book && dropSystem !== null
+        ? poolBidsForDrop(book.buys, { station: h.dest, system: dropSystem, best: -Infinity, orders: [] })
+        : [];
 
+    const target = h.quantity;
     let quantity = 0;
     let buyCost = 0;
     let sellRevenueGross = 0;
-    let ladder: ArbitrageRung[] = [];
+    const ladder: ArbitrageRung[] = [];
+    const srcIds = new Set<number>();
+    const dstIds = new Set<number>();
 
     if (h.status === 'planning') {
-      const walk = walkPlanning(asks, bids, h.quantity);
-      quantity = walk.quantity;
-      buyCost = walk.buyCost;
-      sellRevenueGross = walk.sellRevenueGross;
-      ladder = walk.ladder;
+      let ai = 0;
+      let bi = 0;
+      while (ai < asks.length && bi < bids.length && quantity < target) {
+        const ask = asks[ai];
+        const bid = bids[bi];
+        if (bid.price * (1 - tax) <= ask.price) break; // marginal unit unprofitable
+        const askA = remOf(ask);
+        const bidA = remOf(bid);
+        if (askA <= 0) {
+          ai++;
+          continue;
+        }
+        if (bidA <= 0) {
+          bi++;
+          continue;
+        }
+        const batch = Math.min(askA, bidA, target - quantity);
+        if (batch <= 0) break;
+        quantity += batch;
+        buyCost += batch * ask.price;
+        sellRevenueGross += batch * bid.price;
+        if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: ask.price, sell: bid.price });
+        srcIds.add(ask.id);
+        dstIds.add(bid.id);
+        consume(ask, batch);
+        consume(bid, batch);
+        if (remOf(ask) <= 0) ai++;
+        if (remOf(bid) <= 0) bi++;
+      }
     } else {
-      const bp = h.boughtPrice ?? 0;
-      const walk = walkTransit(bids, bp, h.quantity);
-      quantity = walk.quantity;
-      buyCost = walk.buyCost;
-      sellRevenueGross = walk.sellRevenueGross;
-      ladder = walk.ladder;
+      // Transit: already bought, so only sell into the (shared) remaining bids.
+      const boughtPrice = h.boughtPrice ?? 0;
+      let bi = 0;
+      while (bi < bids.length && quantity < target) {
+        const bid = bids[bi];
+        const bidA = remOf(bid);
+        if (bidA <= 0) {
+          bi++;
+          continue;
+        }
+        const batch = Math.min(bidA, target - quantity);
+        if (batch <= 0) break;
+        quantity += batch;
+        sellRevenueGross += batch * bid.price;
+        if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: boughtPrice, sell: bid.price });
+        dstIds.add(bid.id);
+        consume(bid, batch);
+        if (remOf(bid) <= 0) bi++;
+      }
+      buyCost = quantity * boughtPrice;
     }
 
     const profit = quantity > 0 ? sellRevenueGross * (1 - tax) - buyCost : 0;
     const buyPrice = h.status === 'planning' ? (quantity > 0 ? buyCost / quantity : 0) : (h.boughtPrice ?? 0);
     const sellPrice = quantity > 0 ? sellRevenueGross / quantity : 0;
     const marginPct = buyCost > 0 ? (profit / buyCost) * 100 : 0;
+
+    const sourceOrderIds = [...srcIds];
+    const destOrderIds = [...dstIds];
+    // Source orders only matter while planning (a transit haul is already bought,
+    // so its empty source set must not be diffed against the planning-era ids).
+    const srcChanged =
+      h.status === 'planning' && h.knownSourceOrderIds !== undefined && !sameIds(h.knownSourceOrderIds, sourceOrderIds);
+    const dstChanged = h.knownDestOrderIds !== undefined && !sameIds(h.knownDestOrderIds, destOrderIds);
+    const stale = srcChanged || dstChanged;
 
     out.push({
       id: h.id,
@@ -334,11 +413,22 @@ export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): Pinn
       sellPrice,
       profit,
       marginPct,
-      shortfall: quantity < h.quantity,
-      buyerGone: quantity === 0,
+      shortfall: quantity < target,
+      buyerGone: bids.length === 0,
+      supplyGone: h.status === 'planning' && asks.length === 0,
+      stale,
       ladder,
+      sourceOrderIds,
+      destOrderIds,
     });
   }
 
   return out;
+}
+
+/** Order-id set equality (order-independent). */
+function sameIds(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
 }

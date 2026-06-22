@@ -5,10 +5,10 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
-import { preferencesAtom } from '@/features/preferences/atoms';
+import { preferencesAtom, DEFAULT_SALES_TAX_PCT } from '@/features/preferences/atoms';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import { scoreCombined, type ResultCard } from './combined';
-import { scaleArbitrage } from '@/features/arbitrage/scale';
+import { scaleArbitrage, repriceForTax } from '@/features/arbitrage/scale';
 import type { CourierRow, SearchStatus, SortOptionId } from './types';
 import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
 import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
@@ -77,9 +77,13 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const maxCollateral = get(characterWalletAtom)?.balance ?? Infinity;
   const maxCargo = prefs.cargoM3 ?? Infinity;
 
+  // Re-price arbitrage profit at the user's sales tax (Accounting skill) before
+  // scaling to what fits the hold/wallet.
+  const taxFraction = (prefs.salesTaxPct ?? DEFAULT_SALES_TAX_PCT) / 100;
+
   const courierRows = data.courier.filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo);
   const arbRows = data.arbitrage
-      .map((a) => scaleArbitrage(a, maxCargo, maxCollateral))
+      .map((a) => scaleArbitrage(repriceForTax(a, taxFraction), maxCargo, maxCollateral))
       .filter((a): a is NonNullable<typeof a> => a !== null);
 
   const origin = get(characterStatusAtom)?.systemId ?? null;

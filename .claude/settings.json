@@ -10,7 +10,9 @@
       "Bash(rtk read *)",
       "Bash(rtk curl *)",
       "WebFetch(domain:skoli.ru)",
-      "Bash(rtk tsc *)"
+      "Bash(rtk tsc *)",
+      "Bash(rtk ls *)",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0\\)\\);for\\(const f of d\\)for\\(const m of f.messages\\)console.log\\(m.line+':'+m.column+' '+m.ruleId+' '+m.message\\)\")"
     ]
   }
 }
