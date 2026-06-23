@@ -18,6 +18,14 @@ import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import { getType, getRegion, getStation } from './sde.js';
 import { getMarketPrice } from './prices.js';
+import { dangerForSystems } from './danger.js';
+import {
+  scaleArbitrage,
+  repriceForTax,
+  scoreAttractivity,
+  type AttractivityWeights,
+  type Scaled,
+} from './arbitrageScore.js';
 import {
   getMarketMeta,
   getSnapshot,
@@ -29,9 +37,9 @@ import {
   type TypeBook,
 } from './market.js';
 import type {
-  ArbitrageItem,
   ArbitrageOpportunity,
   ArbitrageRung,
+  ScaledArbitrageItem,
   PinnedHaulStatusRequest,
   PinnedHaulStatusResponse,
 } from './types.js';
@@ -264,72 +272,140 @@ export function resolveOpportunities(
 let opportunitiesSnapshotAt = -1;
 let opportunities: ArbitrageOpportunity[] = [];
 
-/** Cached route-free opportunities, rebuilt only when the snapshot changes. */
+/**
+ * Cached route-free opportunities, rebuilt only when the snapshot changes.
+ * Production is **uncapped by count** (only the 100k profit floor applies) — the
+ * route + attractivity stage in getEnrichedArbitrage truncates to the shipped
+ * top-N. The MAX_PAIRS/MAX_OPPORTUNITIES caps remain available for the offline
+ * diagnostics but are not applied here.
+ */
 function getOpportunities(): ArbitrageOpportunity[] {
   const snap = getSnapshot();
   if (!snap) return [];
   if (snap.builtAt !== opportunitiesSnapshotAt) {
-    opportunities = resolveOpportunities(snap.byType);
+    opportunities = resolveOpportunities(snap.byType, { maxPairs: Infinity, maxTotal: Infinity });
     opportunitiesSnapshotAt = snap.builtAt;
   }
   return opportunities;
 }
 
-
-// --- Step 3: resolve routes into items (every request) ------------------------
-
 /**
- * Resolve one opportunity into a client item by adding its two route legs: the
- * delivery leg (source→dest) plus the approach leg (current system→source) when
- * an origin is given. Returns null — filtering the haul out — when either leg is
- * unreachable (or an endpoint's system is unknown). getRoute memoises the search.
+ * Pre-warm the route cache for the snapshot's delivery legs (source→dest system),
+ * which are origin-independent and shared by every request/user. Run in the
+ * background after each crawl so the first request never pays the ~6–14s of cold
+ * graph searches synchronously. Yields to the event loop periodically so it never
+ * blocks request handling. Approach legs (origin→source) stay lazy (per-origin).
  */
-function resolveItem(
-  opp: ArbitrageOpportunity,
-  routeType: RouteType,
-  origin: number | null,
-  kills: Map<number, number>,
-): ArbitrageItem | null {
-  const srcSys = opp.source.systemId;
-  const dstSys = opp.dest.systemId;
-  if (srcSys === null || dstSys === null) return null;
-
-  const deliveryIds = getRoute(srcSys, dstSys, routeType);
-  if (!deliveryIds) return null; // can't haul source → dest
-  const deliveryRoute = toRouteSystems(deliveryIds, kills);
-
-  let approachRoute: ArbitrageItem['approachRoute'] = null;
-  if (origin !== null) {
-    const approachIds = getRoute(origin, srcSys, routeType);
-    if (!approachIds) return null; // can't reach the buy station from here
-    approachRoute = toRouteSystems(approachIds, kills);
+export async function prewarmDeliveryRoutes(): Promise<void> {
+  const seen = new Set<string>();
+  const pairs: [number, number][] = [];
+  for (const o of getOpportunities()) {
+    const s = o.source.systemId;
+    const d = o.dest.systemId;
+    if (s === null || d === null) continue;
+    const k = `${s}-${d}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    pairs.push([s, d]);
   }
+  let i = 0;
+  for (const [s, d] of pairs) {
+    getRoute(s, d, 'shortest');
+    getRoute(s, d, 'safest');
+    if (++i % 500 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
 
-  return { ...opp, approachRoute, deliveryRoute };
+// --- Step 3: filter → scale → route → score → truncate (every request) --------
+
+export interface EnrichArbitrageParams {
+  routeType: RouteType;
+  /** Current system, or null (no approach leg, no jumps-from-current). */
+  origin: number | null;
+  /** Usable cargo m³ (Infinity = unconstrained). */
+  capacity: number;
+  /** Wallet ISK ceiling (Infinity = unconstrained). */
+  balance: number;
+  /** Sales tax percent (e.g. 4.5) to re-price profit to. */
+  taxPct: number;
+  /** Attractivity weights used to rank the candidate set for truncation. */
+  weights: AttractivityWeights;
+  /** How many of the most attractive hauls to ship. */
+  limit: number;
 }
 
 export interface ArbitrageResponse {
-  items: ArbitrageItem[];
+  items: ScaledArbitrageItem[];
   meta: MarketMeta;
 }
 
 /**
- * Every reachable arbitrage opportunity, with routes resolved for this request
- * (delivery leg by route type, plus the approach leg from `origin` when given).
- * The route-free opportunities are cached against the market snapshot; the route
- * resolution is per request (memoised by routing.ts), and unreachable hauls are
- * dropped.
+ * The shipped arbitrage menu: every floored candidate is re-priced to the user's
+ * tax, scaled to their cargo/wallet, routed (jumps + danger from cached paths),
+ * scored by attractivity over the WHOLE set, then truncated to the top-N. Full
+ * RouteSystem[] objects are materialised only for the shipped items. The server
+ * score is used solely to pick the top-N; the FE re-scores the combined
+ * courier+arbitrage set for the displayed index.
  */
-export async function getEnrichedArbitrage(routeType: RouteType, origin: number | null): Promise<ArbitrageResponse> {
+export async function getEnrichedArbitrage(params: EnrichArbitrageParams): Promise<ArbitrageResponse> {
   const meta = getMarketMeta();
   if (!getSnapshot()) return { items: [], meta };
 
   const kills = await getShipKills();
-  const items: ArbitrageItem[] = [];
-  for (const opp of getOpportunities()) {
-    const item = resolveItem(opp, routeType, origin, kills);
-    if (item) items.push(item);
+  const taxFraction = params.taxPct / 100;
+
+  // One candidate per surviving opportunity: scaled economics + route ids +
+  // jumps/danger numbers (no RouteSystem[] yet — that's only for the top-N).
+  interface Candidate {
+    opp: Scaled<ArbitrageOpportunity>;
+    deliveryIds: number[];
+    approachIds: number[] | null;
+    totalJumps: number;
+    danger: number;
   }
+  const candidates: Candidate[] = [];
+  for (const raw of getOpportunities()) {
+    const scaled = scaleArbitrage(repriceForTax(raw, taxFraction), params.capacity, params.balance);
+    if (!scaled) continue; // nothing fits the hold/wallet
+    const srcSys = scaled.source.systemId;
+    const dstSys = scaled.dest.systemId;
+    if (srcSys === null || dstSys === null) continue;
+
+    const deliveryIds = getRoute(srcSys, dstSys, params.routeType);
+    if (!deliveryIds) continue; // can't haul source → dest
+    let approachIds: number[] | null = null;
+    if (params.origin !== null) {
+      approachIds = getRoute(params.origin, srcSys, params.routeType);
+      if (!approachIds) continue; // can't reach the buy station from here
+    }
+
+    const jumpsToDest = Math.max(0, deliveryIds.length - 1);
+    const jumpsFromCurrent = approachIds ? Math.max(0, approachIds.length - 1) : 0;
+    const totalJumps = jumpsToDest + jumpsFromCurrent;
+    // Danger over the route actually flown (approach + delivery, shared seam dropped).
+    const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
+    const danger = dangerForSystems(dangerRoute, kills);
+
+    candidates.push({ opp: scaled, deliveryIds, approachIds, totalJumps, danger });
+  }
+
+  // Rank by attractivity over the whole set, keep the top-N.
+  const scores = scoreAttractivity(
+    candidates.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger })),
+    params.weights,
+  );
+  const ranked = candidates
+    .map((c, i) => ({ c, score: scores[i] }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, params.limit);
+
+  // Materialise full routes only for the shipped items.
+  const items: ScaledArbitrageItem[] = ranked.map(({ c }) => ({
+    ...c.opp,
+    approachRoute: c.approachIds ? toRouteSystems(c.approachIds, kills) : null,
+    deliveryRoute: toRouteSystems(c.deliveryIds, kills),
+  }));
+
   return { items, meta };
 }
 

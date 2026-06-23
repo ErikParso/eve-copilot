@@ -135,6 +135,22 @@ export interface ArbitrageItem extends ArbitrageOpportunity {
   deliveryRoute: RouteSystem[];
 }
 
+/**
+ * What the server actually ships: a route-enhanced haul whose economics are
+ * already SCALED to the requester's cargo/wallet (full-depth values preserved in
+ * `full*`), picked as part of the attractivity-ranked top-N. The FE re-derives
+ * jumps/danger from the routes and re-scores it in the combined courier+arbitrage
+ * set, so no score is shipped.
+ */
+export interface ScaledArbitrageItem extends ArbitrageItem {
+  /** Full-depth units before the cargo/wallet limit. */
+  fullQuantity: number;
+  /** Full-depth volume (m³) before the limit. */
+  fullTotalVolume: number;
+  /** True when cargo or wallet capped the haul below its full depth. */
+  limited: boolean;
+}
+
 export interface PinnedHaulStatusRequest {
   id: string;
   typeId: number;

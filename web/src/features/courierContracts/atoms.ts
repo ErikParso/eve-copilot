@@ -5,12 +5,11 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
-import { preferencesAtom, DEFAULT_SALES_TAX_PCT } from '@/features/preferences/atoms';
+import { preferencesAtom } from '@/features/preferences/atoms';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import { scoreCombined, type ResultCard } from './combined';
-import { scaleArbitrage, repriceForTax } from '@/features/arbitrage/scale';
 import type { CourierRow, SearchStatus, SortOptionId } from './types';
-import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
+import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
 import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
 
 /** Contextual Hauling-page view state (the grid's sort order). */
@@ -44,7 +43,8 @@ export type CourierBase = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>
 export interface HaulingData {
   status: SearchStatus;
   courier: CourierBase[];
-  arbitrage: ArbitrageItem[];
+  /** Already scaled to the requester's cargo/wallet + tax-repriced server-side. */
+  arbitrage: ScaledArbitrage[];
   error: string | null;
   /** When the contracts snapshot was built by CCP (epoch ms), or null. */
   contractsAsOf: number | null;
@@ -73,18 +73,14 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const prefs = get(preferencesAtom);
   const weights = get(attractivityWeightsAtom);
 
-  // ISK ceiling = your live wallet (hide what you can't cover); no wallet = no cap.
+  // Courier contracts are still filtered client-side (they aren't fetched through
+  // the server-side arbitrage pipeline). ISK ceiling = your live wallet.
   const maxCollateral = get(characterWalletAtom)?.balance ?? Infinity;
   const maxCargo = prefs.cargoM3 ?? Infinity;
 
-  // Re-price arbitrage profit at the user's sales tax (Accounting skill) before
-  // scaling to what fits the hold/wallet.
-  const taxFraction = (prefs.salesTaxPct ?? DEFAULT_SALES_TAX_PCT) / 100;
-
   const courierRows = data.courier.filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo);
-  const arbRows = data.arbitrage
-      .map((a) => scaleArbitrage(repriceForTax(a, taxFraction), maxCargo, maxCollateral))
-      .filter((a): a is NonNullable<typeof a> => a !== null);
+  // Arbitrage is already floored / scaled (cargo+wallet) / tax-repriced server-side.
+  const arbRows = data.arbitrage;
 
   const origin = get(characterStatusAtom)?.systemId ?? null;
   const routeType = prefs.routeType;

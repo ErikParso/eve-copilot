@@ -181,6 +181,12 @@ async function crawl(): Promise<Snapshot> {
   return { byType, builtAt: Date.now(), lastModifiedAt, orderCount, regions };
 }
 
+/** Callbacks fired (best-effort) after each successful crawl — e.g. route pre-warm. */
+const refreshListeners: Array<() => void> = [];
+export function onMarketRefresh(fn: () => void): void {
+  refreshListeners.push(fn);
+}
+
 async function refresh(): Promise<void> {
   if (crawling) return crawling;
   if (status === 'cold') status = 'warming';
@@ -188,6 +194,13 @@ async function refresh(): Promise<void> {
     .then((next) => {
       snapshot = next;
       status = 'ready';
+      for (const fn of refreshListeners) {
+        try {
+          fn();
+        } catch (err) {
+          console.error('Market refresh listener failed', err);
+        }
+      }
     })
     .catch((err) => {
       console.error('Market crawl failed', err);

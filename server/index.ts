@@ -1,25 +1,39 @@
 import express from 'express';
 import { loadSde } from './sde.js';
 import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
-import { startMarketRefresh } from './market.js';
+import { startMarketRefresh, onMarketRefresh } from './market.js';
 import { startPricesRefresh } from './prices.js';
-import { getEnrichedArbitrage, resolvePinnedHaulsStatus } from './arbitrage.js';
+import { getEnrichedArbitrage, resolvePinnedHaulsStatus, prewarmDeliveryRoutes } from './arbitrage.js';
+import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getShipKills } from './kills.js';
 import type { PinnedHaulStatusRequest } from './types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
+const DEFAULT_SHIP_LIMIT = 300; // how many top-attractivity hauls to ship
 
 function parseRouteType(value: unknown): RouteType {
   return value === 'shortest' ? 'shortest' : 'safest';
 }
 
-/** Optional positive number query param, else null. */
+/** Optional finite number query param, else null. */
 function parseOptionalNumber(value: unknown): number | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+/** A cargo/wallet ceiling: absent or negative ⇒ unconstrained (Infinity). */
+function parseCeiling(value: unknown): number {
+  const n = parseOptionalNumber(value);
+  return n === null || n < 0 ? Infinity : n;
+}
+
+/** A non-negative attractivity weight, defaulting to `fallback`. */
+function parseWeight(value: unknown, fallback: number): number {
+  const n = parseOptionalNumber(value);
+  return n === null ? fallback : Math.max(0, n);
 }
 
 
@@ -65,8 +79,14 @@ async function main() {
   startContractsRefresh();
   console.log('Started contracts crawl (refreshing every 10 min).');
 
+  // Pre-warm delivery-leg routes in the background after each crawl, so requests
+  // never pay the cold graph searches synchronously. Registered before the first
+  // refresh so it fires for it too.
+  onMarketRefresh(() => {
+    void prewarmDeliveryRoutes();
+  });
   startMarketRefresh();
-  console.log('Started market crawl (refreshing every 10 min).');
+  console.log('Started market crawl (refreshing every 10 min) + background route pre-warm.');
 
   startPricesRefresh();
   console.log('Started reference-price refresh (refreshing every 60 min).');
@@ -92,9 +112,20 @@ async function main() {
 
   app.get('/api/arbitrage', async (req, res) => {
     try {
-      const type = parseRouteType(req.query.routeType);
-      const origin = parseOptionalNumber(req.query.origin);
-      const result = await getEnrichedArbitrage(type, origin);
+      const weights: AttractivityWeights = {
+        income: parseWeight(req.query.wIncome, 5),
+        totalJumps: parseWeight(req.query.wJumps, 5),
+        danger: parseWeight(req.query.wDanger, 5),
+      };
+      const result = await getEnrichedArbitrage({
+        routeType: parseRouteType(req.query.routeType),
+        origin: parseOptionalNumber(req.query.origin),
+        capacity: parseCeiling(req.query.capacity),
+        balance: parseCeiling(req.query.balance),
+        taxPct: parseOptionalNumber(req.query.taxPct) ?? 4.5,
+        weights,
+        limit: parseOptionalNumber(req.query.limit) ?? DEFAULT_SHIP_LIMIT,
+      });
       res.json(result);
     } catch (err) {
       console.error('GET /api/arbitrage failed', err);
