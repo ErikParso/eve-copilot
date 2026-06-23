@@ -10,7 +10,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom, DEFAULT_SALES_TAX_PCT } from '@/features/preferences/atoms';
 import { deriveJourney, perJump } from './journey';
-import { haulingDataAtom, attractivityWeightsAtom, type CourierBase } from './atoms';
+import { haulingDataAtom, attractivityWeightsAtom, type CourierBase, type ScoredCourier, type ScoredArbitrage } from './atoms';
 import type { ContractEndpoint, RouteSystem } from './types';
 import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
 import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
@@ -57,14 +57,13 @@ type ApiArbitrageItem = Pick<
   | 'fullTotalVolume'
   | 'limited'
 > & { deliveryRoute: RouteSystem[] };
-interface ContractsResponse {
-  contracts: ApiContract[];
-  lastModifiedAt: number | null;
-  total: number;
-}
-interface ArbitrageResponse {
-  items: ApiArbitrageItem[];
+type ApiHaulingItem =
+  | ({ kind: 'courier'; attractivity: number } & ApiContract)
+  | ({ kind: 'arbitrage'; attractivity: number } & ApiArbitrageItem);
+interface HaulingResponse {
+  items: ApiHaulingItem[];
   meta: MarketMeta;
+  contractsAsOf: number | null;
 }
 
 /** Add the route-derived fields (jumps, per-jump rate, danger) + listing times. */
@@ -109,6 +108,9 @@ export function useHaulingSearchController(): void {
   const salesTaxPct = prefs.salesTaxPct;
   const origin = useAtomValue(characterStatusAtom)?.systemId ?? null;
   const balance = useAtomValue(characterWalletAtom)?.balance ?? null;
+  // Weights ARE a re-fetch trigger now: the server scores/truncates by them, and
+  // the FE no longer re-scores the list.
+  const weights = useAtomValue(attractivityWeightsAtom);
   const abortRef = useRef<AbortController | null>(null);
 
   const run = useCallback(async (): Promise<MarketMeta | null> => {
@@ -125,39 +127,41 @@ export function useHaulingSearchController(): void {
     setData((d) => (d.status === 'success' ? d : { ...d, status: 'loading', error: null }));
 
     try {
-      const params = new URLSearchParams({ routeType: rt });
-      if (org !== null) params.set('origin', String(org));
-
-      // Arbitrage takes the full server-side pipeline params: capacity, wallet,
-      // tax (re-priced server-side) + attractivity weights (for the top-N rank).
+      // One combined call: the server scores courier + arbitrage together,
+      // truncates to the top-N by attractivity, and ships each with its score.
       const prefsNow = store.get(preferencesAtom);
       const wallet = store.get(characterWalletAtom)?.balance;
       const weights = store.get(attractivityWeightsAtom);
-      const arbParams = new URLSearchParams(params);
-      if (prefsNow.cargoM3 != null) arbParams.set('capacity', String(prefsNow.cargoM3));
-      if (wallet != null) arbParams.set('balance', String(wallet));
-      arbParams.set('taxPct', String(prefsNow.salesTaxPct ?? DEFAULT_SALES_TAX_PCT));
-      arbParams.set('wIncome', String(weights.income));
-      arbParams.set('wJumps', String(weights.totalJumps));
-      arbParams.set('wDanger', String(weights.danger));
+      const params = new URLSearchParams({ routeType: rt });
+      if (org !== null) params.set('origin', String(org));
+      if (prefsNow.cargoM3 != null) params.set('capacity', String(prefsNow.cargoM3));
+      if (wallet != null) params.set('balance', String(wallet));
+      params.set('taxPct', String(prefsNow.salesTaxPct ?? DEFAULT_SALES_TAX_PCT));
+      params.set('wIncome', String(weights.income));
+      params.set('wJumps', String(weights.totalJumps));
+      params.set('wDanger', String(weights.danger));
 
-      const [contractRes, arbRes] = await Promise.all([
-        fetch(`/api/contracts?${params.toString()}`, { signal }),
-        fetch(`/api/arbitrage?${arbParams.toString()}`, { signal }),
-      ]);
-      if (!contractRes.ok) throw new Error(`Contracts API returned ${contractRes.status}`);
-      if (!arbRes.ok) throw new Error(`Arbitrage API returned ${arbRes.status}`);
-      const contractData = (await contractRes.json()) as ContractsResponse;
-      const arbData = (await arbRes.json()) as ArbitrageResponse;
+      const haulRes = await fetch(`/api/hauling?${params.toString()}`, { signal });
+      if (!haulRes.ok) throw new Error(`Hauling API returned ${haulRes.status}`);
+      const haulData = (await haulRes.json()) as HaulingResponse;
       if (signal.aborted) return null;
+
+      // Split the combined, server-scored list back into the two kinds (each
+      // carries its attractivity); the FE does NOT re-score the list.
+      const courier: ScoredCourier[] = [];
+      const arbitrage: ScoredArbitrage[] = [];
+      for (const it of haulData.items) {
+        if (it.kind === 'courier') courier.push({ ...hydrateContract(it), attractivity: it.attractivity });
+        else arbitrage.push({ ...hydrateArbitrage(it), attractivity: it.attractivity });
+      }
 
       setData({
         status: 'success',
-        courier: contractData.contracts.map(hydrateContract),
-        arbitrage: arbData.items.map(hydrateArbitrage),
+        courier,
+        arbitrage,
         error: null,
-        contractsAsOf: contractData.lastModifiedAt,
-        market: arbData.meta,
+        contractsAsOf: haulData.contractsAsOf,
+        market: haulData.meta,
       });
 
       // Fetch dynamic routes for in-transit/secured pinned items
@@ -213,7 +217,7 @@ export function useHaulingSearchController(): void {
         }
       }
 
-      return arbData.meta;
+      return haulData.meta;
     } catch (err) {
       if (signal.aborted) return null;
       const message = err instanceof Error ? err.message : 'Search failed';
@@ -243,5 +247,5 @@ export function useHaulingSearchController(): void {
       if (timer) clearTimeout(timer);
       abortRef.current?.abort();
     };
-  }, [run, routeType, origin, cargoM3, salesTaxPct, balance]);
+  }, [run, routeType, origin, cargoM3, salesTaxPct, balance, weights.income, weights.totalJumps, weights.danger]);
 }

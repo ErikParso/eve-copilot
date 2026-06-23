@@ -4,10 +4,10 @@
 // and re-scores instantly without a re-fetch.
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
+import { characterStatusAtom } from '@/features/auth/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
-import { scoreCombined, type ResultCard } from './combined';
+import { type ResultCard } from './combined';
 import type { CourierRow, SearchStatus, SortOptionId } from './types';
 import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
 import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
@@ -36,19 +36,25 @@ export const attractivityWeightsAtom = atomWithStorage<AttractivityWeights>(
 /** A hydrated courier row before scoring (attractivity is added by the scorer). */
 export type CourierBase = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>;
 
+/** Server-scored courier row (attractivity computed on the BE; no breakdown). */
+export type ScoredCourier = CourierBase & { attractivity: number };
+/** Server-scored, already-scaled arbitrage row (attractivity from the BE). */
+export type ScoredArbitrage = ScaledArbitrage & { attractivity: number };
+
 /**
- * Raw hydrated hauling data from the server (route-resolved, but unfiltered and
- * unscored). Fetched once by the search controller and shared app-wide.
+ * Hauling data from the server: courier + arbitrage scored TOGETHER on the BE
+ * (one attractivity normalisation), already filtered/scaled and truncated to the
+ * top-N. The FE does not re-score it. Fetched by the controller, shared app-wide.
  */
 export interface HaulingData {
   status: SearchStatus;
-  courier: CourierBase[];
+  courier: ScoredCourier[];
   /** Already scaled to the requester's cargo/wallet + tax-repriced server-side. */
-  arbitrage: ScaledArbitrage[];
+  arbitrage: ScoredArbitrage[];
   error: string | null;
   /** When the contracts snapshot was built by CCP (epoch ms), or null. */
   contractsAsOf: number | null;
-  /** Market-crawl readiness + freshness from the arbitrage API. */
+  /** Market-crawl readiness + freshness from the API. */
   market: MarketMeta | null;
 }
 
@@ -62,26 +68,21 @@ export const haulingDataAtom = atom<HaulingData>({
 });
 
 /**
- * The displayed cards: filter the raw data by the global cargo/ISK/contract-type
- * preferences and score by the weights. Recomputes reactively when either the
- * data or the preferences change — no re-fetch needed.
+ * The displayed cards. The available courier + arbitrage rows are already
+ * filtered, scaled and SCORED on the server (one combined attractivity
+ * normalisation), so the FE doesn't re-score them — it just wraps them as cards
+ * and overlays the (client-only) pinned items. Recomputes when the server data
+ * or the pinned set changes; the page sorts the result.
  */
 export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const data = get(haulingDataAtom);
   if (data.status !== 'success') return [];
 
-  const prefs = get(preferencesAtom);
-  const weights = get(attractivityWeightsAtom);
-
-  // Courier contracts are still filtered client-side (they aren't fetched through
-  // the server-side arbitrage pipeline). ISK ceiling = your live wallet.
-  const maxCollateral = get(characterWalletAtom)?.balance ?? Infinity;
-  const maxCargo = prefs.cargoM3 ?? Infinity;
-
-  const courierRows = data.courier.filter((c) => c.collateral <= maxCollateral && c.volume <= maxCargo);
-  // Arbitrage is already floored / scaled (cargo+wallet) / tax-repriced server-side.
+  // Available rows arrive already filtered + scaled + scored from the server.
+  const courierRows = data.courier;
   const arbRows = data.arbitrage;
 
+  const prefs = get(preferencesAtom);
   const origin = get(characterStatusAtom)?.systemId ?? null;
   const routeType = prefs.routeType;
   const routesCache = get(pinnedRoutesAtom);
@@ -139,5 +140,29 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const pinnedIds = new Set(pinnedHauls.map((h) => h.id));
   const filteredArbRows = arbRows.filter((a) => !pinnedIds.has(a.id));
 
-  return scoreCombined(filteredCourierRows, filteredArbRows, updatedPinnedHauls, updatedPinnedCouriers, weights);
+  // Wrap as cards. Available rows carry their server attractivity; pinned items
+  // carry no score (shown first regardless) and no breakdown.
+  const cards: ResultCard[] = [
+    ...updatedPinnedCouriers.map((c) => ({
+      kind: 'pinned-courier' as const,
+      key: `pc:${c.id}`,
+      row: { ...c, attractivity: 0, attractivitySteps: [] },
+    })),
+    ...updatedPinnedHauls.map((h) => ({
+      kind: 'pinned-arbitrage' as const,
+      key: `p:${h.id}`,
+      row: { ...h, attractivity: 0, attractivitySteps: [] },
+    })),
+    ...filteredCourierRows.map((c) => ({
+      kind: 'courier' as const,
+      key: `c:${c.id}`,
+      row: { ...c, attractivitySteps: [] },
+    })),
+    ...filteredArbRows.map((a) => ({
+      kind: 'arbitrage' as const,
+      key: `a:${a.id}`,
+      row: { ...a, attractivitySteps: [] },
+    })),
+  ];
+  return cards;
 });

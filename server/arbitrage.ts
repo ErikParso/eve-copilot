@@ -13,25 +13,16 @@
 //      filtered out — they aren't returned to the client.
 //
 // ALL user filtering (collateral, cargo, tax, …) stays on the client.
-import { getShipKills } from './kills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import { getType, getRegion, getStation } from './sde.js';
 import { getMarketPrice } from './prices.js';
 import { dangerForSystems } from './danger.js';
+import { scaleArbitrage, repriceForTax, type Scaled } from './arbitrageScore.js';
 import {
-  scaleArbitrage,
-  repriceForTax,
-  scoreAttractivity,
-  type AttractivityWeights,
-  type Scaled,
-} from './arbitrageScore.js';
-import {
-  getMarketMeta,
   getSnapshot,
   RANGE_REGION,
   RANGE_SYSTEM,
-  type MarketMeta,
   type Order,
   type StationOrders,
   type TypeBook,
@@ -316,11 +307,13 @@ export async function prewarmDeliveryRoutes(): Promise<void> {
   }
 }
 
-// --- Step 3: filter → scale → route → score → truncate (every request) --------
+// --- Step 3: per-request candidates (scale + route + jumps/danger) ------------
+// The combined courier+arbitrage scoring/truncation lives in hauling.ts; here we
+// just produce the arbitrage candidate set it ranks.
 
-export interface EnrichArbitrageParams {
+export interface CandidateParams {
   routeType: RouteType;
-  /** Current system, or null (no approach leg, no jumps-from-current). */
+  /** Current system, or null (no approach leg). */
   origin: number | null;
   /** Usable cargo m³ (Infinity = unconstrained). */
   capacity: number;
@@ -328,42 +321,29 @@ export interface EnrichArbitrageParams {
   balance: number;
   /** Sales tax percent (e.g. 4.5) to re-price profit to. */
   taxPct: number;
-  /** Attractivity weights used to rank the candidate set for truncation. */
-  weights: AttractivityWeights;
-  /** How many of the most attractive hauls to ship. */
-  limit: number;
 }
 
-export interface ArbitrageResponse {
-  items: ScaledArbitrageItem[];
-  meta: MarketMeta;
+/** A floored opportunity scaled to the requester, routed, with jumps/danger as
+ *  numbers and the route ids (full RouteSystem[] is materialised later, only for
+ *  shipped items). */
+export interface ArbitrageCandidate {
+  opp: Scaled<ArbitrageOpportunity>;
+  deliveryIds: number[];
+  approachIds: number[] | null;
+  totalJumps: number;
+  danger: number;
 }
 
 /**
- * The shipped arbitrage menu: every floored candidate is re-priced to the user's
- * tax, scaled to their cargo/wallet, routed (jumps + danger from cached paths),
- * scored by attractivity over the WHOLE set, then truncated to the top-N. Full
- * RouteSystem[] objects are materialised only for the shipped items. The server
- * score is used solely to pick the top-N; the FE re-scores the combined
- * courier+arbitrage set for the displayed index.
+ * Every floored opportunity re-priced to the user's tax, scaled to their
+ * cargo/wallet, and routed (jumps + danger from cached paths). Drops anything
+ * that doesn't fit the hold/wallet or isn't reachable. No RouteSystem[] built
+ * here — that's only for the shipped top-N (see materializeArbitrageItem).
  */
-export async function getEnrichedArbitrage(params: EnrichArbitrageParams): Promise<ArbitrageResponse> {
-  const meta = getMarketMeta();
-  if (!getSnapshot()) return { items: [], meta };
-
-  const kills = await getShipKills();
+export function buildArbitrageCandidates(params: CandidateParams, kills: Map<number, number>): ArbitrageCandidate[] {
+  if (!getSnapshot()) return [];
   const taxFraction = params.taxPct / 100;
-
-  // One candidate per surviving opportunity: scaled economics + route ids +
-  // jumps/danger numbers (no RouteSystem[] yet — that's only for the top-N).
-  interface Candidate {
-    opp: Scaled<ArbitrageOpportunity>;
-    deliveryIds: number[];
-    approachIds: number[] | null;
-    totalJumps: number;
-    danger: number;
-  }
-  const candidates: Candidate[] = [];
+  const out: ArbitrageCandidate[] = [];
   for (const raw of getOpportunities()) {
     const scaled = scaleArbitrage(repriceForTax(raw, taxFraction), params.capacity, params.balance);
     if (!scaled) continue; // nothing fits the hold/wallet
@@ -379,34 +359,24 @@ export async function getEnrichedArbitrage(params: EnrichArbitrageParams): Promi
       if (!approachIds) continue; // can't reach the buy station from here
     }
 
-    const jumpsToDest = Math.max(0, deliveryIds.length - 1);
-    const jumpsFromCurrent = approachIds ? Math.max(0, approachIds.length - 1) : 0;
-    const totalJumps = jumpsToDest + jumpsFromCurrent;
+    const totalJumps =
+      Math.max(0, deliveryIds.length - 1) + (approachIds ? Math.max(0, approachIds.length - 1) : 0);
     // Danger over the route actually flown (approach + delivery, shared seam dropped).
     const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
     const danger = dangerForSystems(dangerRoute, kills);
 
-    candidates.push({ opp: scaled, deliveryIds, approachIds, totalJumps, danger });
+    out.push({ opp: scaled, deliveryIds, approachIds, totalJumps, danger });
   }
+  return out;
+}
 
-  // Rank by attractivity over the whole set, keep the top-N.
-  const scores = scoreAttractivity(
-    candidates.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger })),
-    params.weights,
-  );
-  const ranked = candidates
-    .map((c, i) => ({ c, score: scores[i] }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, params.limit);
-
-  // Materialise full routes only for the shipped items.
-  const items: ScaledArbitrageItem[] = ranked.map(({ c }) => ({
+/** Materialise a candidate's full RouteSystem[] legs into a shippable item. */
+export function materializeArbitrageItem(c: ArbitrageCandidate, kills: Map<number, number>): ScaledArbitrageItem {
+  return {
     ...c.opp,
     approachRoute: c.approachIds ? toRouteSystems(c.approachIds, kills) : null,
     deliveryRoute: toRouteSystems(c.deliveryIds, kills),
-  }));
-
-  return { items, meta };
+  };
 }
 
 /**

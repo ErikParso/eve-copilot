@@ -3,7 +3,8 @@ import { loadSde } from './sde.js';
 import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
 import { startMarketRefresh, onMarketRefresh } from './market.js';
 import { startPricesRefresh } from './prices.js';
-import { getEnrichedArbitrage, resolvePinnedHaulsStatus, prewarmDeliveryRoutes } from './arbitrage.js';
+import { resolvePinnedHaulsStatus, prewarmDeliveryRoutes } from './arbitrage.js';
+import { getEnrichedHauling } from './hauling.js';
 import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
@@ -110,14 +111,16 @@ async function main() {
     }
   });
 
-  app.get('/api/arbitrage', async (req, res) => {
+  // Combined hauling menu: courier + arbitrage scored together server-side,
+  // truncated to the top-N by attractivity, shipped with the score attached.
+  app.get('/api/hauling', async (req, res) => {
     try {
       const weights: AttractivityWeights = {
         income: parseWeight(req.query.wIncome, 5),
         totalJumps: parseWeight(req.query.wJumps, 5),
         danger: parseWeight(req.query.wDanger, 5),
       };
-      const result = await getEnrichedArbitrage({
+      const result = await getEnrichedHauling({
         routeType: parseRouteType(req.query.routeType),
         origin: parseOptionalNumber(req.query.origin),
         capacity: parseCeiling(req.query.capacity),
@@ -128,7 +131,7 @@ async function main() {
       });
       res.json(result);
     } catch (err) {
-      console.error('GET /api/arbitrage failed', err);
+      console.error('GET /api/hauling failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });
