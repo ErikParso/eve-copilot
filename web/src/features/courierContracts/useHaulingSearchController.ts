@@ -1,17 +1,18 @@
 // Drives the global hauling fetch: runs once on load, refreshes in the
-// background on the server's crawl cadence, and re-fetches when the route type
-// or the character's current system changes (both alter server-resolved routes).
-// Mount this exactly once (in the app shell). Results land in haulingDataAtom.
-// Filtering/scoring is derived from the preferences in haulingRowsAtom, so
-// preference tweaks don't trigger a re-fetch.
+// background on the server's crawl cadence, and re-fetches when anything that
+// changes the SERVER-side arbitrage result changes — route type, current system,
+// cargo capacity, wallet balance, or sales tax. Attractivity WEIGHTS are NOT a
+// re-fetch trigger: the server ranks/truncates by them but the FE re-scores the
+// shipped set instantly in haulingRowsAtom, so dragging a weight slider costs no
+// round-trip. Mount this exactly once (in the app shell). Results → haulingDataAtom.
 import { useCallback, useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { characterStatusAtom } from '@/features/auth/atoms';
-import { preferencesAtom } from '@/features/preferences/atoms';
+import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
+import { preferencesAtom, DEFAULT_SALES_TAX_PCT } from '@/features/preferences/atoms';
 import { deriveJourney, perJump } from './journey';
-import { haulingDataAtom, type CourierBase } from './atoms';
+import { haulingDataAtom, attractivityWeightsAtom, type CourierBase } from './atoms';
 import type { ContractEndpoint, RouteSystem } from './types';
-import type { ArbitrageItem, MarketMeta } from '@/features/arbitrage/types';
+import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
 import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
 
 // Background refresh aligns to the server crawl cadence (~10 min); retry sooner
@@ -33,7 +34,7 @@ interface ApiContract {
   deliveryRoute: RouteSystem[];
 }
 type ApiArbitrageItem = Pick<
-  ArbitrageItem,
+  ScaledArbitrage,
   | 'id'
   | 'typeId'
   | 'itemName'
@@ -51,6 +52,10 @@ type ApiArbitrageItem = Pick<
   | 'source'
   | 'dest'
   | 'approachRoute'
+  // Server ships these already scaled to the requester's cargo/wallet.
+  | 'fullQuantity'
+  | 'fullTotalVolume'
+  | 'limited'
 > & { deliveryRoute: RouteSystem[] };
 interface ContractsResponse {
   contracts: ApiContract[];
@@ -80,7 +85,7 @@ function hydrateContract(c: ApiContract): CourierBase {
   };
 }
 
-function hydrateArbitrage(a: ApiArbitrageItem): ArbitrageItem {
+function hydrateArbitrage(a: ApiArbitrageItem): ScaledArbitrage {
   const j = deriveJourney(a.approachRoute, a.deliveryRoute);
   return {
     ...a,
@@ -96,9 +101,14 @@ function hydrateArbitrage(a: ApiArbitrageItem): ArbitrageItem {
 export function useHaulingSearchController(): void {
   const store = useStore();
   const setData = useSetAtom(haulingDataAtom);
-  // Triggers: re-fetch when either of these changes (they alter server routes).
-  const routeType = useAtomValue(preferencesAtom).routeType;
+  // Re-fetch triggers: anything that changes the server-side arbitrage result.
+  // (Weights are read at fetch time but are NOT a trigger — see haulingRowsAtom.)
+  const prefs = useAtomValue(preferencesAtom);
+  const routeType = prefs.routeType;
+  const cargoM3 = prefs.cargoM3;
+  const salesTaxPct = prefs.salesTaxPct;
   const origin = useAtomValue(characterStatusAtom)?.systemId ?? null;
+  const balance = useAtomValue(characterWalletAtom)?.balance ?? null;
   const abortRef = useRef<AbortController | null>(null);
 
   const run = useCallback(async (): Promise<MarketMeta | null> => {
@@ -118,9 +128,22 @@ export function useHaulingSearchController(): void {
       const params = new URLSearchParams({ routeType: rt });
       if (org !== null) params.set('origin', String(org));
 
+      // Arbitrage takes the full server-side pipeline params: capacity, wallet,
+      // tax (re-priced server-side) + attractivity weights (for the top-N rank).
+      const prefsNow = store.get(preferencesAtom);
+      const wallet = store.get(characterWalletAtom)?.balance;
+      const weights = store.get(attractivityWeightsAtom);
+      const arbParams = new URLSearchParams(params);
+      if (prefsNow.cargoM3 != null) arbParams.set('capacity', String(prefsNow.cargoM3));
+      if (wallet != null) arbParams.set('balance', String(wallet));
+      arbParams.set('taxPct', String(prefsNow.salesTaxPct ?? DEFAULT_SALES_TAX_PCT));
+      arbParams.set('wIncome', String(weights.income));
+      arbParams.set('wJumps', String(weights.totalJumps));
+      arbParams.set('wDanger', String(weights.danger));
+
       const [contractRes, arbRes] = await Promise.all([
         fetch(`/api/contracts?${params.toString()}`, { signal }),
-        fetch(`/api/arbitrage?${params.toString()}`, { signal }),
+        fetch(`/api/arbitrage?${arbParams.toString()}`, { signal }),
       ]);
       if (!contractRes.ok) throw new Error(`Contracts API returned ${contractRes.status}`);
       if (!arbRes.ok) throw new Error(`Arbitrage API returned ${arbRes.status}`);
@@ -220,5 +243,5 @@ export function useHaulingSearchController(): void {
       if (timer) clearTimeout(timer);
       abortRef.current?.abort();
     };
-  }, [run, routeType, origin]);
+  }, [run, routeType, origin, cargoM3, salesTaxPct, balance]);
 }
