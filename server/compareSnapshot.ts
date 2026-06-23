@@ -1,7 +1,7 @@
 // Offline, deterministic arbitrage algorithm comparison against a saved market
-// fixture (server/fixtures/market-snapshot.json) — no ESI, no variance. Capture
-// the fixture once via GET /api/arbitrage/snapshot/save on a warmed server, then:
-//   npm run compare
+// fixture (server/fixtures/market-snapshot.json) — no ESI, no variance.
+//   npm run capture     # crawl once, write the fixture
+//   npm run compare     # this script: read the fixture, compare, report
 // Prints a text summary and writes the full side-by-side HTML report.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

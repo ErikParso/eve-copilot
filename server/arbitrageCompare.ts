@@ -1,10 +1,15 @@
-// DIAGNOSTIC ONLY — a side-by-side comparison of the arbitrage opportunity
-// discovery BEFORE vs AFTER the range-aware destination pooling change. Both
-// algorithms run over the SAME live market snapshot (same orders, same tax, same
-// volumes), so the only difference shown is the discovery algorithm itself.
+// OFFLINE DIAGNOSTIC ONLY (not wired into the running app) — a side-by-side
+// comparison of the arbitrage opportunity discovery: a frozen BASELINE algorithm
+// (`resolveOpportunitiesLegacy` below) vs the current production `resolveOpportunities`.
+// Both run over the SAME fixed market snapshot (same orders/tax/volumes), so the
+// only difference shown is the discovery algorithm itself. Run via `npm run compare`
+// (see compareSnapshot.ts); capture the fixture with `npm run capture`.
 //
-// Served read-only at GET /api/arbitrage/compare (optional ?typeId=<n> to focus
-// one item type). Safe to delete once the change has been validated.
+// REUSING THIS FOR FUTURE DISCOVERY CHANGES: the baseline below is the
+// pre-range-pooling algorithm. Before experimenting with a new change, replace the
+// baseline's body with a copy of the CURRENT production `resolveOpportunities` (so
+// the comparison measures your new change's incremental effect), then modify
+// production and run `npm run compare`.
 import { getSnapshot, type TypeBook } from './market.js';
 import { getType } from './sde.js';
 import { getMarketPrice } from './prices.js';
@@ -161,11 +166,13 @@ export interface ComparisonResult {
 
 /** Run both algorithms over one order book and classify every lane. Pure. */
 export function computeComparison(byType: Map<number, TypeBook>): ComparisonResult {
-  const improved = resolveOpportunities(byType);
+  // minProfit: 0 on both sides so this stays a pure ALGORITHM comparison (legacy
+  // has no floor); the 100k production floor is an orthogonal lever.
+  const improved = resolveOpportunities(byType, { minProfit: 0 });
   const legacy = resolveOpportunitiesLegacy(byType);
   // The improved discovery with the per-type + global caps removed. Discovery
   // quality is judged against THIS, so menu truncation can't hide a regression.
-  const improvedUncapped = resolveOpportunities(byType, Infinity, Infinity);
+  const improvedUncapped = resolveOpportunities(byType, { maxPairs: Infinity, maxTotal: Infinity, minProfit: 0 });
   const impUncappedByLane = new Map<string, ArbitrageOpportunity>();
   for (const o of improvedUncapped) {
     const cur = impUncappedByLane.get(laneKey(o));
