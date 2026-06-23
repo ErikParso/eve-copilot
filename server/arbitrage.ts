@@ -53,6 +53,11 @@ export const MAX_PAIRS_PER_TYPE = 12;
 // Global ceiling on the cached set (most profitable first). Bounds both the JSON
 // we ship and the number of routes we resolve per request.
 export const MAX_OPPORTUNITIES = 1500;
+// Drop any haul whose full-depth profit is below this — nobody bothers with sub-
+// 100k-ISK deals, and it removes ~60% of candidate pairs (a noise tail worth
+// ~0.6% of total profit) before the expensive route resolution. Route-free, so
+// it lives in the cached discovery stage. See `npm run floor` for the evidence.
+export const MIN_PROFIT = 100_000;
 // Most ladder rungs we keep per opportunity. Generous enough that normal items
 // ship their full depth; pathologically deep items (Tritanium &c.) keep only the
 // most-profitable top — the client reconciles any uncaptured tail against the
@@ -138,21 +143,38 @@ function poolBidsForDrop(dests: StationOrders[], drop: StationOrders): Order[] {
   return pooled;
 }
 
+/** Tunable discovery limits (perf guards). Defaults are the production values. */
+export interface DiscoveryLimits {
+  maxSources: number;
+  maxDests: number;
+  maxPairs: number;
+  maxTotal: number;
+  /** Minimum full-depth profit (ISK) to keep a haul. Diagnostics pass 0. */
+  minProfit: number;
+}
+export const DEFAULT_LIMITS: DiscoveryLimits = {
+  maxSources: MAX_SOURCES_PER_TYPE,
+  maxDests: MAX_DESTS_PER_TYPE,
+  maxPairs: MAX_PAIRS_PER_TYPE,
+  maxTotal: MAX_OPPORTUNITIES,
+  minProfit: MIN_PROFIT,
+};
+
 /** Every profitable source→dest pair for one item type (most profitable first). */
 function opportunitiesForType(
   typeId: number,
   name: string,
   unitVolume: number,
   book: TypeBook,
-  maxPairs: number = MAX_PAIRS_PER_TYPE,
+  limits: DiscoveryLimits = DEFAULT_LIMITS,
 ): ArbitrageOpportunity[] {
   const tax = DEFAULT_SALES_TAX;
   const dearestBuy = book.buys[0]?.best ?? -Infinity;
   // Quick reject: if the dearest buy can't beat the cheapest sell, nothing here.
   if (book.sells.length === 0 || dearestBuy * (1 - tax) <= (book.sells[0]?.best ?? Infinity)) return [];
 
-  const sources = book.sells.slice(0, MAX_SOURCES_PER_TYPE);
-  const dests = book.buys.slice(0, MAX_DESTS_PER_TYPE);
+  const sources = book.sells.slice(0, limits.maxSources);
+  const dests = book.buys.slice(0, limits.maxDests);
   // Range-aware destination books are pooled once per drop station (independent
   // of source), then reused for every source.
   const pooledByDrop = dests.map((drop) => ({ drop, bids: poolBidsForDrop(dests, drop) }));
@@ -179,7 +201,7 @@ function opportunitiesForType(
       const { quantity, buyCost, sellRevenueGross, ladder } = walkDepth(source.orders, bids);
       if (quantity <= 0) continue;
       const profit = sellRevenueGross * (1 - tax) - buyCost;
-      if (profit <= 0) continue;
+      if (profit <= 0 || profit < limits.minProfit) continue;
       const existing = bestBySystem.get(drop.system);
       if (!existing || profit > existing.profit) {
         bestBySystem.set(drop.system, { drop, quantity, buyCost, sellRevenueGross, profit, ladder });
@@ -209,28 +231,27 @@ function opportunitiesForType(
   }
 
   out.sort((a, b) => b.profit - a.profit);
-  return out.length > maxPairs ? out.slice(0, maxPairs) : out;
+  return out.length > limits.maxPairs ? out.slice(0, limits.maxPairs) : out;
 }
 
 /**
- * Resolve every profitable haul in the current snapshot (no routes). The caps
- * default to the production limits; the diagnostic comparison passes Infinity to
- * see the full discovery set (so it can tell a cap-truncated lane from one the
- * discovery logic genuinely misses).
+ * Resolve every profitable haul in the current snapshot (no routes). The limits
+ * default to the production values; the diagnostic comparison overrides them
+ * (e.g. uncapped, or a cap-sensitivity sweep) to see the full discovery set.
  */
 export function resolveOpportunities(
   byType: Map<number, TypeBook>,
-  maxPairs: number = MAX_PAIRS_PER_TYPE,
-  maxTotal: number = MAX_OPPORTUNITIES,
+  limits: Partial<DiscoveryLimits> = {},
 ): ArbitrageOpportunity[] {
+  const lim: DiscoveryLimits = { ...DEFAULT_LIMITS, ...limits };
   const all: ArbitrageOpportunity[] = [];
   for (const [typeId, book] of byType) {
     const type = getType(typeId);
     if (!type) continue;
-    all.push(...opportunitiesForType(typeId, type.name, type.volume, book, maxPairs));
+    all.push(...opportunitiesForType(typeId, type.name, type.volume, book, lim));
   }
   all.sort((a, b) => b.profit - a.profit);
-  return all.length > maxTotal ? all.slice(0, maxTotal) : all;
+  return all.length > lim.maxTotal ? all.slice(0, lim.maxTotal) : all;
 }
 
 // --- Step 2: cache the resolved opportunities (keyed by the market snapshot) --

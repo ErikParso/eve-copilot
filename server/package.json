@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "tsx watch index.ts",
     "start": "tsx index.ts",
+    "capture": "tsx captureSnapshot.ts",
     "compare": "tsx compareSnapshot.ts",
+    "compare:limits": "tsx compareLimits.ts",
+    "floor": "tsx profitFloor.ts",
+    "route-time": "tsx routeTiming.ts",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint ."
   },
