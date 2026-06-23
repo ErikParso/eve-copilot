@@ -139,7 +139,13 @@ function poolBidsForDrop(dests: StationOrders[], drop: StationOrders): Order[] {
 }
 
 /** Every profitable source→dest pair for one item type (most profitable first). */
-function opportunitiesForType(typeId: number, name: string, unitVolume: number, book: TypeBook): ArbitrageOpportunity[] {
+function opportunitiesForType(
+  typeId: number,
+  name: string,
+  unitVolume: number,
+  book: TypeBook,
+  maxPairs: number = MAX_PAIRS_PER_TYPE,
+): ArbitrageOpportunity[] {
   const tax = DEFAULT_SALES_TAX;
   const dearestBuy = book.buys[0]?.best ?? -Infinity;
   // Quick reject: if the dearest buy can't beat the cheapest sell, nothing here.
@@ -157,13 +163,15 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
     // Sells ascending: once the cheapest remaining source can't be beaten by the
     // dearest buy anywhere, no dearer source can be either.
     if (dearestBuy * (1 - tax) <= source.best) break;
-    // One opportunity per destination *system*: pooling makes a second station in
-    // the same system a near-duplicate (it sees the same system/region depth), so
-    // the dearest drop in each system represents it.
-    const emittedSystems = new Set<number>();
+    // One opportunity per destination *system*, represented by the drop station
+    // that yields the MOST profit for this source — not merely the one with the
+    // dearest single bid. Two stations in a system see the same system/region
+    // depth, but each also has its own station-range demand (fillable only at it),
+    // so the best drop can be the one holding a large station-range order rather
+    // than the dearest-quoted one.
+    const bestBySystem = new Map<number, { drop: StationOrders; quantity: number; buyCost: number; sellRevenueGross: number; profit: number; ladder: ArbitrageRung[] }>();
     for (const { drop, bids } of pooledByDrop) {
       if (drop.station === source.station) continue;
-      if (emittedSystems.has(drop.system)) continue;
       // Effective best bid at this drop is the dearest pooled order (may exceed
       // the drop's own best when a dearer region/system order reaches it).
       const bestBid = bids[0]?.price ?? -Infinity;
@@ -172,8 +180,13 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
       if (quantity <= 0) continue;
       const profit = sellRevenueGross * (1 - tax) - buyCost;
       if (profit <= 0) continue;
-      emittedSystems.add(drop.system);
+      const existing = bestBySystem.get(drop.system);
+      if (!existing || profit > existing.profit) {
+        bestBySystem.set(drop.system, { drop, quantity, buyCost, sellRevenueGross, profit, ladder });
+      }
+    }
 
+    for (const { drop, quantity, buyCost, sellRevenueGross, profit, ladder } of bestBySystem.values()) {
       out.push({
         id: `${typeId}:${source.station}:${drop.station}`,
         typeId,
@@ -196,19 +209,28 @@ function opportunitiesForType(typeId: number, name: string, unitVolume: number, 
   }
 
   out.sort((a, b) => b.profit - a.profit);
-  return out.length > MAX_PAIRS_PER_TYPE ? out.slice(0, MAX_PAIRS_PER_TYPE) : out;
+  return out.length > maxPairs ? out.slice(0, maxPairs) : out;
 }
 
-/** Resolve every profitable haul in the current snapshot (no routes). */
-export function resolveOpportunities(byType: Map<number, TypeBook>): ArbitrageOpportunity[] {
+/**
+ * Resolve every profitable haul in the current snapshot (no routes). The caps
+ * default to the production limits; the diagnostic comparison passes Infinity to
+ * see the full discovery set (so it can tell a cap-truncated lane from one the
+ * discovery logic genuinely misses).
+ */
+export function resolveOpportunities(
+  byType: Map<number, TypeBook>,
+  maxPairs: number = MAX_PAIRS_PER_TYPE,
+  maxTotal: number = MAX_OPPORTUNITIES,
+): ArbitrageOpportunity[] {
   const all: ArbitrageOpportunity[] = [];
   for (const [typeId, book] of byType) {
     const type = getType(typeId);
     if (!type) continue;
-    all.push(...opportunitiesForType(typeId, type.name, type.volume, book));
+    all.push(...opportunitiesForType(typeId, type.name, type.volume, book, maxPairs));
   }
   all.sort((a, b) => b.profit - a.profit);
-  return all.length > MAX_OPPORTUNITIES ? all.slice(0, MAX_OPPORTUNITIES) : all;
+  return all.length > maxTotal ? all.slice(0, maxTotal) : all;
 }
 
 // --- Step 2: cache the resolved opportunities (keyed by the market snapshot) --

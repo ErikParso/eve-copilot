@@ -227,3 +227,39 @@ export function getMarketMeta(): MarketMeta {
 export function getSnapshot(): Snapshot | null {
   return snapshot;
 }
+
+/** JSON-serializable form of the current snapshot (Map flattened to entries). */
+export interface SerializedSnapshot {
+  builtAt: number;
+  lastModifiedAt: number | null;
+  orderCount: number;
+  regions: number;
+  byType: Array<[number, TypeBook]>;
+}
+
+/** Flatten the live snapshot for persisting to disk, or null if not ready. */
+export function dumpSnapshot(): SerializedSnapshot | null {
+  if (!snapshot) return null;
+  return {
+    builtAt: snapshot.builtAt,
+    lastModifiedAt: snapshot.lastModifiedAt,
+    orderCount: snapshot.orderCount,
+    regions: snapshot.regions,
+    byType: [...snapshot.byType.entries()],
+  };
+}
+
+/**
+ * Install a snapshot loaded from disk as the live one (for deterministic,
+ * offline algorithm tests). Marks the market ready and stops it looking cold.
+ */
+export function loadSnapshot(data: SerializedSnapshot): void {
+  snapshot = {
+    builtAt: data.builtAt,
+    lastModifiedAt: data.lastModifiedAt,
+    orderCount: data.orderCount,
+    regions: data.regions,
+    byType: new Map(data.byType),
+  };
+  status = 'ready';
+}

@@ -4,7 +4,6 @@ import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
 import { startMarketRefresh } from './market.js';
 import { startPricesRefresh } from './prices.js';
 import { getEnrichedArbitrage, resolvePinnedHaulsStatus } from './arbitrage.js';
-import { buildComparisonHtml } from './arbitrageCompare.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getShipKills } from './kills.js';
@@ -110,18 +109,6 @@ async function main() {
       res.json({ statuses });
     } catch (err) {
       console.error('POST /api/arbitrage/status failed', err);
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
-    }
-  });
-
-  // DIAGNOSTIC: side-by-side comparison of arbitrage discovery before vs after
-  // the range-aware pooling change (read-only HTML). Safe to remove later.
-  app.get('/api/arbitrage/compare', (req, res) => {
-    try {
-      const typeId = parseOptionalNumber(req.query.typeId);
-      res.type('html').send(buildComparisonHtml(typeId));
-    } catch (err) {
-      console.error('GET /api/arbitrage/compare failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });
