@@ -13,3 +13,7 @@ dist-ssr
 npm-debug.log*
 graphify-out
 .aider*
+
+# Large market-snapshot fixtures + generated reports for offline algorithm
+# comparison (local only)
+server/fixtures/

@@ -12,7 +12,12 @@
       "WebFetch(domain:skoli.ru)",
       "Bash(rtk tsc *)",
       "Bash(rtk ls *)",
-      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0\\)\\);for\\(const f of d\\)for\\(const m of f.messages\\)console.log\\(m.line+':'+m.column+' '+m.ruleId+' '+m.message\\)\")"
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0\\)\\);for\\(const f of d\\)for\\(const m of f.messages\\)console.log\\(m.line+':'+m.column+' '+m.ruleId+' '+m.message\\)\")",
+      "Bash(curl -s \"http://localhost:4123/api/arbitrage/compare\" -o /tmp/cmp.html)",
+      "Bash(sed -e 's/<\\\\/div>/\\\\n/g' /tmp/cmp.html)",
+      "Bash(awk '/Legacy lanes/{f=1} /menu hit the/{f=0} f')",
+      "Bash(awk '/covers but LESS/{f=1} /Gains —/{f=0} f')",
+      "Bash(awk '/Cap-displaced/{f=1} /covers but LESS/{f=0} f')"
     ]
   }
 }

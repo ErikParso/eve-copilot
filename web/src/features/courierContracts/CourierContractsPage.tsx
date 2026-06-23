@@ -3,7 +3,6 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   Alert,
   Box,
-  Button,
   LinearProgress,
   Stack,
   TextField,
@@ -11,7 +10,6 @@ import {
   InputAdornment,
   Paper,
 } from '@mui/material';
-import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import { haulingDataAtom, haulingRowsAtom } from './atoms';
 import { sortCombined } from './combined';
 import { CombinedGrid } from './components/CombinedGrid';
@@ -90,10 +88,6 @@ export function CourierContractsPage() {
   // Pinned hauls state
   const pinnedHauls = useAtomValue(pinnedHaulsAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
-
-  // Diagnostic: show the legacy-vs-improved arbitrage discovery comparison
-  // (served as HTML by the backend) instead of the grid.
-  const [showCompare, setShowCompare] = useState(false);
 
   const loading = status === 'idle' || status === 'loading';
   const warming = status === 'success' && market !== null && market.status !== 'ready';
@@ -210,37 +204,18 @@ export function CourierContractsPage() {
               </Box>
             </Paper>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2, gap: 2 }}>
-              <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
-                {showCompare ? 'Algorithm comparison (diagnostic)' : 'Available Opportunities'}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                {!showCompare && (
-                  <Typography variant="body2" color="text.secondary">
-                    {rows.length} {rows.length === 1 ? 'opportunity' : 'opportunities'} found
-                  </Typography>
-                )}
-                <Button
-                  size="small"
-                  variant={showCompare ? 'contained' : 'outlined'}
-                  startIcon={<CompareArrowsIcon />}
-                  onClick={() => setShowCompare((v) => !v)}
-                >
-                  {showCompare ? 'Back to opportunities' : 'Compare algorithm'}
-                </Button>
+            {rows.length > 0 && (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
+                  Available Opportunities
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {rows.length} {rows.length === 1 ? 'opportunity' : 'opportunities'} found
+                </Typography>
               </Box>
-            </Box>
+            )}
 
-            {showCompare ? (
-              <Paper variant="outlined" sx={{ overflow: 'hidden', borderRadius: 2 }}>
-                <Box
-                  component="iframe"
-                  title="Arbitrage algorithm comparison (before vs after)"
-                  src="/api/arbitrage/compare"
-                  sx={{ width: '100%', height: '80vh', border: 'none', display: 'block' }}
-                />
-              </Paper>
-            ) : rows.length > 0 ? (
+            {rows.length > 0 ? (
               <CombinedGrid rows={sortedRows} />
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
