@@ -143,6 +143,17 @@ export function CourierContractsPage() {
   // Sort live by attractivity always
   const sortedRows = useMemo(() => sortCombined(rows, 'attractivity'), [rows]);
 
+  // Courier vs arbitrage split (pinned of each kind included), for the header.
+  const counts = useMemo(() => {
+    let courier = 0;
+    let arbitrage = 0;
+    for (const r of rows) {
+      if (r.kind === 'courier' || r.kind === 'pinned-courier') courier += 1;
+      else arbitrage += 1;
+    }
+    return { courier, arbitrage };
+  }, [rows]);
+
   return (
     <Stack spacing={3}>
       {/* Pinned Hauls Section */}
@@ -210,7 +221,8 @@ export function CourierContractsPage() {
                   Available Opportunities
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {rows.length} {rows.length === 1 ? 'opportunity' : 'opportunities'} found
+                  {rows.length} {rows.length === 1 ? 'opportunity' : 'opportunities'} found ·{' '}
+                  {counts.courier} courier, {counts.arbitrage} arbitrage
                 </Typography>
               </Box>
             )}
