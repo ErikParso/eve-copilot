@@ -332,6 +332,7 @@ export interface ArbitrageCandidate {
   approachIds: number[] | null;
   totalJumps: number;
   danger: number;
+  dangerSteps: string[];
 }
 
 /**
@@ -363,9 +364,9 @@ export function buildArbitrageCandidates(params: CandidateParams, kills: Map<num
       Math.max(0, deliveryIds.length - 1) + (approachIds ? Math.max(0, approachIds.length - 1) : 0);
     // Danger over the route actually flown (approach + delivery, shared seam dropped).
     const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
-    const danger = dangerForSystems(dangerRoute, kills);
+    const { index: danger, steps: dangerSteps } = dangerForSystems(dangerRoute, kills);
 
-    out.push({ opp: scaled, deliveryIds, approachIds, totalJumps, danger });
+    out.push({ opp: scaled, deliveryIds, approachIds, totalJumps, danger, dangerSteps });
   }
   return out;
 }

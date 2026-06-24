@@ -23,9 +23,11 @@ export interface HaulingParams {
   limit: number;
 }
 
+// Every shipped item carries its route danger index + breakdown (computed here);
+// the FE renders these directly and computes no danger of its own.
 export type HaulingItem =
-  | ({ kind: 'courier'; attractivity: number } & EnrichedContract)
-  | ({ kind: 'arbitrage'; attractivity: number } & ScaledArbitrageItem);
+  | ({ kind: 'courier'; attractivity: number; danger: number; dangerSteps: string[] } & EnrichedContract)
+  | ({ kind: 'arbitrage'; attractivity: number; danger: number; dangerSteps: string[] } & ScaledArbitrageItem);
 
 export interface HaulingResponse {
   items: HaulingItem[];
@@ -34,15 +36,19 @@ export interface HaulingResponse {
   contractsAsOf: number | null;
 }
 
-/** jumps + danger over a contract's routes (same formula as arbitrage / FE). */
-function contractMetrics(c: EnrichedContract, kills: Map<number, number>): { totalJumps: number; danger: number } {
+/** jumps + danger (index + steps) over a contract's routes. */
+function contractMetrics(
+  c: EnrichedContract,
+  kills: Map<number, number>,
+): { totalJumps: number; danger: number; dangerSteps: string[] } {
   const ids = (r: RouteSystem[]) => r.map((s) => s.systemId);
   const deliveryIds = ids(c.deliveryRoute);
   const approachIds = c.approachRoute ? ids(c.approachRoute) : null;
   const totalJumps =
     Math.max(0, deliveryIds.length - 1) + (approachIds ? Math.max(0, approachIds.length - 1) : 0);
   const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
-  return { totalJumps, danger: dangerForSystems(dangerRoute, kills) };
+  const { index, steps } = dangerForSystems(dangerRoute, kills);
+  return { totalJumps, danger: index, dangerSteps: steps };
 }
 
 /**
@@ -81,8 +87,20 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
 
   const items: HaulingItem[] = tagged.slice(0, params.limit).map((t) =>
     t.kind === 'courier'
-      ? { kind: 'courier', attractivity: t.attractivity, ...courier[t.idx] }
-      : { kind: 'arbitrage', attractivity: t.attractivity, ...materializeArbitrageItem(arb[t.idx], kills) },
+      ? {
+          kind: 'courier',
+          attractivity: t.attractivity,
+          danger: courierMetrics[t.idx].danger,
+          dangerSteps: courierMetrics[t.idx].dangerSteps,
+          ...courier[t.idx],
+        }
+      : {
+          kind: 'arbitrage',
+          attractivity: t.attractivity,
+          danger: arb[t.idx].danger,
+          dangerSteps: arb[t.idx].dangerSteps,
+          ...materializeArbitrageItem(arb[t.idx], kills),
+        },
   );
 
   return { items, meta, contractsAsOf: contracts.lastModifiedAt };

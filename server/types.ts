@@ -21,6 +21,8 @@ export interface RouteSystem {
   security: number;
   securityBand: SecurityBand;
   shipKills: number;
+  /** Gank/camp hotspot flag (danger ≥ skull threshold) — for the FE's skull markers. */
+  gank: boolean;
 }
 
 export interface ContractEndpoint {
