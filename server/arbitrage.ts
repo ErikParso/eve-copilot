@@ -26,6 +26,7 @@ import {
   type Order,
   type StationOrders,
   type TypeBook,
+  type MarketStore,
 } from './market.js';
 import type {
   ArbitrageOpportunity,
@@ -239,14 +240,18 @@ function opportunitiesForType(
  * (e.g. uncapped, or a cap-sensitivity sweep) to see the full discovery set.
  */
 export function resolveOpportunities(
-  byType: Map<number, TypeBook>,
+  byType: MarketStore,
   limits: Partial<DiscoveryLimits> = {},
 ): ArbitrageOpportunity[] {
   const lim: DiscoveryLimits = { ...DEFAULT_LIMITS, ...limits };
   const all: ArbitrageOpportunity[] = [];
-  for (const [typeId, book] of byType) {
+  // Hydrate one type's verbose book at a time (transient, GC'd) so the matching
+  // logic below is unchanged while the persistent store stays compact/columnar.
+  for (const typeId of byType.typeIds()) {
     const type = getType(typeId);
     if (!type) continue;
+    const book = byType.hydrateType(typeId);
+    if (!book) continue;
     all.push(...opportunitiesForType(typeId, type.name, type.volume, book, lim));
   }
   all.sort((a, b) => b.profit - a.profit);
@@ -409,7 +414,7 @@ export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): Pinn
   const out: PinnedHaulStatusResponse[] = [];
 
   for (const h of hauls) {
-    const book = snap.byType.get(h.typeId);
+    const book = snap.byType.hydrateType(h.typeId);
     const asks = book?.sells.find((s) => s.station === h.source)?.orders ?? [];
     // Range-aware destination depth: every bid reachable from the drop station,
     // not just those physically resting at it.
