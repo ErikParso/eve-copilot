@@ -120,11 +120,12 @@ export const ContractCard = memo(function ContractCard({
           const colorKey = getPinnedBorderColor();
           if (!colorKey) return undefined;
           const parts = colorKey.split('.');
-          let color = theme.palette as any;
+          let node: unknown = theme.palette;
           for (const part of parts) {
-            color = color?.[part];
+            node = typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[part] : undefined;
           }
-          return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color || '#000', 0.35)}`;
+          const color = typeof node === 'string' ? node : '#000';
+          return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color, 0.35)}`;
         },
       }}
     >

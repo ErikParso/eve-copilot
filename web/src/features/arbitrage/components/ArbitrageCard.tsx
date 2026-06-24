@@ -95,7 +95,6 @@ interface DisplayRung {
 function getDisplayRungs(row: ArbitrageRow): DisplayRung[] {
   let remaining = row.quantity;
   const displayRungs: DisplayRung[] = [];
-  let ladderUnits = 0;
   let ladderBuyCost = 0;
   let ladderSellGross = 0;
 
@@ -104,7 +103,6 @@ function getDisplayRungs(row: ArbitrageRow): DisplayRung[] {
     const take = Math.min(rung.units, remaining);
     displayRungs.push({ units: take, buy: rung.buy, sell: rung.sell });
     remaining -= take;
-    ladderUnits += rung.units;
     ladderBuyCost += take * rung.buy;
     ladderSellGross += take * rung.sell;
   }
@@ -308,11 +306,12 @@ export const ArbitrageCard = memo(function ArbitrageCard({
             const colorKey = getPinnedBorderColor();
             if (!colorKey) return undefined;
             const parts = colorKey.split('.');
-            let color = theme.palette as any;
+            let node: unknown = theme.palette;
             for (const part of parts) {
-              color = color?.[part];
+              node = typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[part] : undefined;
             }
-            return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color || '#000', 0.35)}`;
+            const color = typeof node === 'string' ? node : '#000';
+            return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color, 0.35)}`;
           },
         }}
       >
