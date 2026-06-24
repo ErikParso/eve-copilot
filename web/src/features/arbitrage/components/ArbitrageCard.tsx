@@ -264,6 +264,29 @@ export const ArbitrageCard = memo(function ArbitrageCard({
     (liveProfit !== undefined && liveProfit < baselineProfitForComparison)
   );
 
+  const degradedMessage = (() => {
+    if (!isDegraded) return '';
+    const title = buyerGone
+      ? 'Buyer Gone'
+      : supplyGone
+        ? 'Supply Gone'
+        : shortfall
+          ? 'Demand Reduced'
+          : stale
+            ? 'Orders Changed'
+            : 'Price Reduced';
+    const detail = buyerGone
+      ? 'Bids at the destination no longer exist.'
+      : supplyGone
+        ? 'Sell orders at the source no longer exist.'
+        : stale && !shortfall
+          ? 'The specific orders backing this haul changed — re-check before committing.'
+          : isTransit
+            ? `Live destination: ${formatNumber(liveQuantity ?? 0, 0)} units · Profit: ${formatIskMillions(liveProfit ?? 0)}`
+            : `Originally pinned profit: ${formatIskMillions(originalProfit)}`;
+    return `${title}: ${detail}`;
+  })();
+
   const overpaying = isOverpaying(dispBuyPrice, row.marketPrice);
   const overValue =
     row.marketPrice && row.marketPrice > 0 ? dispBuyPrice / row.marketPrice : null;
@@ -383,6 +406,11 @@ export const ArbitrageCard = memo(function ArbitrageCard({
               >
                 {row.itemName}
               </Typography>
+              {isDegraded && (
+                <Tooltip title={degradedMessage} arrow>
+                  <WarningAmberIcon sx={{ fontSize: 18, color: endpointGone ? 'error.main' : 'warning.main', cursor: 'help' }} />
+                </Tooltip>
+              )}
               <OpenMarketButton typeId={row.typeId} />
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -414,34 +442,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
             <ArbitrageRouteCell row={row as ArbitrageRow} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
           )}
 
-          {/* Degraded Market Warnings */}
-          {isDegraded && (
-            <Box sx={{ p: 1, borderRadius: 1, bgcolor: endpointGone ? 'error.light' : 'warning.light', color: 'background.paper', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-              <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <WarningAmberIcon fontSize="inherit" />
-                {buyerGone
-                  ? 'Buyer Gone!'
-                  : supplyGone
-                    ? 'Supply Gone!'
-                    : shortfall
-                      ? 'Demand Reduced'
-                      : stale
-                        ? 'Orders Changed'
-                        : 'Price Reduced'}
-              </Typography>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-                {buyerGone
-                  ? 'Bids at the destination no longer exist.'
-                  : supplyGone
-                    ? 'Sell orders at the source no longer exist.'
-                    : stale && !shortfall
-                      ? 'The specific orders backing this haul changed — re-check before committing.'
-                      : isTransit
-                        ? `Live destination: ${formatNumber(liveQuantity ?? 0, 0)} units · Profit: ${formatIskMillions(liveProfit ?? 0)}`
-                        : `Originally pinned profit: ${formatIskMillions(originalProfit)}`}
-              </Typography>
-            </Box>
-          )}
+
 
           <Divider />
 
