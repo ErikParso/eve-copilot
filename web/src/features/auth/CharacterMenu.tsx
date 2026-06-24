@@ -35,12 +35,15 @@ export function CharacterMenu() {
   return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <Box sx={{ textAlign: 'right', display: { xs: 'none', sm: 'block' }, lineHeight: 1.25 }}>
+        <Box sx={{ textAlign: 'right', display: 'block', lineHeight: 1.25 }}>
           <Typography variant="body2" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
-            {active.name}
+            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+              {active.name}
+            </Box>
             {status?.systemName && (
-              <Box component="span" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '0.75rem' }}>
-                · {status.systemName}
+              <Box component="span" sx={{ fontWeight: { xs: 700, sm: 400 }, color: { xs: 'text.primary', sm: 'text.secondary' }, fontSize: '0.75rem' }}>
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>· </Box>
+                {status.systemName}
                 {status.security != null && (
                   <Box component="span" sx={{ color: securityColor(status.security), fontWeight: 600, ml: 0.5 }}>
                     ({formatNumber(status.security, 1)})
