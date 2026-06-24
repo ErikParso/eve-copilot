@@ -2,6 +2,7 @@
 // endpoints and route-system arrays the client cards render. Used by both the
 // courier-contract and arbitrage pipelines.
 import { getStation, getSystem, securityBand } from './sde.js';
+import { isGankRisk } from './danger.js';
 import type { ContractEndpoint, RouteSystem } from './types.js';
 
 /**
@@ -29,12 +30,15 @@ export function toRouteSystems(systemIds: number[], kills: Map<number, number>):
   return systemIds.map((id) => {
     const system = getSystem(id);
     const security = system?.security ?? 0;
+    const band = securityBand(security);
+    const shipKills = kills.get(id) ?? 0;
     return {
       systemId: id,
       name: system?.name ?? `System ${id}`,
       security,
-      securityBand: securityBand(security),
-      shipKills: kills.get(id) ?? 0,
+      securityBand: band,
+      shipKills,
+      gank: isGankRisk(band, shipKills),
     };
   });
 }

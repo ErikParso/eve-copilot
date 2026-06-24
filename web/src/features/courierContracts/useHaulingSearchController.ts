@@ -32,6 +32,9 @@ interface ApiContract {
   daysToComplete: number;
   approachRoute: RouteSystem[] | null;
   deliveryRoute: RouteSystem[];
+  // Danger (index + breakdown) computed and shipped by the server.
+  danger: number;
+  dangerSteps: string[];
 }
 type ApiArbitrageItem = Pick<
   ScaledArbitrage,
@@ -56,6 +59,9 @@ type ApiArbitrageItem = Pick<
   | 'fullQuantity'
   | 'fullTotalVolume'
   | 'limited'
+  // Server-computed danger (index + breakdown).
+  | 'danger'
+  | 'dangerSteps'
 > & { deliveryRoute: RouteSystem[] };
 type ApiHaulingItem =
   | ({ kind: 'courier'; attractivity: number } & ApiContract)
@@ -79,8 +85,8 @@ function hydrateContract(c: ApiContract): CourierBase {
     activeDurationSeconds: (c.expiresAt - c.issuedAt) / 1000,
     ageSeconds: (now - c.issuedAt) / 1000,
     remainingSeconds: (c.expiresAt - now) / 1000,
-    danger: j.danger,
-    dangerSteps: j.dangerSteps,
+    danger: c.danger,
+    dangerSteps: c.dangerSteps,
   };
 }
 
@@ -92,8 +98,8 @@ function hydrateArbitrage(a: ApiArbitrageItem): ScaledArbitrage {
     jumpsToDest: j.jumpsToDest,
     totalJumps: j.totalJumps,
     profitPerJump: perJump(a.profit, j.totalJumps),
-    danger: j.danger,
-    dangerSteps: j.dangerSteps,
+    danger: a.danger,
+    dangerSteps: a.dangerSteps,
   };
 }
 

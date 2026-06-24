@@ -1,11 +1,5 @@
-// Courier contracts plug into the shared attractivity scorer by mapping a
-// CourierRow onto the neutral Scorable shape; the engine, factor registry,
-// presets and weights all live in the shared module (re-exported here so the
-// existing weights UI / atoms imports keep working). Scoring itself runs over
-// the COMBINED courier+arbitrage set — see combined.ts `scoreCombined`.
-import type { Scorable } from '@/features/attractivity/scoring';
-import type { CourierRow } from './types';
-
+// Attractivity scoring now happens on the server; this module only re-exports
+// the factor registry / presets / weights types the weights UI and atoms import.
 export {
   FACTORS,
   ATTRACTIVITY_PRESETS,
@@ -13,14 +7,3 @@ export {
   factorLabel,
 } from '@/features/attractivity/scoring';
 export type { AttractivityWeights, FactorId, FactorDef } from '@/features/attractivity/scoring';
-
-/** A contract's metrics in the shared scoring vocabulary. */
-export function courierToScorable(
-  r: Pick<CourierRow, 'reward' | 'totalJumps' | 'danger'> & { unavailable?: boolean },
-): Scorable {
-  return {
-    income: r.unavailable ? 0 : r.reward,
-    totalJumps: r.totalJumps,
-    danger: r.danger,
-  };
-}

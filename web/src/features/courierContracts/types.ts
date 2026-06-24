@@ -26,6 +26,8 @@ export interface RouteSystem {
   securityBand: SecurityBand;
   /** Ship kills in this system in the last hour (0 if no recent activity). */
   shipKills: number;
+  /** Gank/camp hotspot flag (server-computed) — drives the skull markers. */
+  gank: boolean;
 }
 
 /** A resolved contract endpoint (station or unresolvable structure). */
