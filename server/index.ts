@@ -93,6 +93,15 @@ async function main() {
   startPricesRefresh();
   console.log('Started reference-price refresh (refreshing every 60 min).');
 
+  // Periodically log memory usage every 2 minutes
+  setInterval(() => {
+    const mem = process.memoryUsage();
+    const rss = Math.round(mem.rss / 1024 / 1024);
+    const heapUsed = Math.round(mem.heapUsed / 1024 / 1024);
+    const heapTotal = Math.round(mem.heapTotal / 1024 / 1024);
+    console.log(`[Memory Heartbeat] RSS: ${rss}MB | Heap Used: ${heapUsed}MB | Heap Total: ${heapTotal}MB`);
+  }, 2 * 60 * 1000).unref();
+
   const app = express();
   app.use(cors());
   app.use(express.json());
