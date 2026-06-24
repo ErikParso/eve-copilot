@@ -1,6 +1,6 @@
 import express from 'express';
 import { loadSde } from './sde.js';
-import { getEnrichedContracts, startContractsRefresh } from './contracts.js';
+import { startContractsRefresh } from './contracts.js';
 import { startMarketRefresh, onMarketRefresh } from './market.js';
 import { startPricesRefresh } from './prices.js';
 import { resolvePinnedHaulsStatus, prewarmDeliveryRoutes } from './arbitrage.js';
@@ -99,17 +99,6 @@ async function main() {
     res.json({ ok: true });
   });
 
-  app.get('/api/contracts', async (req, res) => {
-    try {
-      const type = parseRouteType(req.query.routeType);
-      const origin = parseOptionalNumber(req.query.origin);
-      const result = await getEnrichedContracts(type, origin);
-      res.json(result);
-    } catch (err) {
-      console.error('GET /api/contracts failed', err);
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
-    }
-  });
 
   // Combined hauling menu: courier + arbitrage scored together server-side,
   // truncated to the top-N by attractivity, shipped with the score attached.
