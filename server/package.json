@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch index.ts",
     "build": "tsc",
-    "start": "node --max-old-space-size=450 dist/index.js",
+    "start": "node --max-old-space-size=320 dist/index.js",
     "capture": "tsx captureSnapshot.ts",
     "compare": "tsx compareSnapshot.ts",
     "compare:limits": "tsx compareLimits.ts",
