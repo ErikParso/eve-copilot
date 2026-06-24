@@ -12,7 +12,11 @@
       "WebFetch(domain:skoli.ru)",
       "Bash(rtk tsc *)",
       "Bash(rtk ls *)",
-      "Bash(rtk npx *)"
+      "Bash(rtk npx *)",
+      "Bash(rtk wc *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(echo \"TC_EXIT:$?\")",
+      "Bash(echo \"LINT_EXIT:$?\")"
     ]
   }
 }

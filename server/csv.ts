@@ -12,16 +12,18 @@ export function parseCsv(
   text: string,
   filter?: (row: string[], idx: Record<string, number>) => boolean
 ): ParsedCsv {
-  const cleanText = text.replace(/^\uFEFF/, '');
+  // Skip a leading BOM by offset rather than allocating a second copy of the (multi-MB) string.
+  const cleanText = text;
+  const start = cleanText.charCodeAt(0) === 0xfeff ? 1 : 0;
   const rows: string[][] = [];
   const idx: Record<string, number> = {};
   let headerParsed = false;
 
   let row: string[] = [];
   let inQuotes = false;
-  let fieldStart = 0;
+  let fieldStart = start;
 
-  for (let i = 0; i < cleanText.length; i++) {
+  for (let i = start; i < cleanText.length; i++) {
     const c = cleanText[i];
     if (inQuotes) {
       if (c === '"') {

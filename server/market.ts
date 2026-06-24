@@ -92,36 +92,88 @@ function rangeCode(range: string): number {
   return Number.isFinite(n) && n > 0 ? n : RANGE_STATION;
 }
 
-async function fetchRegionOrders(
-  regionId: number,
-  onOrders: (orders: RawOrder[]) => void
-): Promise<number | null> {
+/** Raw per-station accumulators for one type while crawling (Map<station, orders>). */
+interface TypeBuild {
+  sells: Map<number, Order[]>;
+  buys: Map<number, Order[]>;
+}
+
+/** Result of crawling a single region: its compact, filtered order book plus metadata. */
+interface RegionResult {
+  local: Map<number, TypeBuild>;
+  orderCount: number;
+  lastModified: number | null;
+}
+
+/**
+ * Fetch every page of a region's orders into a compact, region-local order book.
+ *
+ * Returns the book only if ALL pages succeed — if any page fails after retries the
+ * whole region is dropped (returns null) so the snapshot never contains a
+ * half-populated region. Raw page chunks are filtered into compact Orders and
+ * discarded immediately, so memory stays bounded to one region's filtered orders.
+ */
+async function fetchRegionOrders(regionId: number): Promise<RegionResult | null> {
+  const local = new Map<number, TypeBuild>();
+  let orderCount = 0;
+  const localFor = (typeId: number): TypeBuild => {
+    let b = local.get(typeId);
+    if (!b) {
+      b = { sells: new Map(), buys: new Map() };
+      local.set(typeId, b);
+    }
+    return b;
+  };
+  const ingest = (chunk: RawOrder[]) => {
+    for (const o of chunk) {
+      // Skip orders for unpublished or zero-volume items to save massive heap overhead.
+      if (!getType(o.type_id)) continue;
+      const entry: Order = {
+        id: o.order_id,
+        price: o.price,
+        volume: o.volume_remain,
+        locationId: o.location_id,
+        systemId: o.system_id,
+        rangeCode: o.is_buy_order ? rangeCode(o.range) : RANGE_STATION,
+      };
+      const byStation = o.is_buy_order ? localFor(o.type_id).buys : localFor(o.type_id).sells;
+      const arr = byStation.get(o.location_id);
+      if (arr) arr.push(entry);
+      else byStation.set(o.location_id, [entry]);
+      orderCount++;
+    }
+  };
+
   try {
     const first = await esiGetPaged<RawOrder[]>(`/markets/${regionId}/orders/`, 1);
-    onOrders(first.data);
+    ingest(first.data);
     if (first.pages > 1) {
       const pages = Array.from({ length: first.pages - 1 }, (_, i) => i + 2);
       await mapWithConcurrency(pages, PAGE_CONCURRENCY, async (page) => {
         const res = await esiGetPaged<RawOrder[]>(`/markets/${regionId}/orders/`, page);
-        onOrders(res.data);
+        ingest(res.data);
         return null;
       });
     }
-    return first.lastModified;
+    return { local, orderCount, lastModified: first.lastModified };
   } catch (err) {
     if (err instanceof EsiError && err.status === 404) {
       // Regions with no market (e.g. wormhole space) 404 — skip silently.
       return null;
     }
-    console.error(`[Market Crawl] Error fetching region ${regionId}:`, err);
+    // Atomic: a partial region is worse than no region, so discard it entirely.
+    console.error(`[Market Crawl] Error fetching region ${regionId}, dropping region:`, err);
     return null;
   }
 }
 
-/** Raw per-station accumulators for one type while crawling (Map<station, orders>). */
-interface TypeBuild {
-  sells: Map<number, Order[]>;
-  buys: Map<number, Order[]>;
+/** Merge a region-local station map into the shared global map (concatenating order lists). */
+function mergeStationMap(target: Map<number, Order[]>, src: Map<number, Order[]>): void {
+  for (const [station, orders] of src) {
+    const existing = target.get(station);
+    if (existing) for (const o of orders) existing.push(o);
+    else target.set(station, orders);
+  }
 }
 
 /** Group a station map into best-price-sorted StationOrders (asks asc / bids desc). */
@@ -154,38 +206,23 @@ async function crawl(): Promise<Snapshot> {
   };
 
   await mapWithConcurrency(regionIds, REGION_CONCURRENCY, async (regionId) => {
-    let regionHasOrders = false;
-    const lastModified = await fetchRegionOrders(regionId, (chunk) => {
-      if (chunk.length === 0) return;
-      regionHasOrders = true;
-      for (const o of chunk) {
-        // Skip orders for unpublished or zero-volume items to save massive heap overhead
-        const typeInfo = getType(o.type_id);
-        if (!typeInfo) continue;
-
-        const entry: Order = {
-          id: o.order_id,
-          price: o.price,
-          volume: o.volume_remain,
-          locationId: o.location_id,
-          systemId: o.system_id,
-          rangeCode: o.is_buy_order ? rangeCode(o.range) : RANGE_STATION,
-        };
-        const byStation = (o.is_buy_order ? buildFor(o.type_id).buys : buildFor(o.type_id).sells);
-        const arr = byStation.get(o.location_id);
-        if (arr) arr.push(entry);
-        else byStation.set(o.location_id, [entry]);
-        orderCount++;
-      }
-    });
+    const result = await fetchRegionOrders(regionId);
 
     regionsParsed++;
-    if (regionHasOrders) {
+    // Merge happens synchronously after the await, so the shared maps are never
+    // touched concurrently and only fully-fetched regions are committed.
+    if (result && result.orderCount > 0) {
       regions++;
-      if (lastModified !== null && (lastModifiedAt === null || lastModified < lastModifiedAt)) {
+      orderCount += result.orderCount;
+      for (const [typeId, lb] of result.local) {
+        const gb = buildFor(typeId);
+        mergeStationMap(gb.sells, lb.sells);
+        mergeStationMap(gb.buys, lb.buys);
+      }
+      if (result.lastModified !== null && (lastModifiedAt === null || result.lastModified < lastModifiedAt)) {
         // Oldest region snapshot is the honest "data as of" — the list is only as
         // fresh as its stalest part.
-        lastModifiedAt = lastModified;
+        lastModifiedAt = result.lastModified;
       }
     }
     if (regionsParsed % 10 === 0 || regionsParsed === regionIds.length) {
