@@ -138,20 +138,49 @@ export function MarketDataPage() {
             : '0 2px 8px rgba(0,0,0,0.16)',
         }}
       >
-        <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
+        <CardContent sx={{ p: { xs: 2, sm: 3 }, '&:last-child': { pb: { xs: 2, sm: 3 } } }}>
           <Stack spacing={3}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-              {status !== 'ready' ? (
-                <CircularProgress size={20} thickness={5} />
-              ) : (
-                <FiberManualRecordIcon sx={{ fontSize: 18, color: 'success.main' }} />
-              )}
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                {status === 'ready' ? 'All regions loaded' : 'Synchronizing market data…'}
-              </Typography>
-              <Box sx={{ flex: 1 }} />
-              <Chip label={`${regionsLoaded}/${regionsTotal} regions loaded`} color={status === 'ready' ? 'success' : 'primary'} variant="outlined" />
-              <Chip label={`${orderCount.toLocaleString()} total orders`} variant="outlined" />
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                alignItems: { xs: 'flex-start', sm: 'center' },
+                gap: 2,
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                {status !== 'ready' ? (
+                  <CircularProgress size={20} thickness={5} />
+                ) : (
+                  <FiberManualRecordIcon sx={{ fontSize: 18, color: 'success.main' }} />
+                )}
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {status === 'ready' ? 'All regions loaded' : 'Synchronizing market data…'}
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: { xs: 'none', sm: 'block' }, flexGrow: 1 }} />
+
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: 1,
+                  flexWrap: 'wrap',
+                  width: { xs: '100%', sm: 'auto' },
+                }}
+              >
+                <Chip
+                  label={`${regionsLoaded}/${regionsTotal} regions loaded`}
+                  color={status === 'ready' ? 'success' : 'primary'}
+                  variant="outlined"
+                  sx={{ flexGrow: { xs: 1, sm: 0 } }}
+                />
+                <Chip
+                  label={`${orderCount.toLocaleString()} total orders`}
+                  variant="outlined"
+                  sx={{ flexGrow: { xs: 1, sm: 0 } }}
+                />
+              </Box>
             </Box>
 
             {status !== 'ready' && (
@@ -183,8 +212,8 @@ export function MarketDataPage() {
                       border: '1px solid',
                       borderColor: 'divider',
                       bgcolor: 'background.paper',
-                      flex: '1 1 300px',
-                      minWidth: '300px',
+                      flex: { xs: '1 1 100%', sm: '1 1 280px' },
+                      minWidth: 0,
                       '&:hover': { bgcolor: 'action.hover' },
                     }}
                   >
