@@ -162,7 +162,8 @@ async function fetchRegionOrders(regionId: number): Promise<RegionResult | null>
       return null;
     }
     // Atomic: a partial region is worse than no region, so discard it entirely.
-    console.error(`[Market Crawl] Error fetching region ${regionId}, dropping region:`, err);
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`[Market Crawl] Dropping region ${regionId}: ${reason}`);
     return null;
   }
 }
