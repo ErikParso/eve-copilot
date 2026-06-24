@@ -28,7 +28,7 @@ export function Layout() {
         <Toolbar>
           <RocketLaunchIcon sx={{ mr: 1, color: 'primary.main' }} />
           <Typography variant="h6" component="div" sx={{ fontWeight: 700, mr: 4 }}>
-            EVE Multitool
+            EVE Copilot
           </Typography>
           <Box sx={{ display: 'flex', gap: 1 }}>
             {NAV_ITEMS.map((item) => (

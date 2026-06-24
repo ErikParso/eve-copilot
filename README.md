@@ -1,6 +1,6 @@
-# EVE Multitool
+# EVE Copilot
 
-A helper toolkit for [EVE Online](https://www.eveonline.com/), built with **React + TypeScript + MUI**
+A helper copilot for [EVE Online](https://www.eveonline.com/), built with **React + TypeScript + MUI**
 on the front end and a small **Node + Express** API on the back end.
 It talks to the public [EVE ESI API](https://esi.evetech.net/) (no login required for the
 current features) and loads the EVE Static Data Export (SDE) station/system codelists
