@@ -49,17 +49,17 @@ export function Layout() {
             aria-label="open drawer"
             edge="start"
             onClick={() => setDrawerOpen(true)}
-            sx={{ mr: 1, display: { xs: 'flex', sm: 'none' } }}
+            sx={{ mr: 1, display: { xs: 'flex', md: 'none' } }}
           >
             <MenuIcon />
           </IconButton>
 
           <RocketLaunchIcon sx={{ mr: 1, color: 'primary.main' }} />
-          <Typography variant="h6" component="div" sx={{ fontWeight: 700, mr: { xs: 1, sm: 4 } }}>
+          <Typography variant="h6" component="div" sx={{ fontWeight: 700, mr: { xs: 1, md: 4 } }}>
             EVE Copilot
           </Typography>
 
-          <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 1 }}>
+          <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 1 }}>
             {NAV_ITEMS.map((item) => (
               <Button
                 key={item.to}
