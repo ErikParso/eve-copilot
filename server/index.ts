@@ -94,13 +94,21 @@ async function main() {
   startPricesRefresh();
   console.log('Started reference-price refresh (refreshing every 60 min).');
 
-  // Periodically log memory usage every 2 minutes
+  // Periodic health heartbeat every 2 minutes: memory + a one-line market summary
+  // (status, coverage, order count, and how stale the stalest region is) so a
+  // single log line tells you whether the crawler is healthy.
   setInterval(() => {
     const mem = process.memoryUsage();
     const rss = Math.round(mem.rss / 1024 / 1024);
     const heapUsed = Math.round(mem.heapUsed / 1024 / 1024);
     const heapTotal = Math.round(mem.heapTotal / 1024 / 1024);
-    console.log(`[Memory Heartbeat] RSS: ${rss}MB | Heap Used: ${heapUsed}MB | Heap Total: ${heapTotal}MB`);
+    const f = getMarketFreshness();
+    const ages = f.regions.filter((r) => r.status === 'loaded' && r.ageSeconds !== null).map((r) => r.ageSeconds!);
+    const stalest = ages.length ? Math.max(...ages) : 0;
+    console.log(
+      `[Heartbeat] RSS ${rss}MB | heap ${heapUsed}/${heapTotal}MB | market ${f.status}: ` +
+        `${f.regionsLoaded} regions, ${f.orderCount.toLocaleString()} orders, stalest ${Math.round(stalest / 60)}m old`,
+    );
   }, 2 * 60 * 1000).unref();
 
   const app = express();

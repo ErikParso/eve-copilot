@@ -85,6 +85,9 @@ const REGIONS_PER_TICK = 5; // regions dispatched per tick; real throttle is esi
 const PAGE_CONCURRENCY = 8; // per-region page fan-out (further bounded by esi.ts's global gate)
 const RESOLVE_THROTTLE_MS = 60_000; // once ready, rebuild the by-type index at most this often
 const FRESH_FALLBACK_MS = 300_000; // assume 5-min freshness when ESI sends no Expires
+const REFETCH_JITTER_MS = 45_000; // spread re-fetches so co-loaded regions desync (avoid bursts)
+const STALE_WARN_MS = 12 * 60_000; // warn if a loaded region hasn't refreshed in this long (≈2× window)
+const STALL_WARN_MS = 90_000; // warn if one region's fetch runs longer than this (likely hung)
 const EMPTY_REFRESH_MS = 30 * 60_000; // re-check market-less (404) regions rarely
 const ERROR_RETRY_MS = 60_000; // retry a failed region sooner than a full window
 
@@ -153,6 +156,10 @@ let status: MarketStatus = 'cold';
 
 const regionCaches = new Map<number, RegionCache>();
 const inFlight = new Set<number>();
+/** regionId → dispatch time, to detect fetches that hang. */
+const inFlightSince = new Map<number, number>();
+/** Rate-limits the health watchdog so it warns at most once a minute. */
+let lastHealthWarnAt = 0;
 let booksDirty = false;
 let lastBuildAt = 0;
 let started = false;
@@ -256,7 +263,10 @@ async function fetchRegion(rc: RegionCache): Promise<boolean> {
     rc.pageCount = pageCount;
     rc.orderCount = orderCount;
     rc.lastModified = p1.lastModified;
-    rc.expiresAt = p1.expiresAt ?? Date.now() + FRESH_FALLBACK_MS;
+    // Spread re-fetches with a little jitter so regions loaded together (the hubs,
+    // in the first ticks) don't all come due in the same tick and re-fetch as one
+    // big synchronized burst that trips ESI's rate limit.
+    rc.expiresAt = (p1.expiresAt ?? Date.now() + FRESH_FALLBACK_MS) + Math.floor(Math.random() * REFETCH_JITTER_MS);
     rc.fetchedAt = Date.now();
     rc.status = orderCount > 0 ? 'loaded' : 'empty';
     rc.lastError = null;
@@ -398,25 +408,66 @@ function priorityRank(rc: RegionCache): number {
 function tick(): void {
   maybeRebuild();
   const now = Date.now();
-  const due = [...regionCaches.values()]
+  const allDue = [...regionCaches.values()]
     .filter((rc) => !inFlight.has(rc.regionId) && now >= rc.expiresAt)
-    .sort((a, b) => priorityRank(a) - priorityRank(b) || a.expiresAt - b.expiresAt)
-    .slice(0, REGIONS_PER_TICK);
+    .sort((a, b) => priorityRank(a) - priorityRank(b) || a.expiresAt - b.expiresAt);
+  const due = allDue.slice(0, REGIONS_PER_TICK);
 
   if (due.length > 0) {
+    // Surface a backlog: more regions due than we can dispatch this tick means the
+    // crawler is falling behind (slow fetches, rate-limit pauses, or too low a cap).
+    const backlog = allDue.length > REGIONS_PER_TICK ? ` ⚠ ${allDue.length} due (backlog ${allDue.length - REGIONS_PER_TICK})` : '';
     const names = due.map((rc) => regionLabel(rc.regionId)).join(', ');
-    console.log(`[Market] Tick: refreshing ${due.length} region(s) [${inFlight.size} already in flight]: ${names}`);
+    console.log(`[Market] Tick: refreshing ${due.length}${backlog} [${inFlight.size} in flight]: ${names}`);
   }
 
   for (const rc of due) {
     inFlight.add(rc.regionId);
+    inFlightSince.set(rc.regionId, Date.now());
     void fetchRegion(rc)
       .then((changed) => {
         if (changed) booksDirty = true;
       })
       .catch((err) => console.error('[Market] fetchRegion crashed', err))
-      .finally(() => inFlight.delete(rc.regionId));
+      .finally(() => {
+        inFlight.delete(rc.regionId);
+        inFlightSince.delete(rc.regionId);
+      });
   }
+
+  runHealthWatchdog(now);
+}
+
+/**
+ * Periodic (≤ once/min) health check that surfaces the two silent failure modes
+ * the per-region logs miss: a fetch that hangs, and a region that has fallen well
+ * behind its refresh window (so its data is going stale unnoticed).
+ */
+function runHealthWatchdog(now: number): void {
+  if (now - lastHealthWarnAt < 60_000) return;
+  let warned = false;
+
+  const stuck = [...inFlightSince.entries()].filter(([, t]) => now - t > STALL_WARN_MS);
+  if (stuck.length > 0) {
+    const list = stuck.map(([id, t]) => `${regionLabel(id)} (${Math.round((now - t) / 1000)}s)`).join(', ');
+    console.warn(`[Market] ⚠ ${stuck.length} region fetch(es) running unusually long: ${list}`);
+    warned = true;
+  }
+
+  let stalest: RegionCache | null = null;
+  for (const rc of regionCaches.values()) {
+    if (rc.status !== 'loaded' || rc.fetchedAt === 0) continue;
+    if (!stalest || rc.fetchedAt < stalest.fetchedAt) stalest = rc;
+  }
+  if (stalest && now - stalest.fetchedAt > STALE_WARN_MS) {
+    console.warn(
+      `[Market] ⚠ Falling behind: stalest region ${regionLabel(stalest.regionId)} last refreshed ` +
+        `${Math.round((now - stalest.fetchedAt) / 60_000)}m ago (target ~5m).`,
+    );
+    warned = true;
+  }
+
+  if (warned) lastHealthWarnAt = now;
 }
 
 /** Start the incremental market scheduler: load the region list, then tick forever. */
