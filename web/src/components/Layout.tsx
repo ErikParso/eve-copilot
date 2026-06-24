@@ -13,6 +13,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Hauling', to: '/couriers' },
+  { label: 'Market Data', to: '/market' },
 ];
 
 /** App shell: top navigation bar + routed page content. */
