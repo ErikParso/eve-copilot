@@ -3,6 +3,7 @@
 // out over every region's paginated /markets/{region}/orders/ feed (CCP-cached
 // ~5 min) and merge it. Refreshed on a timer so all clients share one crawl.
 import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
+import { getType } from './sde.js';
 
 /**
  * Buy-order reach, normalised so arbitrage can resolve which sell location can
@@ -93,22 +94,23 @@ function rangeCode(range: string): number {
 
 async function fetchRegionOrders(
   regionId: number,
-): Promise<{ orders: RawOrder[]; lastModified: number | null }> {
+  onOrders: (orders: RawOrder[]) => void
+): Promise<number | null> {
   try {
     const first = await esiGetPaged<RawOrder[]>(`/markets/${regionId}/orders/`, 1);
-    const orders = [...first.data];
+    onOrders(first.data);
     if (first.pages > 1) {
       const pages = Array.from({ length: first.pages - 1 }, (_, i) => i + 2);
-      const rest = await mapWithConcurrency(pages, PAGE_CONCURRENCY, async (page) => {
+      await mapWithConcurrency(pages, PAGE_CONCURRENCY, async (page) => {
         const res = await esiGetPaged<RawOrder[]>(`/markets/${regionId}/orders/`, page);
-        return res.data;
+        onOrders(res.data);
+        return null;
       });
-      for (const chunk of rest) orders.push(...chunk);
     }
-    return { orders, lastModified: first.lastModified };
+    return first.lastModified;
   } catch {
     // Regions with no market (e.g. wormhole space) 404 — skip.
-    return { orders: [], lastModified: null };
+    return null;
   }
 }
 
@@ -148,16 +150,15 @@ async function crawl(): Promise<Snapshot> {
   };
 
   await mapWithConcurrency(regionIds, REGION_CONCURRENCY, async (regionId) => {
-    const { orders, lastModified } = await fetchRegionOrders(regionId);
-    regionsParsed++;
-    if (orders.length > 0) {
-      regions++;
-      if (lastModified !== null && (lastModifiedAt === null || lastModified < lastModifiedAt)) {
-        // Oldest region snapshot is the honest "data as of" — the list is only as
-        // fresh as its stalest part.
-        lastModifiedAt = lastModified;
-      }
-      for (const o of orders) {
+    let regionHasOrders = false;
+    const lastModified = await fetchRegionOrders(regionId, (chunk) => {
+      if (chunk.length === 0) return;
+      regionHasOrders = true;
+      for (const o of chunk) {
+        // Skip orders for unpublished or zero-volume items to save massive heap overhead
+        const typeInfo = getType(o.type_id);
+        if (!typeInfo) continue;
+
         const entry: Order = {
           id: o.order_id,
           price: o.price,
@@ -171,6 +172,16 @@ async function crawl(): Promise<Snapshot> {
         if (arr) arr.push(entry);
         else byStation.set(o.location_id, [entry]);
         orderCount++;
+      }
+    });
+
+    regionsParsed++;
+    if (regionHasOrders) {
+      regions++;
+      if (lastModified !== null && (lastModifiedAt === null || lastModified < lastModifiedAt)) {
+        // Oldest region snapshot is the honest "data as of" — the list is only as
+        // fresh as its stalest part.
+        lastModifiedAt = lastModified;
       }
     }
     if (regionsParsed % 10 === 0 || regionsParsed === regionIds.length) {
