@@ -2,7 +2,7 @@
 // index keyed by item type. There is no "all orders" ESI endpoint, so we fan
 // out over every region's paginated /markets/{region}/orders/ feed (CCP-cached
 // ~5 min) and merge it. Refreshed on a timer so all clients share one crawl.
-import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
+import { esiGet, esiGetPaged, mapWithConcurrency, EsiError } from './esi.js';
 import { getType } from './sde.js';
 
 /**
@@ -108,8 +108,12 @@ async function fetchRegionOrders(
       });
     }
     return first.lastModified;
-  } catch {
-    // Regions with no market (e.g. wormhole space) 404 — skip.
+  } catch (err) {
+    if (err instanceof EsiError && err.status === 404) {
+      // Regions with no market (e.g. wormhole space) 404 — skip silently.
+      return null;
+    }
+    console.error(`[Market Crawl] Error fetching region ${regionId}:`, err);
     return null;
   }
 }
