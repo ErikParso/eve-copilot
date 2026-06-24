@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { loadSde } from './sde.js';
 import { startContractsRefresh } from './contracts.js';
 import { startMarketRefresh, onMarketRefresh } from './market.js';
@@ -93,6 +94,7 @@ async function main() {
   console.log('Started reference-price refresh (refreshing every 60 min).');
 
   const app = express();
+  app.use(cors());
   app.use(express.json());
 
   app.get('/api/health', (_req, res) => {

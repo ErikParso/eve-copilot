@@ -22,6 +22,8 @@ import { preferencesAtom } from '@/features/preferences/atoms';
 import { RouteTypeSelect } from './components/RouteTypeSelect';
 import { AttractivityWeightsControl } from './components/AttractivityWeightsControl';
 
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
+
 function parseOptionalNumber(raw: string): number | null {
   if (raw.trim() === '') return null;
   const n = Number(raw);
@@ -116,7 +118,7 @@ export function CourierContractsPage() {
             knownDestOrderIds: h.destOrderIds,
           })),
         };
-        const res = await fetch('/api/arbitrage/status', {
+        const res = await fetch(`${API_BASE}/api/arbitrage/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
