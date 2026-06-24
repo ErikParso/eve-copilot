@@ -52,7 +52,7 @@ export function Layout() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="xl" sx={{ py: 3, flex: 1 }}>
+      <Container component="main" maxWidth="xl" sx={{ py: 3, flex: 1 }}>
         <Outlet />
       </Container>
     </Box>

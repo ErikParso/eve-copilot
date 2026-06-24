@@ -61,6 +61,17 @@ export function MarketDataPage() {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    document.title = 'EVE Copilot — Market Data Status';
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute(
+        'content',
+        'Monitor the synchronization and freshness of EVE Online regional market order books from the ESI API in real-time.'
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
     const poll = async () => {
