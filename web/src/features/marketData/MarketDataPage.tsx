@@ -6,7 +6,6 @@ import {
   CardContent,
   Chip,
   CircularProgress,
-  Grid,
   LinearProgress,
   Stack,
   Typography,
@@ -159,53 +158,50 @@ export function MarketDataPage() {
                 cycle. Regions with no active market are hidden.
               </Typography>
 
-              <Grid container spacing={1}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {withMarket.map((r) => (
-                  <Grid item xs={12} sm={6} md={4} key={r.regionId}>
-                    <Box
+                  <Box
+                    key={r.regionId}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.5,
+                      px: 1.5,
+                      py: 1,
+                      borderRadius: 1.5,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      bgcolor: 'background.paper',
+                      flex: '1 1 300px',
+                      minWidth: '300px',
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                  >
+                    <FiberManualRecordIcon sx={{ fontSize: 10, color: STATUS_COLOR[r.status] }} />
+                    <Typography
+                      variant="body2"
                       sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1.5,
-                        px: 1.5,
-                        py: 1,
-                        borderRadius: 1.5,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        bgcolor: 'background.paper',
-                        '&:hover': { bgcolor: 'action.hover' },
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      <FiberManualRecordIcon sx={{ fontSize: 10, color: STATUS_COLOR[r.status] }} />
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontWeight: r.priority ? 700 : 400,
-                          minWidth: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {r.name ?? `Region ${r.regionId}`}
-                      </Typography>
-                      {r.priority && (
-                        <Chip size="small" label="Priority" color="primary" variant="outlined" sx={{ height: 16, fontSize: '0.65rem', px: 0.5 }} />
+                      {r.name ?? `Region ${r.regionId}`}
+                    </Typography>
+                    <Box sx={{ flex: 1 }} />
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {r.status === 'loaded' ? (
+                        `${r.orderCount.toLocaleString()} orders · ${ageLabel(r.ageSeconds)}`
+                      ) : r.status === 'never' ? (
+                        'Not fetched'
+                      ) : (
+                        `Error: ${r.lastError ?? 'Failed'}`
                       )}
-                      <Box sx={{ flex: 1 }} />
-                      <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                        {r.status === 'loaded' ? (
-                          `${r.orderCount.toLocaleString()} orders · ${ageLabel(r.ageSeconds)}`
-                        ) : r.status === 'never' ? (
-                          'Not fetched'
-                        ) : (
-                          `Error: ${r.lastError ?? 'Failed'}`
-                        )}
-                      </Typography>
-                    </Box>
-                  </Grid>
+                    </Typography>
+                  </Box>
                 ))}
-              </Grid>
+              </Box>
             </Box>
           </Stack>
         </CardContent>
