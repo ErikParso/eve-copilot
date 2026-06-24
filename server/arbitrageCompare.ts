@@ -10,7 +10,7 @@
 // baseline's body with a copy of the CURRENT production `resolveOpportunities` (so
 // the comparison measures your new change's incremental effect), then modify
 // production and run `npm run compare`.
-import { getSnapshot, storeFromVerboseEntries, type TypeBook, type MarketStore } from './market.js';
+import { getSnapshot, type TypeBook } from './market.js';
 import { getType } from './sde.js';
 import { getMarketPrice } from './prices.js';
 import { resolveEndpoint } from './enrich.js';
@@ -165,14 +165,11 @@ export interface ComparisonResult {
 }
 
 /** Run both algorithms over one order book and classify every lane. Pure. */
-export function computeComparison(byType: MarketStore): ComparisonResult {
-  // The legacy discovery iterates a verbose Map; hydrate the whole store once for
-  // it (offline diagnostic, so the memory spike is fine).
-  const legacyMap = byType.hydrateAll();
+export function computeComparison(byType: Map<number, TypeBook>): ComparisonResult {
   // minProfit: 0 on both sides so this stays a pure ALGORITHM comparison (legacy
   // has no floor); the 100k production floor is an orthogonal lever.
   const improved = resolveOpportunities(byType, { minProfit: 0 });
-  const legacy = resolveOpportunitiesLegacy(legacyMap);
+  const legacy = resolveOpportunitiesLegacy(byType);
   // The improved discovery with the per-type + global caps removed. Discovery
   // quality is judged against THIS, so menu truncation can't hide a regression.
   const improvedUncapped = resolveOpportunities(byType, { maxPairs: Infinity, maxTotal: Infinity, minProfit: 0 });
@@ -250,7 +247,7 @@ export function computeComparison(byType: MarketStore): ComparisonResult {
 }
 
 /** One-line-per-metric text summary (for the offline fixture script / tests). */
-export function summarizeComparison(byType: MarketStore): string {
+export function summarizeComparison(byType: Map<number, TypeBook>): string {
   const c = computeComparison(byType);
   const sum = (rs: Regression[], pick: (r: Regression) => number) => rs.reduce((s, r) => s + pick(r), 0);
   return [
@@ -275,10 +272,10 @@ export function buildComparisonHtml(typeIdFilter: number | null): string {
     return page('Arbitrage compare', '<h1>Arbitrage discovery: before vs after</h1><p>Market snapshot not ready yet — wait for the crawl to warm up, then refresh.</p>');
   }
 
-  let byType: MarketStore = snap.byType;
+  let byType = snap.byType;
   if (typeIdFilter !== null) {
-    const b = snap.byType.hydrateType(typeIdFilter);
-    byType = storeFromVerboseEntries(b ? [[typeIdFilter, b]] : []);
+    const b = byType.get(typeIdFilter);
+    byType = new Map(b ? [[typeIdFilter, b]] : []);
   }
 
   const { lostTrue, capDisplaced, weaker, gains, improvedOnly, coveredCount, coveredProfit, cappedOut, legacyCount, legacyLaneCount, improvedLaneCount } =
