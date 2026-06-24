@@ -43,7 +43,19 @@ async function fetchRegionCouriers(
 
 async function crawlContracts(): Promise<{ contracts: PublicContract[]; lastModifiedAt: number | null }> {
   const regionIds = await fetchRegionIds();
-  const perRegion = await mapWithConcurrency(regionIds, 16, fetchRegionCouriers);
+  console.log(`[Contracts Crawl] Starting crawl for public courier contracts in ${regionIds.length} regions...`);
+  let regionsParsed = 0;
+  let totalCouriers = 0;
+  const perRegion = await mapWithConcurrency(regionIds, 16, async (regionId) => {
+    const res = await fetchRegionCouriers(regionId);
+    regionsParsed++;
+    totalCouriers += res.contracts.length;
+    if (regionsParsed % 10 === 0 || regionsParsed === regionIds.length) {
+      console.log(`[Contracts Crawl] Progress: ${regionsParsed}/${regionIds.length} regions parsed (${totalCouriers} couriers found)...`);
+    }
+    return res;
+  });
+  console.log(`[Contracts Crawl] Finished! Cached ${totalCouriers} courier contracts.`);
   const lms = perRegion.map((r) => r.lastModified).filter((v): v is number => v !== null);
   return {
     contracts: perRegion.flatMap((r) => r.contracts),

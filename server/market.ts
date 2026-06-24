@@ -131,10 +131,12 @@ function buildStations(byStation: Map<number, Order[]>, ascending: boolean): Sta
 
 async function crawl(): Promise<Snapshot> {
   const regionIds = await esiGet<number[]>('/universe/regions/');
+  console.log(`[Market Crawl] Starting crawl for ${regionIds.length} regions...`);
   const building = new Map<number, TypeBuild>();
   let orderCount = 0;
   let lastModifiedAt: number | null = null;
   let regions = 0;
+  let regionsParsed = 0;
 
   const buildFor = (typeId: number): TypeBuild => {
     let b = building.get(typeId);
@@ -147,36 +149,43 @@ async function crawl(): Promise<Snapshot> {
 
   await mapWithConcurrency(regionIds, REGION_CONCURRENCY, async (regionId) => {
     const { orders, lastModified } = await fetchRegionOrders(regionId);
-    if (orders.length === 0) return;
-    regions++;
-    if (lastModified !== null && (lastModifiedAt === null || lastModified < lastModifiedAt)) {
-      // Oldest region snapshot is the honest "data as of" — the list is only as
-      // fresh as its stalest part.
-      lastModifiedAt = lastModified;
+    regionsParsed++;
+    if (orders.length > 0) {
+      regions++;
+      if (lastModified !== null && (lastModifiedAt === null || lastModified < lastModifiedAt)) {
+        // Oldest region snapshot is the honest "data as of" — the list is only as
+        // fresh as its stalest part.
+        lastModifiedAt = lastModified;
+      }
+      for (const o of orders) {
+        const entry: Order = {
+          id: o.order_id,
+          price: o.price,
+          volume: o.volume_remain,
+          locationId: o.location_id,
+          systemId: o.system_id,
+          rangeCode: o.is_buy_order ? rangeCode(o.range) : RANGE_STATION,
+        };
+        const byStation = (o.is_buy_order ? buildFor(o.type_id).buys : buildFor(o.type_id).sells);
+        const arr = byStation.get(o.location_id);
+        if (arr) arr.push(entry);
+        else byStation.set(o.location_id, [entry]);
+        orderCount++;
+      }
     }
-    for (const o of orders) {
-      const entry: Order = {
-        id: o.order_id,
-        price: o.price,
-        volume: o.volume_remain,
-        locationId: o.location_id,
-        systemId: o.system_id,
-        rangeCode: o.is_buy_order ? rangeCode(o.range) : RANGE_STATION,
-      };
-      const byStation = (o.is_buy_order ? buildFor(o.type_id).buys : buildFor(o.type_id).sells);
-      const arr = byStation.get(o.location_id);
-      if (arr) arr.push(entry);
-      else byStation.set(o.location_id, [entry]);
-      orderCount++;
+    if (regionsParsed % 10 === 0 || regionsParsed === regionIds.length) {
+      console.log(`[Market Crawl] Progress: ${regionsParsed}/${regionIds.length} regions parsed (${orderCount.toLocaleString()} orders found)...`);
     }
   });
 
   // Group each type's orders by station and pre-sort, once, here — so requests
   // never re-scan raw orders.
+  console.log(`[Market Crawl] Grouping and sorting order books...`);
   const byType = new Map<number, TypeBook>();
   for (const [typeId, b] of building) {
     byType.set(typeId, { sells: buildStations(b.sells, true), buys: buildStations(b.buys, false) });
   }
+  console.log(`[Market Crawl] Finished! Cached ${orderCount.toLocaleString()} orders across ${byType.size} types in ${regions} active regions.`);
 
   return { byType, builtAt: Date.now(), lastModifiedAt, orderCount, regions };
 }
