@@ -21,7 +21,6 @@ import {
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { RouteTypeSelect } from './components/RouteTypeSelect';
 import { AttractivityWeightsControl } from './components/AttractivityWeightsControl';
-import { MarketFreshnessPanel } from './components/MarketFreshnessPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -179,11 +178,9 @@ export function CourierContractsPage() {
         {warming && (
           <Alert severity="warning">
             The market data is still loading region by region — arbitrage hauls may be incomplete until every
-            region is in. This fills in and refreshes automatically; expand the panel below to watch progress.
+            region is in. This fills in and refreshes automatically; check the Market Data tab to watch progress.
           </Alert>
         )}
-
-        <MarketFreshnessPanel />
 
         {status === 'success' && (
           <>
