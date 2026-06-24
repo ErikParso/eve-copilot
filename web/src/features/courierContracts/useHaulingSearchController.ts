@@ -70,6 +70,7 @@ interface HaulingResponse {
   items: ApiHaulingItem[];
   meta: MarketMeta;
   contractsAsOf: number | null;
+  total: number;
 }
 
 /** Add the route-derived fields (jumps, per-jump rate, danger) + listing times. */
@@ -168,6 +169,7 @@ export function useHaulingSearchController(): void {
         error: null,
         contractsAsOf: haulData.contractsAsOf,
         market: haulData.meta,
+        total: haulData.total,
       });
 
       // Fetch dynamic routes for in-transit/secured pinned items
@@ -232,7 +234,7 @@ export function useHaulingSearchController(): void {
       setData((d) =>
         d.status === 'success'
           ? d
-          : { status: 'error', courier: [], arbitrage: [], error: message, contractsAsOf: null, market: null },
+          : { status: 'error', courier: [], arbitrage: [], error: message, contractsAsOf: null, market: null, total: 0 },
       );
       return null;
     }

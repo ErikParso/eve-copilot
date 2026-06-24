@@ -81,7 +81,7 @@ function ProgressBar() {
 }
 
 export function CourierContractsPage() {
-  const { status, error, market } = useAtomValue(haulingDataAtom);
+  const { status, error, market, total } = useAtomValue(haulingDataAtom);
   const rows = useAtomValue(haulingRowsAtom);
   const [prefs, setPrefs] = useAtom(preferencesAtom);
   
@@ -143,15 +143,16 @@ export function CourierContractsPage() {
   // Sort live by attractivity always
   const sortedRows = useMemo(() => sortCombined(rows, 'attractivity'), [rows]);
 
-  // Courier vs arbitrage split (pinned of each kind included), for the header.
+  // Courier vs arbitrage split of the shown menu (pinned excluded — those are
+  // your active hauls, not part of the server's "best N of total" pick).
   const counts = useMemo(() => {
     let courier = 0;
     let arbitrage = 0;
     for (const r of rows) {
-      if (r.kind === 'courier' || r.kind === 'pinned-courier') courier += 1;
-      else arbitrage += 1;
+      if (r.kind === 'courier') courier += 1;
+      else if (r.kind === 'arbitrage') arbitrage += 1;
     }
-    return { courier, arbitrage };
+    return { courier, arbitrage, shown: courier + arbitrage };
   }, [rows]);
 
   return (
@@ -221,8 +222,10 @@ export function CourierContractsPage() {
                   Available Opportunities
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {rows.length} {rows.length === 1 ? 'opportunity' : 'opportunities'} found ·{' '}
-                  {counts.courier} courier, {counts.arbitrage} arbitrage
+                  {total > counts.shown
+                    ? `Top ${counts.shown} of ${total.toLocaleString()} by attractivity`
+                    : `${counts.shown} ${counts.shown === 1 ? 'opportunity' : 'opportunities'}`}{' '}
+                  · {counts.courier} courier, {counts.arbitrage} arbitrage
                 </Typography>
               </Box>
             )}
