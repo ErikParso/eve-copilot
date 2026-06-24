@@ -5,17 +5,17 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadSde } from './sde.js';
-import { startMarketRefresh, getMarketMeta, dumpSnapshot } from './market.js';
+import { startMarketScheduler, getMarketMeta, dumpSnapshot } from './market.js';
 
-const MAX_WAIT_MS = 180_000;
+const MAX_WAIT_MS = 600_000; // incremental scheduler warms all regions in ~5 min
 const POLL_MS = 2_000;
 
 async function main() {
   console.log('Loading SDE…');
   await loadSde();
 
-  console.log('Starting market crawl (hits ESI; ~10–30s for a full crawl)…');
-  startMarketRefresh();
+  console.log('Starting market scheduler (hits ESI; ~5 min to warm every region)…');
+  void startMarketScheduler();
 
   // Wait for the first crawl to complete (or give up after MAX_WAIT_MS).
   const deadline = Date.now() + MAX_WAIT_MS;

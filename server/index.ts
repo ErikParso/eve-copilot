@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { loadSde } from './sde.js';
 import { startContractsRefresh } from './contracts.js';
-import { startMarketRefresh, onMarketRefresh } from './market.js';
+import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
 import { resolvePinnedHaulsStatus, prewarmDeliveryRoutes } from './arbitrage.js';
 import { getEnrichedHauling } from './hauling.js';
@@ -81,14 +81,15 @@ async function main() {
   startContractsRefresh();
   console.log('Started contracts crawl (refreshing every 10 min).');
 
-  // Pre-warm delivery-leg routes in the background after each crawl, so requests
-  // never pay the cold graph searches synchronously. Registered before the first
-  // refresh so it fires for it too.
+  // After each (throttled) index rebuild, re-resolve opportunities and pre-warm
+  // delivery-leg routes in the background — off the request path — so requests
+  // never pay the cold graph searches synchronously. prewarmDeliveryRoutes()
+  // calls getOpportunities() internally, so this is also the resolve trigger.
   onMarketRefresh(() => {
     void prewarmDeliveryRoutes();
   });
-  startMarketRefresh();
-  console.log('Started market crawl (refreshing every 10 min) + background route pre-warm.');
+  void startMarketScheduler().catch((err) => console.error('Market scheduler failed to start', err));
+  console.log('Started incremental market scheduler (20s tick) + background resolve/route pre-warm.');
 
   startPricesRefresh();
   console.log('Started reference-price refresh (refreshing every 60 min).');
@@ -108,6 +109,11 @@ async function main() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
+  });
+
+  // Per-region market-data freshness, for the UI panel. Cheap — poll every few sec.
+  app.get('/api/market/freshness', (_req, res) => {
+    res.json(getMarketFreshness());
   });
 
 

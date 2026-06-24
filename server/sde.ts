@@ -82,6 +82,7 @@ const PACKAGED_VOLUME_BY_GROUP = new Map<number, number>([
 const stationById = new Map<number, Station>();
 const systemById = new Map<number, SolarSystem>();
 const typeById = new Map<number, ItemType>();
+const regionNameById = new Map<number, string>();
 /** systemId -> neighbouring systemIds (via stargates). */
 const adjacency = new Map<number, number[]>();
 
@@ -97,6 +98,8 @@ export const getType = (id: number) => typeById.get(id);
 export const neighbors = (id: number) => adjacency.get(id) ?? [];
 /** Region of a solar system, or null if unknown. */
 export const getRegion = (systemId: number): number | null => systemById.get(systemId)?.regionId ?? null;
+/** Display name of a region, or null if unknown. */
+export const getRegionName = (regionId: number): string | null => regionNameById.get(regionId) ?? null;
 
 async function fetchCsv(
   file: string,
@@ -117,6 +120,12 @@ export interface SdeMeta {
 
 /** Load stations, systems, item types, and the jump graph into memory sequentially to conserve RAM. */
 export async function loadSde(): Promise<SdeMeta> {
+  console.log('Loading mapRegions SDE...');
+  const reg = await fetchCsv('mapRegions.csv');
+  for (const r of reg.rows) {
+    regionNameById.set(Number(r[reg.idx.regionID]), r[reg.idx.regionName]);
+  }
+
   console.log('Loading mapSolarSystems SDE...');
   const sys = await fetchCsv('mapSolarSystems.csv');
   for (const r of sys.rows) {

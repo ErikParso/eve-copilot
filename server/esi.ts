@@ -20,7 +20,7 @@ function url(path: string, params: Record<string, string | number> = {}): string
 // in-flight requests across the WHOLE app matters more than per-loop limits
 // (which multiply: 5 regions x 10 pages = 50 sockets → 429s). Every request
 // passes through this gate regardless of which crawler issued it.
-const MAX_CONCURRENT = 10;
+const MAX_CONCURRENT = 8;
 let active = 0;
 const waiters: Array<() => void> = [];
 
@@ -39,13 +39,63 @@ function release(): void {
 }
 
 /** fetch() wrapper that never lets total in-flight ESI requests exceed MAX_CONCURRENT. */
-async function gatedFetch(target: string): Promise<Response> {
+async function gatedFetch(target: string, extraHeaders?: Record<string, string>): Promise<Response> {
   await acquire();
   try {
-    return await fetch(target, { headers: { Accept: 'application/json' } });
+    return await fetch(target, { headers: { Accept: 'application/json', ...extraHeaders } });
   } finally {
     release();
   }
+}
+
+/** Parse an HTTP `Expires` header to an epoch-ms timestamp, or null if absent/invalid. */
+function parseExpires(res: Response): number | null {
+  const exp = res.headers.get('expires');
+  if (!exp) return null;
+  const t = Date.parse(exp);
+  return Number.isFinite(t) ? t : null;
+}
+
+// --- Error telemetry -----------------------------------------------------
+// Counts every failed ESI request attempt (including ones that later succeed on
+// retry) so the crawler can report exactly what's failing and why.
+const httpErrorCounts = new Map<number, number>();
+let networkErrorCount = 0;
+
+/** Tally a thrown request error by HTTP status, or as a network-level failure. */
+function noteThrown(err: unknown): void {
+  if (err instanceof EsiError) {
+    httpErrorCounts.set(err.status, (httpErrorCounts.get(err.status) ?? 0) + 1);
+  } else {
+    networkErrorCount++;
+  }
+}
+
+export interface EsiErrorStats {
+  byStatus: Record<number, number>;
+  network: number;
+  total: number;
+}
+
+/** Cumulative ESI request-failure counts since process start. */
+export function getEsiErrorStats(): EsiErrorStats {
+  const byStatus: Record<number, number> = {};
+  let total = networkErrorCount;
+  for (const [status, n] of httpErrorCounts) {
+    byStatus[status] = n;
+    total += n;
+  }
+  return { byStatus, network: networkErrorCount, total };
+}
+
+/** Human-readable one-line summary of failures, e.g. "429×12, 503×2, network×1". */
+export function formatEsiErrorStats(): string {
+  const parts: string[] = [];
+  for (const [status, n] of [...httpErrorCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    parts.push(`${status}×${n}`);
+  }
+  if (networkErrorCount > 0) parts.push(`network×${networkErrorCount}`);
+  return parts.length ? parts.join(', ') : 'none';
 }
 
 /** Build an EsiError from a non-ok response, capturing how long to back off (420/429). */
@@ -86,6 +136,7 @@ export async function esiGet<T>(
     if (!res.ok) throw esiErrorFrom(res, `ESI ${res.status} for ${path}`);
     return (await res.json()) as T;
   } catch (err) {
+    noteThrown(err);
     if (retries > 0 && shouldRetry(err)) {
       await new Promise((resolve) => setTimeout(resolve, retryWaitMs(err)));
       return esiGet(path, params, retries - 1);
@@ -115,9 +166,66 @@ export async function esiGetPaged<T>(
     const lastModified = lm ? Date.parse(lm) : null;
     return { data: (await res.json()) as T, pages, lastModified: Number.isFinite(lastModified) ? lastModified : null };
   } catch (err) {
+    noteThrown(err);
     if (retries > 0 && shouldRetry(err)) {
       await new Promise((resolve) => setTimeout(resolve, retryWaitMs(err)));
       return esiGetPaged(path, page, params, retries - 1);
+    }
+    throw err;
+  }
+}
+
+/** One conditional page fetch: 304 (unchanged) carries no body but still has meta. */
+export interface ConditionalPage<T> {
+  /** HTTP status — 200 (fresh body) or 304 (unchanged, `data` is null). */
+  status: 200 | 304;
+  /** Parsed body on 200, null on 304. */
+  data: T | null;
+  /** Total pages for this resource (X-Pages), defaulting to 1. */
+  pages: number;
+  /** Current ETag to store and replay on the next conditional request. */
+  etag: string | null;
+  lastModified: number | null;
+  /** When ESI's cache for this resource expires (epoch ms), or null. */
+  expiresAt: number | null;
+}
+
+/**
+ * Fetch one page of a paginated ESI resource conditionally. Pass the ETag stored
+ * from the previous fetch; if the page is unchanged ESI replies 304 with no body
+ * (near-zero cost), otherwise 200 with the fresh body and a new ETag. Retries on
+ * transient 5xx / rate-limit errors like the other helpers.
+ */
+export async function esiGetPageConditional<T>(
+  path: string,
+  page: number,
+  etag: string | null,
+  retries = 5,
+): Promise<ConditionalPage<T>> {
+  try {
+    const headers = etag ? { 'If-None-Match': etag } : undefined;
+    const res = await gatedFetch(url(path, { page }), headers);
+    const pages = Number(res.headers.get('x-pages') ?? '1') || 1;
+    const lm = res.headers.get('last-modified');
+    const lastModified = lm ? Date.parse(lm) : null;
+    const expiresAt = parseExpires(res);
+    if (res.status === 304) {
+      return { status: 304, data: null, pages, etag, lastModified: Number.isFinite(lastModified) ? lastModified : null, expiresAt };
+    }
+    if (!res.ok) throw esiErrorFrom(res, `ESI ${res.status} for ${path} (page ${page})`);
+    return {
+      status: 200,
+      data: (await res.json()) as T,
+      pages,
+      etag: res.headers.get('etag'),
+      lastModified: Number.isFinite(lastModified) ? lastModified : null,
+      expiresAt,
+    };
+  } catch (err) {
+    noteThrown(err);
+    if (retries > 0 && shouldRetry(err)) {
+      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(err)));
+      return esiGetPageConditional(path, page, etag, retries - 1);
     }
     throw err;
   }
