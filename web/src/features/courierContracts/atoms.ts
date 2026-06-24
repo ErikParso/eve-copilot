@@ -56,12 +56,15 @@ export interface HaulingData {
   contractsAsOf: number | null;
   /** Market-crawl readiness + freshness from the API. */
   market: MarketMeta | null;
+  /** Total candidates the server scored before keeping the shipped top-N. */
+  total: number;
 }
 
 export const haulingDataAtom = atom<HaulingData>({
   status: 'idle',
   courier: [],
   arbitrage: [],
+  total: 0,
   error: null,
   contractsAsOf: null,
   market: null,

@@ -34,6 +34,9 @@ export interface HaulingResponse {
   meta: MarketMeta;
   /** Courier snapshot freshness (epoch ms), for the FE's "as of" display. */
   contractsAsOf: number | null;
+  /** Total candidates scored before the top-N truncation (so the FE can say
+   *  "top N of total"). */
+  total: number;
 }
 
 /** jumps + danger (index + steps) over a contract's routes. */
@@ -103,5 +106,5 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
         },
   );
 
-  return { items, meta, contractsAsOf: contracts.lastModifiedAt };
+  return { items, meta, contractsAsOf: contracts.lastModifiedAt, total: courier.length + arb.length };
 }
