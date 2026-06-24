@@ -240,8 +240,9 @@ async function fetchRegion(rc: RegionCache): Promise<boolean> {
     rc.lastError = null;
 
     const ms = Date.now() - startedAt;
-    // Log first loads and real changes; stay quiet for the common "all 304" no-op.
-    if (firstLoad || changed) {
+    // Log first loads and real changes for regions that actually have a market;
+    // stay quiet for the common "all 304" no-op and for the ~40 market-less regions.
+    if ((firstLoad || changed) && orderCount > 0) {
       const verb = firstLoad ? 'loaded' : 'updated';
       console.log(
         `[Market] ${verb} ${regionLabel(rc.regionId)}: ${orderCount.toLocaleString()} orders ` +
