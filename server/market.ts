@@ -11,7 +11,7 @@
 // body. The global by-type index is rebuilt (throttled) only when some region
 // actually changed; the resolver/algorithm downstream is untouched, so once all
 // regions are loaded the output is identical to a full crawl.
-import { esiGet, esiGetPageConditional, mapWithConcurrency, EsiError, formatEsiErrorStats, getEsiErrorStats, type EsiErrorStats, type ConditionalPage } from './esi.js';
+import { esiGet, esiGetPageConditional, mapWithConcurrency, EsiError, getEsiErrorStats, type EsiErrorStats, type ConditionalPage } from './esi.js';
 import { getType, getRegionName } from './sde.js';
 
 /**
@@ -158,6 +158,28 @@ let lastBuildAt = 0;
 let started = false;
 /** Count of regions whose refresh failed (after retries) and were kept stale/cold. */
 let regionDrops = 0;
+// Cumulative counts as of the previous rebuild, so each log line can report just
+// what happened in that interval (a running total keeps re-printing a frozen
+// number, which reads like errors are still occurring when they're long over).
+let lastErrByStatus: Record<number, number> = {};
+let lastNetworkErr = 0;
+let lastRegionDrops = 0;
+
+/** ESI failures that occurred since the last rebuild, e.g. "429×12" or "none". */
+function esiFailuresThisInterval(): string {
+  const s = getEsiErrorStats();
+  const parts: string[] = [];
+  for (const [statusStr, count] of Object.entries(s.byStatus)) {
+    const status = Number(statusStr);
+    const delta = count - (lastErrByStatus[status] ?? 0);
+    if (delta > 0) parts.push(`${status}×${delta}`);
+  }
+  const netDelta = s.network - lastNetworkErr;
+  if (netDelta > 0) parts.push(`network×${netDelta}`);
+  lastErrByStatus = { ...s.byStatus };
+  lastNetworkErr = s.network;
+  return parts.length ? parts.join(', ') : 'none';
+}
 
 /** Short label for logs: region name if known, else its id. */
 function regionLabel(regionId: number): string {
@@ -333,10 +355,12 @@ function rebuildSnapshot(): void {
   status = allSeen ? 'ready' : 'warming';
   fireListeners();
   const loaded = [...regionCaches.values()].filter((rc) => rc.status === 'loaded').length;
+  const dropsThisInterval = regionDrops - lastRegionDrops;
+  lastRegionDrops = regionDrops;
   console.log(
     `[Market] Rebuilt index: ${orderCount.toLocaleString()} orders, ${byType.size} types, ` +
       `${regions} active regions (${loaded}/${regionCaches.size} fetched, status: ${status}). ` +
-      `ESI failures: ${formatEsiErrorStats()}; region drops: ${regionDrops}.`,
+      `ESI failures: ${esiFailuresThisInterval()}; region drops: ${dropsThisInterval}.`,
   );
 }
 
