@@ -15,10 +15,24 @@ function url(path: string, params: Record<string, string | number> = {}): string
   return u.toString();
 }
 
-export async function esiGet<T>(path: string, params?: Record<string, string | number>): Promise<T> {
-  const res = await fetch(url(path, params), { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new EsiError(`ESI ${res.status} for ${path}`, res.status);
-  return (await res.json()) as T;
+/** Fetch data from ESI with automatic retry on transient 5xx errors and 420 rate limiting. */
+export async function esiGet<T>(
+  path: string,
+  params?: Record<string, string | number>,
+  retries = 3
+): Promise<T> {
+  try {
+    const res = await fetch(url(path, params), { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new EsiError(`ESI ${res.status} for ${path}`, res.status);
+    return (await res.json()) as T;
+  } catch (err) {
+    if (retries > 0 && (!(err instanceof EsiError) || err.status >= 500 || err.status === 420)) {
+      // Wait 1 second before retrying
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return esiGet(path, params, retries - 1);
+    }
+    throw err;
+  }
 }
 
 export interface PagedResponse<T> {
@@ -27,17 +41,28 @@ export interface PagedResponse<T> {
   lastModified: number | null;
 }
 
+/** Fetch paginated data from ESI with automatic retry on transient 5xx errors and 420 rate limiting. */
 export async function esiGetPaged<T>(
   path: string,
   page: number,
   params?: Record<string, string | number>,
+  retries = 3
 ): Promise<PagedResponse<T>> {
-  const res = await fetch(url(path, { ...params, page }), { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new EsiError(`ESI ${res.status} for ${path} (page ${page})`, res.status);
-  const pages = Number(res.headers.get('x-pages') ?? '1');
-  const lm = res.headers.get('last-modified');
-  const lastModified = lm ? Date.parse(lm) : null;
-  return { data: (await res.json()) as T, pages, lastModified: Number.isFinite(lastModified) ? lastModified : null };
+  try {
+    const res = await fetch(url(path, { ...params, page }), { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new EsiError(`ESI ${res.status} for ${path} (page ${page})`, res.status);
+    const pages = Number(res.headers.get('x-pages') ?? '1');
+    const lm = res.headers.get('last-modified');
+    const lastModified = lm ? Date.parse(lm) : null;
+    return { data: (await res.json()) as T, pages, lastModified: Number.isFinite(lastModified) ? lastModified : null };
+  } catch (err) {
+    if (retries > 0 && (!(err instanceof EsiError) || err.status >= 500 || err.status === 420)) {
+      // Wait 1 second before retrying
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return esiGetPaged(path, page, params, retries - 1);
+    }
+    throw err;
+  }
 }
 
 /** Run an async mapper with bounded concurrency, preserving order. */

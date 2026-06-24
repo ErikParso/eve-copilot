@@ -1,7 +1,7 @@
 // Crawls every region's public courier contracts, enriches them (routes via the
 // local engine + danger), and caches the result in memory. Refreshed on a timer
 // so all clients share one crawl. Attractivity scoring stays on the client.
-import { esiGet, esiGetPaged, mapWithConcurrency } from './esi.js';
+import { esiGet, esiGetPaged, mapWithConcurrency, EsiError } from './esi.js';
 import { getShipKills } from './kills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
@@ -35,8 +35,10 @@ async function fetchRegionCouriers(
       });
       rest.forEach(keep);
     }
-  } catch {
-    // Region with no contracts returns 404 — ignore.
+  } catch (err) {
+    if (!(err instanceof EsiError && err.status === 404)) {
+      console.error(`[Contracts Crawl] Error fetching region ${regionId}:`, err);
+    }
   }
   return { contracts: collected, lastModified };
 }
