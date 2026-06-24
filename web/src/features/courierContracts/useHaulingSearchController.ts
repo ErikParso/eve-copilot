@@ -20,6 +20,8 @@ import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/feature
 const REFRESH_MS = 10 * 60 * 1000;
 const WARMING_RETRY_MS = 20 * 1000;
 
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
+
 interface ApiContract {
   id: number;
   pickup: ContractEndpoint;
@@ -148,7 +150,7 @@ export function useHaulingSearchController(): void {
       params.set('wJumps', String(weights.totalJumps));
       params.set('wDanger', String(weights.danger));
 
-      const haulRes = await fetch(`/api/hauling?${params.toString()}`, { signal });
+      const haulRes = await fetch(`${API_BASE}/api/hauling?${params.toString()}`, { signal });
       if (!haulRes.ok) throw new Error(`Hauling API returned ${haulRes.status}`);
       const haulData = (await haulRes.json()) as HaulingResponse;
       if (signal.aborted) return null;
@@ -206,7 +208,7 @@ export function useHaulingSearchController(): void {
                 dest: String(destSys),
                 routeType: rt,
               });
-              const res = await fetch(`/api/route?${routeParams.toString()}`, { signal });
+              const res = await fetch(`${API_BASE}/api/route?${routeParams.toString()}`, { signal });
               if (res.ok) {
                 const data = (await res.json()) as { route: RouteSystem[] | null; jumps: number | null };
                 if (data.route !== undefined) {
