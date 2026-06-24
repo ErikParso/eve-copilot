@@ -12,7 +12,7 @@ import { getShipKills } from './kills.js';
 import type { PinnedHaulStatusRequest } from './types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
-const DEFAULT_SHIP_LIMIT = 300; // how many top-attractivity hauls to ship
+const DEFAULT_SHIP_LIMIT = 48; // how many top-attractivity hauls to ship (the FE shows them all, no paging)
 
 function parseRouteType(value: unknown): RouteType {
   return value === 'shortest' ? 'shortest' : 'safest';
