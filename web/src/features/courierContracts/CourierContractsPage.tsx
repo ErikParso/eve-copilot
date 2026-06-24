@@ -157,6 +157,15 @@ export function CourierContractsPage() {
 
   return (
     <Stack spacing={3}>
+      <Box>
+        <Typography variant="h4" component="h1" sx={{ fontWeight: 800, letterSpacing: '-0.025em', mb: 0.5 }}>
+          EVE Online Hauling & Arbitrage Opportunities
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Find the most profitable courier contracts and arbitrage routes using real-time market data analysis.
+        </Typography>
+      </Box>
+
       {/* Pinned Hauls Section */}
 
       <Stack spacing={2}>
