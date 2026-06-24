@@ -1,4 +1,4 @@
-import { Button, Tooltip } from '@mui/material';
+import { Box, Button, Tooltip } from '@mui/material';
 import LoginIcon from '@mui/icons-material/Login';
 import { useAuth } from './useAuth';
 import { CharacterMenu } from './CharacterMenu';
@@ -23,7 +23,12 @@ export function AuthControls() {
 
   return (
     <Button size="small" variant="outlined" startIcon={<LoginIcon />} onClick={() => void login()}>
-      Log in with EVE
+      <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+        Log in with EVE
+      </Box>
+      <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>
+        Log In
+      </Box>
     </Button>
   );
 }
