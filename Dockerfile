@@ -16,8 +16,11 @@ RUN npm run build
 # Build the Frontend (Vite)
 WORKDIR /app/web
 RUN npm ci
-# Use relative paths for the API URL in production so Nginx routes properly
-RUN echo "VITE_API_URL=" > .env.production
+
+# Read VITE_EVE_CLIENT_ID from Hugging Face Space secrets during build
+ARG VITE_EVE_CLIENT_ID
+ENV VITE_EVE_CLIENT_ID=$VITE_EVE_CLIENT_ID
+
 RUN npm run build
 
 # Set up Nginx configuration
