@@ -20,7 +20,7 @@ function url(path: string, params: Record<string, string | number> = {}): string
 // in-flight requests across the WHOLE app matters more than per-loop limits
 // (which multiply: 5 regions x 10 pages = 50 sockets → 429s). Every request
 // passes through this gate regardless of which crawler issued it.
-const MAX_CONCURRENT = 8;
+const MAX_CONCURRENT = 4;
 let active = 0;
 const waiters: Array<() => void> = [];
 
