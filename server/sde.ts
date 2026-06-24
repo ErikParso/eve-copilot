@@ -98,10 +98,13 @@ export const neighbors = (id: number) => adjacency.get(id) ?? [];
 /** Region of a solar system, or null if unknown. */
 export const getRegion = (systemId: number): number | null => systemById.get(systemId)?.regionId ?? null;
 
-async function fetchCsv(file: string): Promise<ParsedReturn> {
+async function fetchCsv(
+  file: string,
+  filter?: (row: string[], idx: Record<string, number>) => boolean
+): Promise<ParsedReturn> {
   const res = await fetch(`${BASE}/${file}`);
   if (!res.ok) throw new Error(`Failed to fetch ${file} (${res.status})`);
-  return parseCsv(await res.text());
+  return parseCsv(await res.text(), filter);
 }
 type ParsedReturn = ReturnType<typeof parseCsv>;
 
@@ -149,12 +152,14 @@ export async function loadSde(): Promise<SdeMeta> {
   // Only keep market-relevant types (published, with a non-zero volume) to
   // keep the map small; that's all arbitrage ever looks up.
   console.log('Loading invTypes SDE...');
-  const types = await fetchCsv('invTypes.csv');
+  const types = await fetchCsv('invTypes.csv', (row, idx) => {
+    if (row[idx.published] !== '1') return false;
+    const vol = Number(row[idx.volume]);
+    return Number.isFinite(vol) && vol > 0;
+  });
   for (const r of types.rows) {
-    if (r[types.idx.published] !== '1') continue;
     const id = Number(r[types.idx.typeID]);
     const assembled = Number(r[types.idx.volume]);
-    if (!Number.isFinite(assembled) || assembled <= 0) continue;
     // Prefer the packaged volume for repackageable groups (ships &c.); the SDE
     // `volume` is the assembled size, which overstates hauling volume.
     const groupId = Number(r[types.idx.groupID]);
