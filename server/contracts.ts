@@ -37,7 +37,8 @@ async function fetchRegionCouriers(
     }
   } catch (err) {
     if (!(err instanceof EsiError && err.status === 404)) {
-      console.error(`[Contracts Crawl] Error fetching region ${regionId}:`, err);
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[Contracts Crawl] Error fetching region ${regionId}: ${reason}`);
     }
   }
   return { contracts: collected, lastModified };
