@@ -1,3 +1,13 @@
+---
+title: EVE Copilot
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # EVE Copilot
 
 A helper copilot for [EVE Online](https://www.eveonline.com/), built with **React + TypeScript + MUI**
