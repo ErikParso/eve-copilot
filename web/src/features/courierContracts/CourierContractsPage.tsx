@@ -99,6 +99,17 @@ export function CourierContractsPage() {
   pinnedHaulsRef.current = pinnedHauls;
 
   useEffect(() => {
+    document.title = 'EVE Copilot — Hauling & Arbitrage Opportunities';
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute(
+        'content',
+        'Find the most profitable EVE Online courier contracts and arbitrage routes using real-time market data analysis, filtered by your cargo capacity and budget.'
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     if (pinnedHauls.length === 0) return;
 
     let active = true;
