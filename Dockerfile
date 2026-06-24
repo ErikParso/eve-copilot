@@ -17,11 +17,9 @@ RUN npm run build
 WORKDIR /app/web
 RUN npm ci
 
-# Read VITE_EVE_CLIENT_ID from Hugging Face Space secrets during build
-ARG VITE_EVE_CLIENT_ID
-ENV VITE_EVE_CLIENT_ID=$VITE_EVE_CLIENT_ID
-
-RUN npm run build
+# Build the frontend using the Hugging Face secret mount
+RUN --mount=type=secret,id=VITE_EVE_CLIENT_ID,mode=0444,required=true \
+    VITE_EVE_CLIENT_ID=$(cat /run/secrets/VITE_EVE_CLIENT_ID) npm run build
 
 # Set up Nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
