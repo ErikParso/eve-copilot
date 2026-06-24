@@ -112,15 +112,10 @@ export interface SdeMeta {
   types: number;
 }
 
-/** Load stations, systems, item types, and the jump graph into memory. */
+/** Load stations, systems, item types, and the jump graph into memory sequentially to conserve RAM. */
 export async function loadSde(): Promise<SdeMeta> {
-  const [sta, sys, jumps, types] = await Promise.all([
-    fetchCsv('staStations.csv'),
-    fetchCsv('mapSolarSystems.csv'),
-    fetchCsv('mapSolarSystemJumps.csv'),
-    fetchCsv('invTypes.csv'),
-  ]);
-
+  console.log('Loading mapSolarSystems SDE...');
+  const sys = await fetchCsv('mapSolarSystems.csv');
   for (const r of sys.rows) {
     const id = Number(r[sys.idx.solarSystemID]);
     systemById.set(id, {
@@ -131,6 +126,8 @@ export async function loadSde(): Promise<SdeMeta> {
     });
   }
 
+  console.log('Loading staStations SDE...');
+  const sta = await fetchCsv('staStations.csv');
   for (const r of sta.rows) {
     const id = Number(r[sta.idx.stationID]);
     stationById.set(id, {
@@ -140,6 +137,8 @@ export async function loadSde(): Promise<SdeMeta> {
     });
   }
 
+  console.log('Loading mapSolarSystemJumps SDE...');
+  const jumps = await fetchCsv('mapSolarSystemJumps.csv');
   for (const r of jumps.rows) {
     const from = Number(r[jumps.idx.fromSolarSystemID]);
     const to = Number(r[jumps.idx.toSolarSystemID]);
@@ -149,6 +148,8 @@ export async function loadSde(): Promise<SdeMeta> {
 
   // Only keep market-relevant types (published, with a non-zero volume) to
   // keep the map small; that's all arbitrage ever looks up.
+  console.log('Loading invTypes SDE...');
+  const types = await fetchCsv('invTypes.csv');
   for (const r of types.rows) {
     if (r[types.idx.published] !== '1') continue;
     const id = Number(r[types.idx.typeID]);
