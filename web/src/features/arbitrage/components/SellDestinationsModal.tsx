@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   Dialog,
   DialogTitle,
@@ -13,7 +13,7 @@ import {
 import Grid from '@mui/material/Unstable_Grid2';
 import CloseIcon from '@mui/icons-material/Close';
 import { ArbitrageCard } from './ArbitrageCard';
-import type { PinnedHaul } from '../atoms';
+import { PinnedHaul, redirectHaulAtom } from '../atoms';
 import type { ArbitrageRow } from '../types';
 import { deriveJourney, perJump } from '@/features/courierContracts/journey';
 import { attractivityWeightsAtom } from '@/features/courierContracts/atoms';
@@ -26,7 +26,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 type ApiSellDestination = Omit<ArbitrageRow, 'jumpsFromCurrent' | 'jumpsToDest' | 'totalJumps' | 'profitPerJump' | 'attractivitySteps'>;
 
 function hydrate(item: ApiSellDestination): ArbitrageRow {
-  const j = deriveJourney(item.approachRoute, item.deliveryRoute);
+  const j = deriveJourney(item.approachRoute, item.deliveryRoute ?? []);
   return {
     ...item,
     jumpsFromCurrent: j.jumpsFromCurrent,
@@ -51,6 +51,18 @@ export function SellDestinationsModal({ open, onClose, haul }: { open: boolean; 
   const [rows, setRows] = useState<ArbitrageRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const redirectHaul = useSetAtom(redirectHaulAtom);
+
+  const handleSelectAlternative = (option: ArbitrageRow) => {
+    redirectHaul({
+      id: haul.id,
+      newDest: option.dest,
+      newSellPrice: option.sellPrice,
+      newProfit: option.profit,
+    });
+    onClose();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -126,7 +138,7 @@ export function SellDestinationsModal({ open, onClose, haul }: { open: boolean; 
           <Grid container spacing={2} sx={{ pt: '10px' }}>
             {rows.map((row) => (
               <Grid key={row.id} xs={12} sm={6} md={4} lg={3}>
-                <ArbitrageCard row={row} variant="sell" />
+                <ArbitrageCard row={row} variant="sell" onSelect={handleSelectAlternative} />
               </Grid>
             ))}
           </Grid>

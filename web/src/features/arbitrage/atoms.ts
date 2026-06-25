@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { ArbitrageItem, ArbitrageRung } from './types';
-import type { CourierRow, RouteSystem } from '@/features/courierContracts/types';
+import type { ContractEndpoint, CourierRow, RouteSystem } from '@/features/courierContracts/types';
 
 export interface PinnedRoute {
   route: RouteSystem[] | null;
@@ -162,6 +162,32 @@ export const executeHaulAtom = atom(null, (_get, set, id: string) => {
     prev.map((h) => (h.id === id ? { ...h, status: 'executed' } : h))
   );
 });
+
+export const redirectHaulAtom = atom(
+  null,
+  (_get, set, p: { id: string; newDest: ContractEndpoint; newSellPrice: number; newProfit: number }) => {
+    set(pinnedHaulsAtom, (prev) =>
+      prev.map((h) => {
+        if (h.id !== p.id) return h;
+        const newId = `${h.typeId}:${h.source.locationId}:${p.newDest.locationId}`;
+        return {
+          ...h,
+          id: newId,
+          dest: p.newDest,
+          sellPrice: p.newSellPrice,
+          profit: p.newProfit,
+          originalProfit: p.newProfit,
+          liveProfit: undefined,
+          liveQuantity: undefined,
+          buyerGone: undefined,
+          supplyGone: undefined,
+          shortfall: undefined,
+          stale: undefined,
+        };
+      })
+    );
+  }
+);
 
 /**
  * Update live check results on pinned items.
