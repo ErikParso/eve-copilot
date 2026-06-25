@@ -21,6 +21,7 @@ import { AuthControls } from '@/features/auth/AuthControls';
 import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
 import { useCharacterWalletPoller } from '@/features/auth/useCharacterWalletPoller';
 import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
+import { AdBanner } from './AdBanner';
 
 interface NavItem {
   label: string;
@@ -36,6 +37,8 @@ const NAV_ITEMS: NavItem[] = [
 export function Layout() {
   const { pathname } = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [adVisible, setAdVisible] = useState(false);
+  
   useCharacterStatusPoller();
   useCharacterWalletPoller();
   useHaulingSearchController();
@@ -132,9 +135,21 @@ export function Layout() {
         </List>
       </Drawer>
 
-      <Container component="main" maxWidth="xl" sx={{ py: 3, flex: 1 }}>
+      <Container
+        component="main"
+        maxWidth="xl"
+        sx={{
+          py: 3,
+          pb: adVisible ? { xs: '90px', md: '135px' } : 3,
+          flex: 1,
+          transition: 'padding-bottom 0.3s ease-in-out',
+        }}
+      >
         <Outlet />
       </Container>
+
+      <AdBanner onVisibilityChange={setAdVisible} />
     </Box>
   );
 }
+
