@@ -89,11 +89,11 @@ async function gatedFetch(target: string, extraHeaders?: Record<string, string>)
   }
 }
 
-/** Parse an HTTP date header to an epoch-ms timestamp, or null if absent/invalid. */
-function parseDateHeader(res: Response, name: string): number | null {
-  const v = res.headers.get(name);
-  if (!v) return null;
-  const t = Date.parse(v);
+/** Parse an HTTP `Expires` header to an epoch-ms timestamp, or null if absent/invalid. */
+function parseExpires(res: Response): number | null {
+  const exp = res.headers.get('expires');
+  if (!exp) return null;
+  const t = Date.parse(exp);
   return Number.isFinite(t) ? t : null;
 }
 
@@ -115,11 +115,28 @@ function noteThrown(err: unknown): void {
 export interface EsiErrorStats {
   byStatus: Record<number, number>;
   network: number;
+  total: number;
 }
 
-/** ESI request-failure counts since process start (cumulative; deltas done by caller). */
+/** Cumulative ESI request-failure counts since process start. */
 export function getEsiErrorStats(): EsiErrorStats {
-  return { byStatus: Object.fromEntries(httpErrorCounts), network: networkErrorCount };
+  const byStatus: Record<number, number> = {};
+  let total = networkErrorCount;
+  for (const [status, n] of httpErrorCounts) {
+    byStatus[status] = n;
+    total += n;
+  }
+  return { byStatus, network: networkErrorCount, total };
+}
+
+/** Human-readable one-line summary of failures, e.g. "429×12, 503×2, network×1". */
+export function formatEsiErrorStats(): string {
+  const parts: string[] = [];
+  for (const [status, n] of [...httpErrorCounts.entries()].sort((a, b) => b[1] - a[1])) {
+    parts.push(`${status}×${n}`);
+  }
+  if (networkErrorCount > 0) parts.push(`network×${networkErrorCount}`);
+  return parts.length ? parts.join(', ') : 'none';
 }
 
 /** Build an EsiError from a non-ok response, capturing how long to back off (420/429). */
@@ -142,39 +159,34 @@ function shouldRetry(err: unknown): boolean {
   return true; // network-level failure (fetch throws TypeError) — retry
 }
 
-// How long to wait before retrying: honour the server's reset window if it gave
-// one. Rate-limit (420/429) backoff is otherwise handled globally by the circuit
-// breaker (gatedFetch waits out the pause), so no special case is needed here.
+/** How long to wait before retrying: honour the server's reset window, else a sensible default. */
 function retryWaitMs(err: unknown): number {
   if (err instanceof EsiError && err.retryAfterMs && err.retryAfterMs > 0) {
     return Math.min(err.retryAfterMs, 30_000);
   }
+  // Rate-limited but no header given: back off hard rather than hammering again.
+  if (err instanceof EsiError && (err.status === 420 || err.status === 429)) return 5000;
   return 1000;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-/** Run an ESI request with the shared policy: tally failures, retry transient ones. */
-async function withRetry<T>(run: () => Promise<T>, retries = 5): Promise<T> {
+/** Fetch data from ESI with automatic retry on transient 5xx errors and 420 rate limiting. */
+export async function esiGet<T>(
+  path: string,
+  params?: Record<string, string | number>,
+  retries = 5
+): Promise<T> {
   try {
-    return await run();
-  } catch (err) {
-    noteThrown(err);
-    if (retries > 0 && shouldRetry(err)) {
-      await sleep(retryWaitMs(err));
-      return withRetry(run, retries - 1);
-    }
-    throw err;
-  }
-}
-
-/** Fetch JSON from ESI, with the shared retry/backoff policy. */
-export function esiGet<T>(path: string, params?: Record<string, string | number>): Promise<T> {
-  return withRetry(async () => {
     const res = await gatedFetch(url(path, params));
     if (!res.ok) throw esiErrorFrom(res, `ESI ${res.status} for ${path}`);
     return (await res.json()) as T;
-  });
+  } catch (err) {
+    noteThrown(err);
+    if (retries > 0 && shouldRetry(err)) {
+      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(err)));
+      return esiGet(path, params, retries - 1);
+    }
+    throw err;
+  }
 }
 
 export interface PagedResponse<T> {
@@ -183,17 +195,28 @@ export interface PagedResponse<T> {
   lastModified: number | null;
 }
 
-/** Fetch one page of a paginated ESI resource, with the shared retry/backoff policy. */
-export function esiGetPaged<T>(path: string, page: number, params?: Record<string, string | number>): Promise<PagedResponse<T>> {
-  return withRetry(async () => {
+/** Fetch paginated data from ESI with automatic retry on transient 5xx errors and 420 rate limiting. */
+export async function esiGetPaged<T>(
+  path: string,
+  page: number,
+  params?: Record<string, string | number>,
+  retries = 5
+): Promise<PagedResponse<T>> {
+  try {
     const res = await gatedFetch(url(path, { ...params, page }));
     if (!res.ok) throw esiErrorFrom(res, `ESI ${res.status} for ${path} (page ${page})`);
-    return {
-      data: (await res.json()) as T,
-      pages: Number(res.headers.get('x-pages') ?? '1'),
-      lastModified: parseDateHeader(res, 'last-modified'),
-    };
-  });
+    const pages = Number(res.headers.get('x-pages') ?? '1');
+    const lm = res.headers.get('last-modified');
+    const lastModified = lm ? Date.parse(lm) : null;
+    return { data: (await res.json()) as T, pages, lastModified: Number.isFinite(lastModified) ? lastModified : null };
+  } catch (err) {
+    noteThrown(err);
+    if (retries > 0 && shouldRetry(err)) {
+      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(err)));
+      return esiGetPaged(path, page, params, retries - 1);
+    }
+    throw err;
+  }
 }
 
 /** One conditional page fetch: 304 (unchanged) carries no body but still has meta. */
@@ -217,16 +240,39 @@ export interface ConditionalPage<T> {
  * (near-zero cost), otherwise 200 with the fresh body and a new ETag. Retries on
  * transient 5xx / rate-limit errors like the other helpers.
  */
-export function esiGetPageConditional<T>(path: string, page: number, etag: string | null): Promise<ConditionalPage<T>> {
-  return withRetry(async () => {
-    const res = await gatedFetch(url(path, { page }), etag ? { 'If-None-Match': etag } : undefined);
+export async function esiGetPageConditional<T>(
+  path: string,
+  page: number,
+  etag: string | null,
+  retries = 5,
+): Promise<ConditionalPage<T>> {
+  try {
+    const headers = etag ? { 'If-None-Match': etag } : undefined;
+    const res = await gatedFetch(url(path, { page }), headers);
     const pages = Number(res.headers.get('x-pages') ?? '1') || 1;
-    const lastModified = parseDateHeader(res, 'last-modified');
-    const expiresAt = parseDateHeader(res, 'expires');
-    if (res.status === 304) return { status: 304, data: null, pages, etag, lastModified, expiresAt };
+    const lm = res.headers.get('last-modified');
+    const lastModified = lm ? Date.parse(lm) : null;
+    const expiresAt = parseExpires(res);
+    if (res.status === 304) {
+      return { status: 304, data: null, pages, etag, lastModified: Number.isFinite(lastModified) ? lastModified : null, expiresAt };
+    }
     if (!res.ok) throw esiErrorFrom(res, `ESI ${res.status} for ${path} (page ${page})`);
-    return { status: 200, data: (await res.json()) as T, pages, etag: res.headers.get('etag'), lastModified, expiresAt };
-  });
+    return {
+      status: 200,
+      data: (await res.json()) as T,
+      pages,
+      etag: res.headers.get('etag'),
+      lastModified: Number.isFinite(lastModified) ? lastModified : null,
+      expiresAt,
+    };
+  } catch (err) {
+    noteThrown(err);
+    if (retries > 0 && shouldRetry(err)) {
+      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(err)));
+      return esiGetPageConditional(path, page, etag, retries - 1);
+    }
+    throw err;
+  }
 }
 
 /** Run an async mapper with bounded concurrency, preserving order. */
@@ -234,13 +280,16 @@ export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,
   mapper: (item: T, index: number) => Promise<R>,
+  onSettled?: (completed: number, total: number) => void,
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let cursor = 0;
+  let completed = 0;
   async function worker() {
     while (cursor < items.length) {
       const i = cursor++;
       results[i] = await mapper(items[i], i);
+      onSettled?.(++completed, items.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));

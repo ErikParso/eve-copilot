@@ -11,7 +11,7 @@
 // body. The global by-type index is rebuilt (throttled) only when some region
 // actually changed; the resolver/algorithm downstream is untouched, so once all
 // regions are loaded the output is identical to a full crawl.
-import { esiGet, esiGetPageConditional, mapWithConcurrency, EsiError, getEsiErrorStats, type ConditionalPage } from './esi.js';
+import { esiGet, esiGetPageConditional, mapWithConcurrency, EsiError, getEsiErrorStats, type EsiErrorStats, type ConditionalPage } from './esi.js';
 import { getType, getRegionName } from './sde.js';
 
 /**
@@ -533,6 +533,9 @@ export interface MarketFreshness {
   orderCount: number;
   builtAt: number | null;
   lastModifiedAt: number | null;
+  /** Cumulative ESI request failures by reason, plus region drops, since startup. */
+  esiErrors: EsiErrorStats;
+  regionDrops: number;
   regions: RegionFreshness[];
 }
 
@@ -563,6 +566,8 @@ export function getMarketFreshness(): MarketFreshness {
     orderCount: snapshot?.orderCount ?? 0,
     builtAt: snapshot?.builtAt ?? null,
     lastModifiedAt: snapshot?.lastModifiedAt ?? null,
+    esiErrors: getEsiErrorStats(),
+    regionDrops,
     regions,
   };
 }
