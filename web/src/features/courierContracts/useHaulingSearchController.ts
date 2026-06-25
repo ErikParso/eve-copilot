@@ -122,7 +122,7 @@ export function useHaulingSearchController(): void {
   const weights = useAtomValue(attractivityWeightsAtom);
   const abortRef = useRef<AbortController | null>(null);
 
-  const run = useCallback(async (): Promise<MarketMeta | null> => {
+  const run = useCallback(async (isBackground = false): Promise<MarketMeta | null> => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -131,9 +131,13 @@ export function useHaulingSearchController(): void {
     const rt = store.get(preferencesAtom).routeType;
     const org = store.get(characterStatusAtom)?.systemId ?? null;
 
-    // Keep showing the current cards during a background refresh; only flip to
-    // "loading" on the very first fetch.
-    setData((d) => (d.status === 'success' ? d : { ...d, status: 'loading', error: null }));
+    // If it's a user action (not a background refresh), we set status to 'loading'
+    // so skeletons are shown.
+    if (!isBackground) {
+      setData((d) => ({ ...d, status: 'loading', error: null }));
+    } else {
+      setData((d) => (d.status === 'success' ? d : { ...d, status: 'loading', error: null }));
+    }
 
     try {
       // One combined call: the server scores courier + arbitrage together,
@@ -245,13 +249,13 @@ export function useHaulingSearchController(): void {
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
-    const tick = async () => {
-      const market = await run();
+    const tick = async (isBg = false) => {
+      const market = await run(isBg);
       if (cancelled) return;
       const delay = market && market.status !== 'ready' ? WARMING_RETRY_MS : REFRESH_MS;
-      timer = window.setTimeout(() => void tick(), delay);
+      timer = window.setTimeout(() => void tick(true), delay);
     };
-    void tick();
+    void tick(false);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
