@@ -9,7 +9,15 @@ import {
   Typography,
   InputAdornment,
   Paper,
+  useTheme,
+  useMediaQuery,
+  Fab,
+  Slide,
+  alpha,
 } from '@mui/material';
+import BubbleChartIcon from '@mui/icons-material/BubbleChart';
+import CloseIcon from '@mui/icons-material/Close';
+import { HaulingBubbleChart } from './components/HaulingBubbleChart';
 import { haulingDataAtom, haulingRowsAtom } from './atoms';
 import { sortCombined } from './combined';
 import { CombinedGrid } from './components/CombinedGrid';
@@ -83,6 +91,8 @@ function ProgressBar() {
 }
 
 export function CourierContractsPage() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { status, error, market, total } = useAtomValue(haulingDataAtom);
   const rows = useAtomValue(haulingRowsAtom);
   const [prefs, setPrefs] = useAtom(preferencesAtom);
@@ -90,6 +100,36 @@ export function CourierContractsPage() {
   // Pinned hauls state
   const pinnedHauls = useAtomValue(pinnedHaulsAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
+
+  const [showChart, setShowChart] = useState(false);
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+  const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleBubbleClick = (key: string) => {
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    const cardEl = document.getElementById(`card-${key}`);
+    if (cardEl) {
+      // Scroll to start (top) so the card is visible above the bottom floating panel
+      cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setHighlightedKey(key);
+      if (isMobile) {
+        setShowChart(false);
+      }
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedKey(null);
+      }, 4000);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const loading = status === 'idle' || status === 'loading';
   const warming = status === 'success' && market !== null && market.status !== 'ready';
@@ -239,21 +279,95 @@ export function CourierContractsPage() {
             </Paper>
 
             {rows.length > 0 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  mt: 2,
+                  mb: 1.5,
+                }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem', whiteSpace: 'nowrap' }}>
                   Available Opportunities
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {total > counts.shown
                     ? `Top ${counts.shown} of ${total.toLocaleString()} by attractivity`
-                    : `${counts.shown} ${counts.shown === 1 ? 'opportunity' : 'opportunities'}`}{' '}
-                  · {counts.courier} courier, {counts.arbitrage} arbitrage
+                    : `${counts.shown} ${counts.shown === 1 ? 'opportunity' : 'opportunities'}`}
                 </Typography>
               </Box>
             )}
 
+            {rows.length > 0 && (
+              <>
+                <Slide direction="up" in={showChart}>
+                  <Paper
+                    elevation={8}
+                    sx={(theme) => ({
+                      position: 'fixed',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: { xs: '30vh', md: '200px' },
+                      zIndex: theme.zIndex.speedDial + 10,
+                      borderRadius: 0,
+                      bgcolor: alpha(theme.palette.background.paper, 0.9),
+                      backdropFilter: 'blur(10px)',
+                      borderTop: '2px solid',
+                      borderColor: 'primary.main',
+                      boxShadow: `0 -4px 20px ${alpha(theme.palette.primary.main, 0.15)}, 0 -8px 32px rgba(0, 0, 0, 0.5)`,
+                      overflow: 'hidden',
+                      pt: 2.5, // leaves room for the overlapping FAB centered on the top border
+                    })}
+                  >
+                    <HaulingBubbleChart rows={sortedRows} onBubbleClick={handleBubbleClick} />
+                  </Paper>
+                </Slide>
+
+                <Fab
+                  color="primary"
+                  size="small"
+                  onClick={() => setShowChart(!showChart)}
+                  sx={(theme) => ({
+                    position: 'fixed',
+                    bottom: showChart ? { xs: 'calc(30vh - 20px)', md: '180px' } : 12,
+                    right: 12,
+                    zIndex: theme.zIndex.speedDial + 20,
+                    boxShadow: showChart
+                      ? `0 0 12px ${alpha(theme.palette.primary.main, 0.4)}, 0 4px 12px rgba(0,0,0,0.5)`
+                      : '0 6px 24px rgba(0,0,0,0.4)',
+                    transition: theme.transitions.create(
+                      ['bottom', 'background-color', 'border-color', 'box-shadow', 'color', 'transform'],
+                      {
+                        duration: showChart
+                          ? theme.transitions.duration.enteringScreen
+                          : theme.transitions.duration.leavingScreen,
+                        easing: showChart
+                          ? theme.transitions.easing.easeOut
+                          : theme.transitions.easing.sharp,
+                      }
+                    ),
+                    bgcolor: showChart ? 'background.paper' : 'primary.main',
+                    color: showChart ? 'primary.main' : 'primary.contrastText',
+                    border: '2px solid',
+                    borderColor: 'primary.main',
+                    '&:hover': {
+                      bgcolor: showChart ? '#212c3d' : 'primary.dark',
+                      boxShadow: showChart
+                        ? `0 0 18px ${alpha(theme.palette.primary.main, 0.6)}, 0 4px 12px rgba(0,0,0,0.5)`
+                        : `0 8px 28px ${alpha(theme.palette.primary.main, 0.4)}`,
+                      transform: 'scale(1.05)',
+                    },
+                  })}
+                >
+                  {showChart ? <CloseIcon fontSize="small" /> : <BubbleChartIcon fontSize="small" />}
+                </Fab>
+              </>
+            )}
+
             {rows.length > 0 ? (
-              <CombinedGrid rows={sortedRows} />
+              <CombinedGrid rows={sortedRows} highlightedKey={highlightedKey} />
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Nothing matches. Widen the cargo / ISK / contract-type limits in Preferences.
