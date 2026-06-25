@@ -133,8 +133,16 @@ let opportunitiesFetchedAt = -1;
 async function refresh(): Promise<void> {
   if (crawling) return crawling;
   crawling = (async () => {
-    const result = await crawlContracts();
-    raw = { ...result, fetchedAt: Date.now() };
+    try {
+      const result = await crawlContracts();
+      raw = { ...result, fetchedAt: Date.now() };
+    } catch (err) {
+      // A whole-crawl failure (e.g. the region-list fetch 504s during an ESI
+      // outage) must NOT crash the process — keep the last good cache and let the
+      // next 10-min cycle retry, mirroring the market crawler's per-region resilience.
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[Contracts Crawl] Crawl failed (keeping last cache): ${reason}`);
+    }
   })().finally(() => {
     crawling = null;
   });
