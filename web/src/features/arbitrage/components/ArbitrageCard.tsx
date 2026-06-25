@@ -19,6 +19,8 @@ import { ArbitrageRouteCell } from './ArbitrageRouteCell';
 import { OpenMarketButton } from './OpenMarketButton';
 import { WaypointButton } from './WaypointButton';
 import { PinnedHaul, pinnedHaulsAtom, pinHaulAtom, unpinHaulAtom, confirmBuyHaulAtom, executeHaulAtom } from '../atoms';
+import MapIcon from '@mui/icons-material/Map';
+import { SellDestinationsModal } from './SellDestinationsModal';
 
 // Paying more than this multiple of the item's reference market value at the
 // source is the real exposure: if the destination sale falls through (e.g. a
@@ -181,6 +183,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   
   // Dialog state
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
+  const [sellModalOpen, setSellModalOpen] = useState(false);
   const [confirmQty, setConfirmQty] = useState(String(row.quantity));
   const [confirmPrice, setConfirmPrice] = useState(String(row.buyPrice));
   const [confirmTotal, setConfirmTotal] = useState(String((row.quantity * row.buyPrice) / 1_000_000));
@@ -528,16 +531,28 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           {isPinnedMode && (
             <Box sx={{ mt: 'auto', pt: 1, display: 'flex', gap: 1 }}>
               {haulStatus === 'transit' ? (
-                <Button
-                  variant="contained"
-                  color="success"
-                  size="small"
-                  fullWidth
-                  startIcon={<CheckCircleOutlineIcon />}
-                  onClick={handleConfirmSell}
-                >
-                  Confirm Sell
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1, width: '100%' }}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    size="small"
+                    sx={{ flex: 1 }}
+                    startIcon={<CheckCircleOutlineIcon />}
+                    onClick={handleConfirmSell}
+                  >
+                    Confirm Sell
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    size="small"
+                    sx={{ flex: 1 }}
+                    startIcon={<MapIcon />}
+                    onClick={() => setSellModalOpen(true)}
+                  >
+                    Sell Elsewhere
+                  </Button>
+                </Box>
               ) : haulStatus === 'executed' ? (
                 <Button
                   variant="contained"
@@ -603,6 +618,14 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           <Button variant="contained" onClick={handleConfirmBuy}>Confirm &amp; Load</Button>
         </DialogActions>
       </Dialog>
+
+      {isPinnedMode && haulStatus === 'transit' && (
+        <SellDestinationsModal
+          open={sellModalOpen}
+          onClose={() => setSellModalOpen(false)}
+          haul={row as PinnedHaul}
+        />
+      )}
     </>
   );
 });
