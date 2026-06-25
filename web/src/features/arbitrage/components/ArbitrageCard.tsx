@@ -164,12 +164,14 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   row,
   isHighlighted,
   variant = 'default',
+  onSelect,
 }: {
   row: ArbitrageRow | PinnedHaul;
   isHighlighted?: boolean;
   /** 'sell' renders a liquidation alternative: buy side is "In ship", profit goes
    *  red when ≤ 0, and the pin control is hidden (you set a waypoint instead). */
   variant?: 'default' | 'sell';
+  onSelect?: (option: ArbitrageRow) => void;
 }) {
   const isSell = variant === 'sell';
   const pinnedHauls = useAtomValue(pinnedHaulsAtom);
@@ -328,6 +330,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
     return 'primary.main'; // unchanged / not yet revalidated
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const getHighlightColor = (theme: any) => {
     const colorKey = getPinnedBorderColor();
     if (!colorKey) return theme.palette.primary.main;
@@ -574,6 +577,20 @@ export const ArbitrageCard = memo(function ArbitrageCard({
                   Confirm Buy
                 </Button>
               )}
+            </Box>
+          )}
+
+          {variant === 'sell' && onSelect && (
+            <Box sx={{ mt: 'auto', pt: 1 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                size="small"
+                fullWidth
+                onClick={() => onSelect(row as ArbitrageRow)}
+              >
+                Redirect Here
+              </Button>
             </Box>
           )}
         </CardContent>

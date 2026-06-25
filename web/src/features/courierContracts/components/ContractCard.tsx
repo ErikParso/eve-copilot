@@ -100,6 +100,7 @@ export const ContractCard = memo(function ContractCard({
     return 'success.main'; // Green if fresh or secured
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const getHighlightColor = (theme: any) => {
     const colorKey = getPinnedBorderColor();
     if (!colorKey) return theme.palette.primary.main;
