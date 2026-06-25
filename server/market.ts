@@ -81,7 +81,7 @@ interface Snapshot {
 }
 
 const TICK_MS = 20_000; // how often the scheduler checks which regions are due
-const REGIONS_PER_TICK = 10; // regions dispatched per tick; real throttle is esi.ts's global gate
+const REGIONS_PER_TICK = 5; // regions dispatched per tick; real throttle is esi.ts's global gate
 const PAGE_CONCURRENCY = 8; // per-region page fan-out (further bounded by esi.ts's global gate)
 const RESOLVE_THROTTLE_MS = 60_000; // once ready, rebuild the by-type index at most this often
 const FRESH_FALLBACK_MS = 300_000; // assume 5-min freshness when ESI sends no Expires
