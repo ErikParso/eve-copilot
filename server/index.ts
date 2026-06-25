@@ -12,6 +12,16 @@ import { toRouteSystems } from './enrich.js';
 import { getShipKills } from './kills.js';
 import type { PinnedHaulStatusRequest } from './types.js';
 
+// Last-resort backstop: a stray rejected promise or thrown error in any
+// background crawl must never take the whole server down (a transient ESI 504
+// once did exactly that). Log it and keep serving the cached data.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled promise rejection (ignored, server stays up):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught exception (ignored, server stays up):', err);
+});
+
 const PORT = Number(process.env.PORT ?? 4000);
 const DEFAULT_SHIP_LIMIT = 48; // how many top-attractivity hauls to ship (the FE shows them all, no paging)
 
