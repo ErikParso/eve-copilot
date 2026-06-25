@@ -161,10 +161,15 @@ const RungBreakdownTooltip = ({ rungs }: { rungs: DisplayRung[] }) => {
 export const ArbitrageCard = memo(function ArbitrageCard({
   row,
   isHighlighted,
+  variant = 'default',
 }: {
   row: ArbitrageRow | PinnedHaul;
   isHighlighted?: boolean;
+  /** 'sell' renders a liquidation alternative: buy side is "In ship", profit goes
+   *  red when ≤ 0, and the pin control is hidden (you set a waypoint instead). */
+  variant?: 'default' | 'sell';
 }) {
+  const isSell = variant === 'sell';
   const pinnedHauls = useAtomValue(pinnedHaulsAtom);
   const pinHaul = useSetAtom(pinHaulAtom);
   const unpinHaul = useSetAtom(unpinHaulAtom);
@@ -385,24 +390,26 @@ export const ArbitrageCard = memo(function ArbitrageCard({
             gap: 1,
           }}
         >
-          <Tooltip title={isPinned ? "Unpin opportunity" : "Pin opportunity"} arrow>
-            <IconButton
-              size="small"
-              onClick={handlePinClick}
-              sx={{
-                color: isPinned ? 'primary.main' : 'text.secondary',
-                bgcolor: 'background.paper',
-                boxShadow: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                width: 32,
-                height: 32,
-                '&:hover': { bgcolor: 'action.hover' },
-              }}
-            >
-              {isPinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
+          {!isSell && (
+            <Tooltip title={isPinned ? "Unpin opportunity" : "Pin opportunity"} arrow>
+              <IconButton
+                size="small"
+                onClick={handlePinClick}
+                sx={{
+                  color: isPinned ? 'primary.main' : 'text.secondary',
+                  bgcolor: 'background.paper',
+                  boxShadow: 2,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  width: 32,
+                  height: 32,
+                  '&:hover': { bgcolor: 'action.hover' },
+                }}
+              >
+                {isPinned ? <PushPinIcon fontSize="small" /> : <PushPinOutlinedIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          )}
 
           {!isPinned && (
             <AttractivityCell score={'attractivity' in row ? row.attractivity : 0} steps={'attractivitySteps' in row ? row.attractivitySteps : []} circle />
@@ -413,12 +420,19 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           {/* Profit headline */}
           <Box sx={{ pr: 5, minWidth: 0 }}>
             <Typography variant="caption" color="text.secondary">
-              Expected Profit
+              {isSell ? 'Income if sold here' : 'Expected Profit'}
             </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: incomeZero ? 'error.main' : 'primary.main' }}>
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 700,
+                lineHeight: 1.2,
+                color: incomeZero || (isSell && dispProfit <= 0) ? 'error.main' : 'primary.main',
+              }}
+            >
               {incomeZero ? '0.00 ISK' : formatIskMillions(dispProfit)}
             </Typography>
-            <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+            <Typography variant="caption" color={isSell && dispMarginPct < 0 ? 'error.main' : 'success.main'} sx={{ fontWeight: 600 }}>
               {formatNumber(dispMarginPct, 1)}% margin
             </Typography>
           </Box>
@@ -466,7 +480,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           </Box>
 
           {/* Endpoints */}
-          {isTransit ? (
+          {isTransit || isSell ? (
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ width: 28, flexShrink: 0, mt: 0.25 }}>
                 Buy

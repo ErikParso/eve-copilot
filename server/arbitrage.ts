@@ -15,10 +15,11 @@
 // ALL user filtering (collateral, cargo, tax, …) stays on the client.
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import { getType, getRegion, getStation } from './sde.js';
+import { getType, getRegion, getStation, getSystem, securityBand } from './sde.js';
 import { getMarketPrice } from './prices.js';
 import { dangerForSystems } from './danger.js';
-import { scaleArbitrage, repriceForTax, type Scaled } from './arbitrageScore.js';
+import { scaleArbitrage, repriceForTax, scoreAttractivity, type Scaled, type AttractivityWeights } from './arbitrageScore.js';
+import type { ContractEndpoint } from './types.js';
 import {
   getSnapshot,
   RANGE_REGION,
@@ -547,4 +548,160 @@ function sameIds(a: number[], b: number[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every((id) => set.has(id));
+}
+
+// --- Sell-destination search (liquidate cargo carried in transit) -------------
+
+export interface SellDestinationParams {
+  /** Item carried in the ship. */
+  typeId: number;
+  /** Units in the hold (the most you could offload). */
+  quantity: number;
+  /** What you paid per unit (sunk cost — same everywhere, so it only sets P/L). */
+  boughtPrice: number;
+  /** Current system — every route/jumps/danger figure is measured from here. */
+  origin: number;
+  routeType: RouteType;
+  taxPct: number;
+  weights: AttractivityWeights;
+  /** Max cards returned (UX cap; the search itself isn't capped). */
+  limit?: number;
+}
+
+/** A routed, attractivity-scored place to sell the carried cargo. Shaped like a
+ *  shipped arbitrage item so the client reuses the arbitrage card to render it. */
+export type SellDestinationItem = ScaledArbitrageItem & {
+  danger: number;
+  dangerSteps: string[];
+  attractivity: number;
+};
+
+/** How many destinations we route per request. Routing from the current location
+ *  isn't pre-warmed (unlike the opportunity delivery legs), so we price every
+ *  market but only route the strongest by raw income — the long tail of low-income
+ *  markets can't win under income-weighted scoring anyway. */
+const SELL_DEST_ROUTE_BUDGET = 50;
+const DEFAULT_SELL_DEST_LIMIT = 24;
+
+/** A synthetic "your ship" endpoint for the buy side (the cargo is already aboard;
+ *  the card renders this as "In ship"). */
+function shipEndpoint(systemId: number): ContractEndpoint {
+  const system = getSystem(systemId);
+  return {
+    locationId: 0,
+    name: 'Your ship',
+    systemName: system?.name ?? null,
+    systemId,
+    security: system?.security ?? null,
+    securityBand: system ? securityBand(system.security) : null,
+    resolved: false,
+  };
+}
+
+/**
+ * Find where the cargo carried in transit can be sold, ranked by the same
+ * attractivity weights as the hauling list. For each destination SYSTEM we take
+ * the drop station that liquidates the most value (range-aware bid pool), sell up
+ * to the held quantity best-bid-first (no profitability break — dumping owned
+ * stock), route it from the current location, score danger, and rank. "Best
+ * available" — loss-making destinations are included (they just rank low under an
+ * income weight); the client colours non-positive income red.
+ */
+export function resolveSellDestinations(params: SellDestinationParams, kills: Map<number, number>): SellDestinationItem[] {
+  const snap = getSnapshot();
+  if (!snap) return [];
+  const book = snap.byType.get(params.typeId);
+  if (!book || book.buys.length === 0) return [];
+
+  const type = getType(params.typeId);
+  const unitVolume = type?.volume ?? 0;
+  const name = type?.name ?? `Type ${params.typeId}`;
+  const marketPrice = getMarketPrice(params.typeId);
+  const tax = params.taxPct / 100;
+  const Q = params.quantity;
+  const X = params.boughtPrice;
+
+  // Best liquidation per destination system (the drop station yielding the most
+  // gross revenue for up to Q units).
+  interface Liq {
+    drop: StationOrders;
+    sellableQty: number;
+    revenueGross: number;
+    ladder: ArbitrageRung[];
+  }
+  const bestBySystem = new Map<number, Liq>();
+  for (const drop of book.buys) {
+    const bids = poolBidsForDrop(book.buys, drop);
+    let qty = 0;
+    let revenueGross = 0;
+    const ladder: ArbitrageRung[] = [];
+    for (let bi = 0; bi < bids.length && qty < Q; bi++) {
+      const bid = bids[bi];
+      const take = Math.min(bid.volume, Q - qty);
+      if (take <= 0) continue;
+      qty += take;
+      revenueGross += take * bid.price;
+      if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: take, buy: X, sell: bid.price });
+    }
+    if (qty <= 0) continue;
+    const existing = bestBySystem.get(drop.system);
+    if (!existing || revenueGross > existing.revenueGross) {
+      bestBySystem.set(drop.system, { drop, sellableQty: qty, revenueGross, ladder });
+    }
+  }
+
+  // Route only the strongest candidates by raw income (routing bound, not a
+  // results cap — see SELL_DEST_ROUTE_BUDGET).
+  const ranked = [...bestBySystem.values()].sort((a, b) => b.revenueGross - a.revenueGross).slice(0, SELL_DEST_ROUTE_BUDGET);
+
+  const items: SellDestinationItem[] = [];
+  for (const liq of ranked) {
+    const destSys = liq.drop.system;
+    const deliveryIds = getRoute(params.origin, destSys, params.routeType);
+    if (!deliveryIds) continue; // unreachable from here
+
+    const { index: danger, steps: dangerSteps } = dangerForSystems(deliveryIds, kills);
+
+    const sellableQty = liq.sellableQty;
+    const buyCost = X * sellableQty;
+    const profit = liq.revenueGross * (1 - tax) - buyCost; // realized on what sells
+
+    items.push({
+      id: `sell:${params.typeId}:${liq.drop.station}`,
+      typeId: params.typeId,
+      itemName: name,
+      quantity: sellableQty,
+      unitVolume,
+      totalVolume: sellableQty * unitVolume,
+      buyPrice: X,
+      sellPrice: sellableQty > 0 ? liq.revenueGross / sellableQty : 0,
+      marketPrice,
+      buyCost,
+      profit,
+      marginPct: buyCost > 0 ? (profit / buyCost) * 100 : 0,
+      ladder: liq.ladder,
+      salesTax: tax,
+      source: shipEndpoint(params.origin),
+      dest: resolveEndpoint(liq.drop.station, destSys),
+      approachRoute: null,
+      deliveryRoute: toRouteSystems(deliveryIds, kills),
+      fullQuantity: sellableQty,
+      fullTotalVolume: sellableQty * unitVolume,
+      limited: sellableQty < Q,
+      // Attached below once the whole set is scored together.
+      danger,
+      dangerSteps,
+      attractivity: 0,
+    });
+  }
+
+  // Score the routed set together (one normalisation), like the hauling list.
+  const scores = scoreAttractivity(
+    items.map((it) => ({ income: it.profit, totalJumps: it.deliveryRoute.length - 1, danger: it.danger })),
+    params.weights,
+  );
+  items.forEach((it, i) => (it.attractivity = scores[i]));
+  items.sort((a, b) => b.attractivity - a.attractivity);
+
+  return items.slice(0, params.limit ?? DEFAULT_SELL_DEST_LIMIT);
 }
