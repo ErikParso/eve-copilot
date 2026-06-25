@@ -23,7 +23,7 @@ import {
 
 // Background refresh aligns to the server crawl cadence (~10 min); retry sooner
 // while the market crawl is still warming up on a cold server.
-const REFRESH_MS = 5 * 60 * 1000;
+const REFRESH_MS = 1 * 60 * 1000;
 const WARMING_RETRY_MS = 20 * 1000;
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
