@@ -158,8 +158,10 @@ const RungBreakdownTooltip = ({ rungs }: { rungs: DisplayRung[] }) => {
 /** One arbitrage opportunity rendered as a card for the results grid. */
 export const ArbitrageCard = memo(function ArbitrageCard({
   row,
+  isHighlighted,
 }: {
   row: ArbitrageRow | PinnedHaul;
+  isHighlighted?: boolean;
 }) {
   const pinnedHauls = useAtomValue(pinnedHaulsAtom);
   const pinHaul = useSetAtom(pinHaulAtom);
@@ -308,6 +310,17 @@ export const ArbitrageCard = memo(function ArbitrageCard({
     return 'primary.main';
   };
 
+  const getHighlightColor = (theme: any) => {
+    const colorKey = getPinnedBorderColor();
+    if (!colorKey) return theme.palette.primary.main;
+    const parts = colorKey.split('.');
+    let node: unknown = theme.palette;
+    for (const part of parts) {
+      node = typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[part] : undefined;
+    }
+    return typeof node === 'string' ? node : theme.palette.primary.main;
+  };
+
   return (
     <>
       <Card
@@ -324,18 +337,30 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           backgroundPosition: 'left top',
           backgroundRepeat: 'no-repeat',
           borderColor: getPinnedBorderColor(),
+          borderWidth: '1px',
+          margin: '0px',
           boxShadow: (theme) => {
+            if (isHighlighted) return undefined;
             if (!isPinnedMode) return undefined;
-            const colorKey = getPinnedBorderColor();
-            if (!colorKey) return undefined;
-            const parts = colorKey.split('.');
-            let node: unknown = theme.palette;
-            for (const part of parts) {
-              node = typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[part] : undefined;
-            }
-            const color = typeof node === 'string' ? node : '#000';
+            const color = getHighlightColor(theme);
             return `0 4px 12px rgba(0, 0, 0, 0.08), 0 0 8px ${alpha(color, 0.35)}`;
           },
+          '@keyframes highlightPulse': {
+            '0%': {
+              boxShadow: (theme) => {
+                const color = getHighlightColor(theme);
+                return `0 0 6px ${alpha(color, 0.25)}, 0 4px 12px rgba(0, 0, 0, 0.08)`;
+              },
+            },
+            '100%': {
+              boxShadow: (theme) => {
+                const color = getHighlightColor(theme);
+                return `0 0 24px ${alpha(color, 0.7)}, 0 4px 12px rgba(0, 0, 0, 0.08)`;
+              },
+            },
+          },
+          animation: isHighlighted ? 'highlightPulse 0.5s ease-in-out 4 alternate' : undefined,
+          transition: 'box-shadow 0.6s ease-out',
         }}
       >
         {/* Top-right actions: Pin button and Attractivity bubble */}
