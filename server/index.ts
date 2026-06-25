@@ -4,7 +4,7 @@ import { loadSde } from './sde.js';
 import { startContractsRefresh } from './contracts.js';
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
-import { resolvePinnedHaulsStatus, prewarmDeliveryRoutes } from './arbitrage.js';
+import { resolvePinnedHaulsStatus, resolveSellDestinations, prewarmDeliveryRoutes } from './arbitrage.js';
 import { getEnrichedHauling } from './hauling.js';
 import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
@@ -185,6 +185,45 @@ async function main() {
       res.json({ ...result, pinnedStatuses });
     } catch (err) {
       console.error('POST /api/hauling failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // Where can I sell the cargo I'm carrying right now? Liquidation search for one
+  // item, ranked by the same attractivity weights as the hauling list, routed from
+  // the caller's current system. On-demand (a transit card's "Sell elsewhere").
+  app.post('/api/arbitrage/sell-destinations', async (req, res) => {
+    try {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const typeId = Number(b.typeId);
+      const quantity = Number(b.quantity);
+      const boughtPrice = Number(b.boughtPrice);
+      const origin = Number(b.origin);
+      if (![typeId, quantity, boughtPrice, origin].every(Number.isFinite) || quantity <= 0) {
+        return res.status(400).json({ error: 'typeId, quantity, boughtPrice and origin are required' });
+      }
+      const w = (b.weights ?? {}) as Record<string, unknown>;
+      const weights: AttractivityWeights = {
+        income: parseWeight(w.income, 5),
+        totalJumps: parseWeight(w.totalJumps, 5),
+        danger: parseWeight(w.danger, 5),
+      };
+      const kills = await getShipKills();
+      const items = resolveSellDestinations(
+        {
+          typeId,
+          quantity,
+          boughtPrice,
+          origin,
+          routeType: parseRouteType(b.routeType),
+          taxPct: parseOptionalNumber(b.taxPct) ?? 4.5,
+          weights,
+        },
+        kills,
+      );
+      res.json({ items });
+    } catch (err) {
+      console.error('POST /api/arbitrage/sell-destinations failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });
