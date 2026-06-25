@@ -14,9 +14,13 @@ export interface PinnedHaul extends ArbitrageItem {
   // Lifecycle status
   status: 'planning' | 'transit' | 'executed';
   
-  // Original values when pinned
+  // Original values captured at the moment of pinning — the fixed baseline every
+  // later revalidation is compared against (income up/down/zero vs this). Also the
+  // defaults for the Confirm-Buy dialog, since the live values may have collapsed
+  // (e.g. you bought the stock yourself, emptying the sell orders).
   originalProfit?: number;
   originalQuantity?: number;
+  originalBuyPrice?: number;
   
   // User-confirmed buy details (used during transit)
   boughtQuantity?: number;
@@ -122,6 +126,7 @@ export const pinHaulAtom = atom(null, (get, set, item: ArbitrageItem) => {
     status: 'planning',
     originalProfit: item.profit,
     originalQuantity: item.quantity,
+    originalBuyPrice: item.buyPrice,
   };
   set(pinnedHaulsAtom, [...current, pinned]);
 });

@@ -49,6 +49,12 @@ function parseWeight(value: unknown, fallback: number): number {
 }
 
 
+function parseNumberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.map(Number).filter(Number.isFinite);
+  return out.length ? out : undefined;
+}
+
 function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
   if (!Array.isArray(value)) return [];
   const out: PinnedHaulStatusRequest[] = [];
@@ -62,12 +68,13 @@ function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
     const quantity = Number(e.quantity);
     const status = e.status;
     const boughtPrice = e.boughtPrice !== undefined ? Number(e.boughtPrice) : undefined;
-    
+    const unitVolume = e.unitVolume !== undefined ? Number(e.unitVolume) : undefined;
+
     if (typeof id !== 'string') continue;
     if (![typeId, source, dest, quantity].every(Number.isFinite)) continue;
     if (status !== 'planning' && status !== 'transit') continue;
     if (boughtPrice !== undefined && !Number.isFinite(boughtPrice)) continue;
-    
+
     out.push({
       id,
       typeId,
@@ -76,6 +83,12 @@ function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
       quantity,
       status: status as 'planning' | 'transit',
       boughtPrice,
+      unitVolume: unitVolume !== undefined && Number.isFinite(unitVolume) ? unitVolume : undefined,
+      // Echoed back from the previous response so the server can flag `stale`
+      // (the specific orders backing the haul changed). Without these the stale
+      // check is inert.
+      knownSourceOrderIds: parseNumberArray(e.knownSourceOrderIds),
+      knownDestOrderIds: parseNumberArray(e.knownDestOrderIds),
     });
   }
   return out;
@@ -137,36 +150,41 @@ async function main() {
 
   // Combined hauling menu: courier + arbitrage scored together server-side,
   // truncated to the top-N by attractivity, shipped with the score attached.
-  app.get('/api/hauling', async (req, res) => {
+  // One combined call: fresh opportunities AND a revalidation of the caller's
+  // pinned hauls, both resolved against the SAME market snapshot. POST so the
+  // pinned set (which lives client-side) can ride in the body; search params
+  // stay on the query string. Pins are validated only on this reload cadence —
+  // there is no separate per-pin check — so a freshly pinned item stays as-is
+  // until the next reload instead of being re-priced the instant it's added.
+  app.post('/api/hauling', async (req, res) => {
     try {
       const weights: AttractivityWeights = {
         income: parseWeight(req.query.wIncome, 5),
         totalJumps: parseWeight(req.query.wJumps, 5),
         danger: parseWeight(req.query.wDanger, 5),
       };
+      const capacity = parseCeiling(req.query.capacity);
+      const balance = parseCeiling(req.query.balance);
+      const taxPct = parseOptionalNumber(req.query.taxPct) ?? 4.5;
       const result = await getEnrichedHauling({
         routeType: parseRouteType(req.query.routeType),
         origin: parseOptionalNumber(req.query.origin),
-        capacity: parseCeiling(req.query.capacity),
-        balance: parseCeiling(req.query.balance),
-        taxPct: parseOptionalNumber(req.query.taxPct) ?? 4.5,
+        capacity,
+        balance,
+        taxPct,
         weights,
         limit: parseOptionalNumber(req.query.limit) ?? DEFAULT_SHIP_LIMIT,
       });
-      res.json(result);
+      // Pins are re-optimized against the SAME cargo/wallet/tax as the grid, so a
+      // pinned planning haul reflects exactly what the matching opportunity would.
+      const pinnedStatuses = resolvePinnedHaulsStatus(parsePinnedHaulsRequest(req.body?.hauls), {
+        capacity,
+        balance,
+        taxFraction: taxPct / 100,
+      });
+      res.json({ ...result, pinnedStatuses });
     } catch (err) {
-      console.error('GET /api/hauling failed', err);
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
-    }
-  });
-
-  app.post('/api/arbitrage/status', (req, res) => {
-    try {
-      const requests = parsePinnedHaulsRequest(req.body?.hauls);
-      const statuses = resolvePinnedHaulsStatus(requests);
-      res.json({ statuses });
-    } catch (err) {
-      console.error('POST /api/arbitrage/status failed', err);
+      console.error('POST /api/hauling failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });

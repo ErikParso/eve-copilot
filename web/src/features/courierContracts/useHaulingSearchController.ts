@@ -13,7 +13,13 @@ import { deriveJourney, perJump } from './journey';
 import { haulingDataAtom, attractivityWeightsAtom, type CourierBase, type ScoredCourier, type ScoredArbitrage } from './atoms';
 import type { ContractEndpoint, RouteSystem } from './types';
 import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
-import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
+import {
+  pinnedHaulsAtom,
+  pinnedCouriersAtom,
+  pinnedRoutesAtom,
+  updatePinnedStatusesAtom,
+  type PinnedHaulStatus,
+} from '@/features/arbitrage/atoms';
 
 // Background refresh aligns to the server crawl cadence (~10 min); retry sooner
 // while the market crawl is still warming up on a cold server.
@@ -73,6 +79,9 @@ interface HaulingResponse {
   meta: MarketMeta;
   contractsAsOf: number | null;
   total: number;
+  // Revalidation of the pinned hauls posted with the request, resolved against
+  // the same snapshot as `items`.
+  pinnedStatuses: PinnedHaulStatus[];
 }
 
 /** Add the route-derived fields (jumps, per-jump rate, danger) + listing times. */
@@ -109,6 +118,7 @@ function hydrateArbitrage(a: ApiArbitrageItem): ScaledArbitrage {
 export function useHaulingSearchController(): void {
   const store = useStore();
   const setData = useSetAtom(haulingDataAtom);
+  const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
   // Re-fetch triggers: anything that changes the server-side arbitrage result.
   // (Weights are read at fetch time but are NOT a trigger — see haulingRowsAtom.)
   const prefs = useAtomValue(preferencesAtom);
@@ -154,7 +164,32 @@ export function useHaulingSearchController(): void {
       params.set('wJumps', String(weights.totalJumps));
       params.set('wDanger', String(weights.danger));
 
-      const haulRes = await fetch(`${API_BASE}/api/hauling?${params.toString()}`, { signal });
+      // Pinned hauls are revalidated in the SAME request (and thus the same
+      // market snapshot) as the opportunities. Only planning/transit hauls carry
+      // live status; echo the orders we last saw so the server can flag `stale`.
+      const pinnedForCheck = store
+        .get(pinnedHaulsAtom)
+        .filter((h) => h.status === 'planning' || h.status === 'transit')
+        .map((h) => ({
+          id: h.id,
+          typeId: h.typeId,
+          source: h.source.locationId,
+          dest: h.dest.locationId,
+          quantity: h.status === 'planning' ? h.quantity : (h.boughtQuantity ?? h.quantity),
+          status: h.status,
+          boughtPrice: h.boughtPrice,
+          // Lets the server re-optimize a planning haul to the qty that fits cargo.
+          unitVolume: h.unitVolume,
+          knownSourceOrderIds: h.sourceOrderIds,
+          knownDestOrderIds: h.destOrderIds,
+        }));
+
+      const haulRes = await fetch(`${API_BASE}/api/hauling?${params.toString()}`, {
+        signal,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hauls: pinnedForCheck }),
+      });
       if (!haulRes.ok) throw new Error(`Hauling API returned ${haulRes.status}`);
       const haulData = (await haulRes.json()) as HaulingResponse;
       if (signal.aborted) return null;
@@ -177,6 +212,12 @@ export function useHaulingSearchController(): void {
         market: haulData.meta,
         total: haulData.total,
       });
+
+      // Fold the same-snapshot pin revalidation into the store. Pins not echoed
+      // back (none posted, or already executed) are left untouched.
+      if (haulData.pinnedStatuses?.length) {
+        updatePinnedStatuses(haulData.pinnedStatuses);
+      }
 
       // Fetch dynamic routes for in-transit/secured pinned items
       const pinnedHauls = store.get(pinnedHaulsAtom);
@@ -244,7 +285,7 @@ export function useHaulingSearchController(): void {
       );
       return null;
     }
-  }, [store, setData]);
+  }, [store, setData, updatePinnedStatuses]);
 
   useEffect(() => {
     let cancelled = false;

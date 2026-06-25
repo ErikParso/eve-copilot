@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import {
   Alert,
   Box,
@@ -20,16 +20,9 @@ import { HaulingBubbleChart } from './components/HaulingBubbleChart';
 import { haulingDataAtom, haulingRowsAtom } from './atoms';
 import { sortCombined } from './combined';
 import { CombinedGrid } from './components/CombinedGrid';
-import {
-  pinnedHaulsAtom,
-  updatePinnedStatusesAtom,
-  type PinnedHaulStatus,
-} from '@/features/arbitrage/atoms';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { RouteTypeSelect } from './components/RouteTypeSelect';
 import { AttractivityWeightsControl } from './components/AttractivityWeightsControl';
-
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 function parseOptionalNumber(raw: string): number | null {
   if (raw.trim() === '') return null;
@@ -86,10 +79,6 @@ export function CourierContractsPage() {
   const { status, error, market, total } = useAtomValue(haulingDataAtom);
   const rows = useAtomValue(haulingRowsAtom);
   const [prefs, setPrefs] = useAtom(preferencesAtom);
-  
-  // Pinned hauls state
-  const pinnedHauls = useAtomValue(pinnedHaulsAtom);
-  const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
 
   const [showChart, setShowChart] = useState(false);
   const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
@@ -124,9 +113,8 @@ export function CourierContractsPage() {
   const loading = status === 'idle' || status === 'loading';
   const warming = status === 'success' && market !== null && market.status !== 'ready';
 
-  // Poll pinned statuses
-  const pinnedHaulsRef = useRef(pinnedHauls);
-  pinnedHaulsRef.current = pinnedHauls;
+  // Pinned hauls are revalidated by the global hauling reload (same request +
+  // same market snapshot as the opportunities), so there is no per-page polling.
 
   useEffect(() => {
     document.title = 'EVE Copilot — Hauling & Arbitrage Opportunities';
@@ -138,50 +126,6 @@ export function CourierContractsPage() {
       );
     }
   }, []);
-
-  useEffect(() => {
-    if (pinnedHauls.length === 0) return;
-
-    let active = true;
-    const checkStatuses = async () => {
-      try {
-        const body = {
-          hauls: pinnedHaulsRef.current.map((h) => ({
-            id: h.id,
-            typeId: h.typeId,
-            source: h.source.locationId,
-            dest: h.dest.locationId,
-            quantity: h.status === 'planning' ? h.quantity : (h.boughtQuantity ?? h.quantity),
-            status: h.status,
-            boughtPrice: h.boughtPrice,
-            // Echo the orders we last saw so the server can flag identity changes.
-            knownSourceOrderIds: h.sourceOrderIds,
-            knownDestOrderIds: h.destOrderIds,
-          })),
-        };
-        const res = await fetch(`${API_BASE}/api/arbitrage/status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error('Status check failed');
-        const data = (await res.json()) as { statuses?: PinnedHaulStatus[] };
-        if (active && data.statuses) {
-          updatePinnedStatuses(data.statuses);
-        }
-      } catch (err) {
-        console.error('Failed to check pinned hauls status', err);
-      }
-    };
-
-    checkStatuses();
-
-    const interval = setInterval(checkStatuses, 15000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [pinnedHauls.length, updatePinnedStatuses]);
 
   // Sort live by attractivity always
   const sortedRows = useMemo(() => sortCombined(rows, 'attractivity'), [rows]);

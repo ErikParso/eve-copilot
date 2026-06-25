@@ -2,6 +2,8 @@ import { useState, memo, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Box, Card, CardContent, Divider, Stack, Tooltip, Typography, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, alpha } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import SegmentIcon from '@mui/icons-material/Segment';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
@@ -187,9 +189,15 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   };
 
   const handleOpenBuyDialog = () => {
-    setConfirmQty(String(row.quantity));
-    setConfirmPrice(String(row.buyPrice));
-    setConfirmTotal(String((row.quantity * row.buyPrice) / 1_000_000));
+    // Default to the values captured when pinned, not the live (re-optimized)
+    // ones — the live qty/price may have collapsed to 0 precisely because you
+    // bought the stock yourself. You can still adjust to what you actually paid.
+    const pin = row as PinnedHaul;
+    const qty = pin.originalQuantity ?? row.quantity;
+    const price = pin.originalBuyPrice ?? row.buyPrice;
+    setConfirmQty(String(qty));
+    setConfirmPrice(String(price));
+    setConfirmTotal(String((qty * price) / 1_000_000));
     setBuyDialogOpen(true);
   };
 
@@ -217,8 +225,9 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   };
 
   const handleConfirmBuy = () => {
-    const qty = Number(confirmQty) || row.quantity;
-    const price = Number(confirmPrice) || row.buyPrice;
+    const pin = row as PinnedHaul;
+    const qty = Number(confirmQty) || pin.originalQuantity || row.quantity;
+    const price = Number(confirmPrice) || pin.originalBuyPrice || row.buyPrice;
     confirmBuy({ id: row.id, qty, price });
     setBuyDialogOpen(false);
   };
@@ -248,45 +257,46 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const hasLiveUpdates = pinnedWithLive && pinnedWithLive.liveProfit !== undefined;
   const buyerGone = !!(pinnedWithLive && pinnedWithLive.buyerGone);
   const supplyGone = !!(pinnedWithLive && pinnedWithLive.supplyGone);
-  const shortfall = !!(pinnedWithLive && pinnedWithLive.shortfall);
   const stale = !!(pinnedWithLive && pinnedWithLive.stale);
-  // A missing endpoint (no asks at source, or no bids at dest) zeroes the haul.
-  const endpointGone = buyerGone || supplyGone;
 
-  // Calculate if degraded
+  // Live income (re-optimized) vs the income captured at the moment of pinning.
   const liveProfit = pinnedWithLive?.liveProfit;
   const liveQuantity = pinnedWithLive?.liveQuantity;
-  const originalProfit = pinnedWithLive?.originalProfit ?? dispProfit;
-  const baselineProfitForComparison = isTransit ? dispProfit : originalProfit;
+  // The FIXED baseline: total income when the item was pinned. Every later reload
+  // compares against this (never against the previous reload), planning or transit.
+  const pinnedIncome = pinnedWithLive?.originalProfit ?? dispProfit;
 
-  const isDegraded = hasLiveUpdates && (
-    endpointGone ||
-    shortfall ||
-    stale ||
-    (liveProfit !== undefined && liveProfit < baselineProfitForComparison)
-  );
+  // ±3% of the pinned income counts as unchanged so reload jitter doesn't flicker
+  // the arrow.
+  const PROFIT_BAND = 0.03;
+  const currentIncome = hasLiveUpdates ? (liveProfit ?? 0) : undefined;
+  // Direction vs the pinned income: up (green) / down (orange) / zero (red).
+  const incomeZero = currentIncome !== undefined && currentIncome <= 0;
+  const incomeUp =
+    currentIncome !== undefined && !incomeZero && currentIncome > pinnedIncome * (1 + PROFIT_BAND);
+  const incomeDown =
+    currentIncome !== undefined && !incomeZero && currentIncome < pinnedIncome * (1 - PROFIT_BAND);
 
-  const degradedMessage = (() => {
-    if (!isDegraded) return '';
-    const title = buyerGone
-      ? 'Buyer Gone'
-      : supplyGone
-        ? 'Supply Gone'
-        : shortfall
-          ? 'Demand Reduced'
-          : stale
-            ? 'Orders Changed'
-            : 'Price Reduced';
-    const detail = buyerGone
-      ? 'Bids at the destination no longer exist.'
-      : supplyGone
-        ? 'Sell orders at the source no longer exist.'
-        : stale && !shortfall
-          ? 'The specific orders backing this haul changed — re-check before committing.'
-          : isTransit
-            ? `Live destination: ${formatNumber(liveQuantity ?? 0, 0)} units · Profit: ${formatIskMillions(liveProfit ?? 0)}`
-            : `Originally pinned profit: ${formatIskMillions(originalProfit)}`;
-    return `${title}: ${detail}`;
+  // 'zero' = income collapsed to nothing (red down-arrow); 'down' = reduced but
+  // still positive (orange down-arrow); 'up' = increased (green up-arrow).
+  const statusKind: 'zero' | 'down' | 'up' | null =
+    incomeZero ? 'zero' : incomeUp ? 'up' : incomeDown ? 'down' : null;
+
+  const statusMessage = (() => {
+    if (statusKind === null) return '';
+    const from = formatIskMillions(pinnedIncome);
+    const to = formatIskMillions(currentIncome ?? 0);
+    if (statusKind === 'zero') {
+      const why = buyerGone
+        ? ' (bids at the destination are gone)'
+        : supplyGone
+          ? ' (sell orders at the source are gone)'
+          : '';
+      return `Income dropped to zero: ${from} → ${to}${why}. You can still confirm the buy/price you actually paid.`;
+    }
+    const staleNote = stale ? 'Orders changed — ' : '';
+    const dir = statusKind === 'up' ? 'up' : 'down';
+    return `${staleNote}Income ${dir}: ${from} → ${to} (${formatNumber(liveQuantity ?? 0, 0)} units).`;
   })();
 
   const overpaying = isOverpaying(dispBuyPrice, row.marketPrice);
@@ -304,10 +314,10 @@ export const ArbitrageCard = memo(function ArbitrageCard({
 
   const getPinnedBorderColor = () => {
     if (!isPinnedMode) return undefined;
-    if (endpointGone) return 'error.main';
-    if (isDegraded) return 'warning.main';
-    if (hasLiveUpdates) return 'success.main';
-    return 'primary.main';
+    if (statusKind === 'zero') return 'error.main'; // red — income collapsed to 0
+    if (statusKind === 'up') return 'success.main'; // green — income increased
+    if (statusKind === 'down') return 'warning.main'; // orange — income decreased
+    return 'primary.main'; // unchanged / not yet revalidated
   };
 
   const getHighlightColor = (theme: any) => {
@@ -405,8 +415,8 @@ export const ArbitrageCard = memo(function ArbitrageCard({
             <Typography variant="caption" color="text.secondary">
               Expected Profit
             </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: endpointGone ? 'error.main' : 'primary.main' }}>
-              {endpointGone ? '0.00 ISK' : formatIskMillions(dispProfit)}
+            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: incomeZero ? 'error.main' : 'primary.main' }}>
+              {incomeZero ? '0.00 ISK' : formatIskMillions(dispProfit)}
             </Typography>
             <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
               {formatNumber(dispMarginPct, 1)}% margin
@@ -431,9 +441,16 @@ export const ArbitrageCard = memo(function ArbitrageCard({
               >
                 {row.itemName}
               </Typography>
-              {isDegraded && (
-                <Tooltip title={degradedMessage} arrow>
-                  <WarningAmberIcon sx={{ fontSize: 18, color: endpointGone ? 'error.main' : 'warning.main', cursor: 'help' }} />
+              {statusKind === 'up' && (
+                <Tooltip title={statusMessage} arrow>
+                  <ArrowUpwardIcon sx={{ fontSize: 18, color: 'success.main', cursor: 'help' }} />
+                </Tooltip>
+              )}
+              {(statusKind === 'down' || statusKind === 'zero') && (
+                <Tooltip title={statusMessage} arrow>
+                  <ArrowDownwardIcon
+                    sx={{ fontSize: 18, color: statusKind === 'zero' ? 'error.main' : 'warning.main', cursor: 'help' }}
+                  />
                 </Tooltip>
               )}
               <OpenMarketButton typeId={row.typeId} />

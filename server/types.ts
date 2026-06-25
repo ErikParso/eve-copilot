@@ -162,6 +162,11 @@ export interface PinnedHaulStatusRequest {
   status: 'planning' | 'transit';
   boughtPrice?: number;
   /**
+   * Per-unit cargo volume (m³). Used to re-optimize a planning haul to the
+   * max-income quantity that fits the requester's current cargo hold.
+   */
+  unitVolume?: number;
+  /**
    * The order IDs that backed this haul on the previous check (echoed back from
    * the last response). When present, the server flags `stale` if the live set
    * of backing orders has changed since — i.e. specific orders filled/cancelled.
