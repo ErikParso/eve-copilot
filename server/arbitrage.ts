@@ -387,11 +387,24 @@ export function materializeArbitrageItem(c: ArbitrageCandidate, kills: Map<numbe
  * both claim them — the first reserves the cheap depth, the next prices up the
  * ladder. Each haul also reports the live order IDs backing it, so identity-based
  * staleness (specific orders gone) can be flagged against the IDs last seen.
+ *
+ * A PLANNING haul is re-optimized to the max-income quantity that fits the
+ * requester's CURRENT cargo (`capacity` m³) and wallet (`balance` ISK) against
+ * the live book — same item/source/dest, only the orders and those settings
+ * change. Cargo/wallet are applied per-haul (as the grid scales each opportunity
+ * independently); the netting ledger only prevents two hauls double-claiming the
+ * same order. A TRANSIT haul is already bought, so it keeps its fixed quantity
+ * and only re-prices the sell side.
  */
-export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): PinnedHaulStatusResponse[] {
+export function resolvePinnedHaulsStatus(
+  hauls: PinnedHaulStatusRequest[],
+  opts: { capacity?: number; balance?: number; taxFraction?: number } = {},
+): PinnedHaulStatusResponse[] {
   const snap = getSnapshot();
   if (!snap) return [];
-  const tax = DEFAULT_SALES_TAX;
+  const tax = opts.taxFraction ?? DEFAULT_SALES_TAX;
+  const capacity = opts.capacity ?? Infinity;
+  const balance = opts.balance ?? Infinity;
 
   // Shared remaining-volume ledger across all hauls in this request (order id →
   // units left). Lazily seeded from the snapshot the first time an order is hit.
@@ -430,9 +443,15 @@ export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): Pinn
     const dstIds = new Set<number>();
 
     if (h.status === 'planning') {
+      // Max-income walk: keep taking profitable units until the marginal unit
+      // stops being profitable OR the cargo hold / wallet runs out. No fixed
+      // target — the quantity is re-derived from the current market + settings.
+      const uVol = h.unitVolume && h.unitVolume > 0 ? h.unitVolume : 0;
+      const cargoUnitCap = capacity === Infinity || uVol === 0 ? Infinity : Math.floor(capacity / uVol);
+      let walletRem = balance;
       let ai = 0;
       let bi = 0;
-      while (ai < asks.length && bi < bids.length && quantity < target) {
+      while (ai < asks.length && bi < bids.length) {
         const ask = asks[ai];
         const bid = bids[bi];
         if (bid.price * (1 - tax) <= ask.price) break; // marginal unit unprofitable
@@ -446,11 +465,16 @@ export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): Pinn
           bi++;
           continue;
         }
-        const batch = Math.min(askA, bidA, target - quantity);
+        const cargoRoom = cargoUnitCap === Infinity ? Infinity : cargoUnitCap - quantity;
+        if (cargoRoom <= 0) break; // hold full
+        const walletRoom = walletRem === Infinity ? Infinity : ask.price > 0 ? Math.floor(walletRem / ask.price) : Infinity;
+        if (walletRoom <= 0) break; // can't afford the next unit
+        const batch = Math.min(askA, bidA, cargoRoom, walletRoom);
         if (batch <= 0) break;
         quantity += batch;
         buyCost += batch * ask.price;
         sellRevenueGross += batch * bid.price;
+        if (walletRem !== Infinity) walletRem -= batch * ask.price;
         if (ladder.length < MAX_LADDER_RUNGS) ladder.push({ units: batch, buy: ask.price, sell: bid.price });
         srcIds.add(ask.id);
         dstIds.add(bid.id);
@@ -503,7 +527,9 @@ export function resolvePinnedHaulsStatus(hauls: PinnedHaulStatusRequest[]): Pinn
       sellPrice,
       profit,
       marginPct,
-      shortfall: quantity < target,
+      // Planning is re-optimized (no fixed target), so "shortfall" only applies
+      // to transit: cargo already bought that the live bids can't fully absorb.
+      shortfall: h.status === 'transit' && quantity < target,
       buyerGone: bids.length === 0,
       supplyGone: h.status === 'planning' && asks.length === 0,
       stale,
