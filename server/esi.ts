@@ -32,6 +32,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 // staying under it, not to hit it and wait for a reset.
 const MIN_INTERVAL_MS = 150; // floor ≈ 7 req/s when healthy
 const MAX_INTERVAL_MS = 3000; // safety-net ceiling if ever rate-limited (≈ 0.3 req/s)
+// Per-request ceiling. The crawler now fetches regions through ONE sequential
+// worker, so a single hung connection would stall the whole crawl (the old
+// parallel model masked this). Individual ESI page responses are sub-second in
+// practice, so this only ever fires on a genuinely stuck request — which then
+// surfaces as a retryable failure (withRetry → keep stale data), not a hang.
+const REQUEST_TIMEOUT_MS = 30_000;
 let intervalMs = MIN_INTERVAL_MS;
 let nextSlotAt = 0;
 let throttleLogged = false;
@@ -59,7 +65,10 @@ async function gatedFetch(target: string, extraHeaders?: Record<string, string>)
   const slot = Math.max(now, nextSlotAt);
   nextSlotAt = slot + intervalMs; // reserve this slot atomically (single-threaded)
   if (slot > now) await sleep(slot - now);
-  const res = await fetch(target, { headers: { Accept: 'application/json', ...extraHeaders } });
+  const res = await fetch(target, {
+    headers: { Accept: 'application/json', ...extraHeaders },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   noteRateResult(res.status);
   return res;
 }

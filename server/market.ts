@@ -4,13 +4,16 @@
 // ~5 min) and merge it.
 //
 // Crawl model: instead of one big all-region burst (which trips ESI's 429
-// connection limit and OOMs at the peak), a scheduler ticks every 20s and
-// refetches only the regions whose ESI cache has expired, a few per tick,
-// priority-ordered (hubs first). Each region is re-checked ~every 5 min via
-// per-page conditional requests (ETag) — unchanged pages cost a 304 with no
-// body. The global by-type index is rebuilt (throttled) only when some region
-// actually changed; the resolver/algorithm downstream is untouched, so once all
-// regions are loaded the output is identical to a full crawl.
+// connection limit and OOMs at the peak), a single continuous worker refetches
+// regions one at a time — pick the most-overdue region (hubs first), fetch it to
+// completion, commit, repeat; sleep until the next region expires when nothing's
+// due. One region in flight means each gets the FULL ESI request budget, so the
+// big hubs (Jita's 426 pages) finish in ~60s instead of starving for minutes
+// behind ~30 parallel fetches that split the ~7 req/s pipe. Each region is
+// re-checked ~every 5 min via per-page conditional requests (ETag) — unchanged
+// pages cost a 304 with no body. The global by-type index is rebuilt (throttled)
+// only when some region actually changed; the resolver/algorithm downstream is
+// untouched, so once all regions are loaded the output is identical to a full crawl.
 import { esiGet, esiGetPageConditional, mapWithConcurrency, EsiError, getEsiErrorStats, type ConditionalPage } from './esi.js';
 import { getType, getRegionName } from './sde.js';
 
@@ -80,16 +83,19 @@ interface Snapshot {
   regions: number;
 }
 
-const TICK_MS = 20_000; // how often the scheduler checks which regions are due
-const REGIONS_PER_TICK = 10; // regions dispatched per tick; real throttle is esi.ts's global gate
-const PAGE_CONCURRENCY = 8; // per-region page fan-out (further bounded by esi.ts's global gate)
+const WORKER_IDLE_SLEEP_MS = 5_000; // when no region is due, re-check (rebuild/watchdog) at least this often
+const PAGE_CONCURRENCY = 8; // per-region page fan-out (bounded by esi.ts's global rate limiter)
 const RESOLVE_THROTTLE_MS = 60_000; // once ready, rebuild the by-type index at most this often
+const WARMING_REBUILD_MS = 15_000; // while warming, rebuild at most this often (the worker commits regions back-to-back)
+const BACKLOG_LOG_MS = 30_000; // throttle the "N regions due" backlog log
 const FRESH_FALLBACK_MS = 300_000; // assume 5-min freshness when ESI sends no Expires
 const REFETCH_JITTER_MS = 45_000; // spread re-fetches so co-loaded regions desync (avoid bursts)
 const STALE_WARN_MS = 12 * 60_000; // warn if a loaded region hasn't refreshed in this long (≈2× window)
 const STALL_WARN_MS = 90_000; // warn if one region's fetch runs longer than this (likely hung)
 const EMPTY_REFRESH_MS = 30 * 60_000; // re-check market-less (404) regions rarely
 const ERROR_RETRY_MS = 60_000; // retry a failed region sooner than a full window
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // Trade hubs first: during contention (startup, or if we ever can't keep up) the
 // regions that carry ~all the arbitrage value get refreshed ahead of the long
@@ -263,9 +269,10 @@ async function fetchRegion(rc: RegionCache): Promise<boolean> {
     rc.pageCount = pageCount;
     rc.orderCount = orderCount;
     rc.lastModified = p1.lastModified;
-    // Spread re-fetches with a little jitter so regions loaded together (the hubs,
-    // in the first ticks) don't all come due in the same tick and re-fetch as one
-    // big synchronized burst that trips ESI's rate limit.
+    // Spread re-fetches with a little jitter so regions whose ESI caches expire
+    // together (they're roughly synchronized) don't all come due at the same
+    // instant and pile into one long back-to-back run; staggering them lets the
+    // worker interleave them and keeps each region nearer its 5-min target.
     rc.expiresAt = (p1.expiresAt ?? Date.now() + FRESH_FALLBACK_MS) + Math.floor(Math.random() * REFETCH_JITTER_MS);
     rc.fetchedAt = Date.now();
     rc.status = orderCount > 0 ? 'loaded' : 'empty';
@@ -374,12 +381,17 @@ function rebuildSnapshot(): void {
   );
 }
 
-/** Rebuild if something changed — eagerly while warming, throttled once ready. */
+/**
+ * Rebuild if something changed, throttled. The first build (no snapshot yet) runs
+ * immediately so the UI sees data ASAP; after that we coalesce — gently while
+ * warming (the worker commits regions back-to-back, so without this it would
+ * rebuild the whole growing index per region), and more lazily once ready.
+ */
 function maybeRebuild(): void {
   if (!booksDirty) return;
   const now = Date.now();
-  const warming = status !== 'ready';
-  if (snapshot && !warming && now - lastBuildAt < RESOLVE_THROTTLE_MS) return;
+  const throttle = status === 'ready' ? RESOLVE_THROTTLE_MS : WARMING_REBUILD_MS;
+  if (snapshot && now - lastBuildAt < throttle) return;
   booksDirty = false;
   lastBuildAt = now;
   rebuildSnapshot();
@@ -404,38 +416,75 @@ function priorityRank(rc: RegionCache): number {
   return PRIORITY_RANK.get(rc.regionId) ?? 1000;
 }
 
-/** One scheduler tick: commit any finished fetches, then dispatch the next due regions. */
-function tick(): void {
-  maybeRebuild();
-  const now = Date.now();
-  const allDue = [...regionCaches.values()]
+/** Due regions (ESI cache expired, not in flight), most-overdue first but hubs ahead of the tail. */
+function dueRegions(now: number): RegionCache[] {
+  return [...regionCaches.values()]
     .filter((rc) => !inFlight.has(rc.regionId) && now >= rc.expiresAt)
     .sort((a, b) => priorityRank(a) - priorityRank(b) || a.expiresAt - b.expiresAt);
-  const due = allDue.slice(0, REGIONS_PER_TICK);
+}
 
-  if (due.length > 0) {
-    // Surface a backlog: more regions due than we can dispatch this tick means the
-    // crawler is falling behind (slow fetches, rate-limit pauses, or too low a cap).
-    const backlog = allDue.length > REGIONS_PER_TICK ? ` ⚠ ${allDue.length} due (backlog ${allDue.length - REGIONS_PER_TICK})` : '';
-    const names = due.map((rc) => regionLabel(rc.regionId)).join(', ');
-    console.log(`[Market] Tick: refreshing ${due.length}${backlog} [${inFlight.size} in flight]: ${names}`);
+/** Soonest epoch-ms any region next comes due, or +∞ if none scheduled. */
+function soonestDueAt(): number {
+  let soonest = Infinity;
+  for (const rc of regionCaches.values()) {
+    if (!inFlight.has(rc.regionId) && rc.expiresAt < soonest) soonest = rc.expiresAt;
   }
+  return soonest;
+}
 
-  for (const rc of due) {
-    inFlight.add(rc.regionId);
-    inFlightSince.set(rc.regionId, Date.now());
-    void fetchRegion(rc)
-      .then((changed) => {
-        if (changed) booksDirty = true;
-      })
-      .catch((err) => console.error('[Market] fetchRegion crashed', err))
-      .finally(() => {
+let lastBacklogLogAt = 0;
+
+/**
+ * The single continuous crawl worker. Each pass: pick the most-overdue region
+ * (hubs first), fetch it to completion, commit, rebuild if needed. With only one
+ * region in flight it gets the full ~7 req/s, so a hub's hundreds of pages finish
+ * in ~60s rather than starving behind dozens of parallel fetches; the log reads as
+ * a clean sequence with no overlapping runs. When nothing is due, rebuild any
+ * pending change and sleep until the next region expires (capped, so the watchdog
+ * still runs). Never throws — a failed fetch keeps stale data (see fetchRegion) and
+ * the loop carries on; transient ESI outages become stale data, never a crash.
+ */
+async function runWorker(): Promise<void> {
+  for (;;) {
+    try {
+      const now = Date.now();
+      const due = dueRegions(now);
+
+      if (due.length === 0) {
+        maybeRebuild();
+        runHealthWatchdog(now);
+        const wait = Math.min(Math.max(soonestDueAt() - now, 0), WORKER_IDLE_SLEEP_MS);
+        await sleep(wait);
+        continue;
+      }
+
+      // Surface a backlog (throttled): many regions overdue at once means the worker
+      // is behind its 5-min window — normal during the synchronized expiry burst,
+      // worth noticing if it persists.
+      if (due.length > 1 && now - lastBacklogLogAt >= BACKLOG_LOG_MS) {
+        lastBacklogLogAt = now;
+        console.log(`[Market] ${due.length} regions due — refreshing most-overdue first (hubs prioritized).`);
+      }
+
+      const rc = due[0];
+      inFlight.add(rc.regionId);
+      inFlightSince.set(rc.regionId, Date.now());
+      try {
+        if (await fetchRegion(rc)) booksDirty = true;
+      } finally {
         inFlight.delete(rc.regionId);
         inFlightSince.delete(rc.regionId);
-      });
-  }
+      }
 
-  runHealthWatchdog(now);
+      maybeRebuild();
+      runHealthWatchdog(Date.now());
+    } catch (err) {
+      // fetchRegion swallows its own errors, so this is belt-and-braces: never let
+      // an unexpected throw kill the crawl loop.
+      console.error('[Market] worker loop error (continuing)', err);
+      await sleep(WORKER_IDLE_SLEEP_MS);
+    }
+  }
 }
 
 /**
@@ -470,7 +519,7 @@ function runHealthWatchdog(now: number): void {
   if (warned) lastHealthWarnAt = now;
 }
 
-/** Start the incremental market scheduler: load the region list, then tick forever. */
+/** Start the incremental market crawler: load the region list, then run the worker forever. */
 export async function startMarketScheduler(): Promise<void> {
   if (started) return;
   started = true;
@@ -489,9 +538,8 @@ export async function startMarketScheduler(): Promise<void> {
       lastError: null,
     });
   }
-  console.log(`[Market] Scheduler started for ${regionIds.length} regions (tick ${TICK_MS / 1000}s, ${REGIONS_PER_TICK} regions/tick).`);
-  tick();
-  setInterval(tick, TICK_MS).unref();
+  console.log(`[Market] Crawl worker started for ${regionIds.length} regions (sequential, most-overdue first; hubs prioritized).`);
+  void runWorker();
 }
 
 export interface MarketMeta {
