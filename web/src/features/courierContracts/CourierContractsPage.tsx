@@ -3,7 +3,6 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   Alert,
   Box,
-  LinearProgress,
   Stack,
   TextField,
   Typography,
@@ -79,16 +78,7 @@ function NumberPrefField({
   );
 }
 
-function ProgressBar() {
-  return (
-    <Box>
-      <Typography variant="body2" color="text.secondary" gutterBottom>
-        Loading courier contracts and arbitrage hauls…
-      </Typography>
-      <LinearProgress />
-    </Box>
-  );
-}
+
 
 export function CourierContractsPage() {
   const theme = useTheme();
@@ -222,8 +212,6 @@ export function CourierContractsPage() {
       {/* Pinned Hauls Section */}
 
       <Stack spacing={2}>
-        {loading && <ProgressBar />}
-
         {status === 'error' && <Alert severity="error">Could not load the data: {error}</Alert>}
 
         {warming && (
@@ -233,72 +221,75 @@ export function CourierContractsPage() {
           </Alert>
         )}
 
-        {status === 'success' && (
+        {/* Settings Panel is always shown immediately */}
+        <Paper
+          elevation={0}
+          variant="outlined"
+          sx={{
+            p: 2.5,
+            bgcolor: 'background.paper',
+            borderRadius: 2,
+            boxShadow: (theme) => theme.palette.mode === 'light' 
+              ? '0 2px 8px rgba(0,0,0,0.04)' 
+              : '0 2px 8px rgba(0,0,0,0.16)',
+          }}
+        >
+          <Box
+            sx={{
+              display: 'flex',
+              flexWrap: { xs: 'wrap' },
+              gap: 2,
+              alignItems: 'flex-start',
+            }}
+          >
+            <Box sx={{ flex: '1 1 140px', minWidth: 140 }}>
+              <NumberPrefField
+                label="Cargo capacity"
+                value={prefs.cargoM3}
+                unit="m³"
+                helperText="Your hold — hides oversized hauls."
+                onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
+              />
+            </Box>
+
+            <Box sx={{ flex: '1 1 180px', minWidth: 180 }}>
+              <RouteTypeSelect
+                value={prefs.routeType}
+                onChange={(routeType) => setPrefs({ ...prefs, routeType })}
+              />
+            </Box>
+
+            <Box sx={{ flex: { xs: '1 1 auto', sm: '2 0 440px' }, minWidth: { xs: 0, sm: 440 } }}>
+              <AttractivityWeightsControl />
+            </Box>
+          </Box>
+        </Paper>
+
+        {/* Available Opportunities Header (always visible as title, but dynamic count when loaded) */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            mt: 2,
+            mb: 1.5,
+          }}
+        >
+          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem', whiteSpace: 'nowrap' }}>
+            Available Opportunities
+          </Typography>
+          {!loading && status === 'success' && (
+            <Typography variant="body2" color="text.secondary">
+              {total > counts.shown
+                ? `Top ${counts.shown} of ${total.toLocaleString()} by attractivity`
+                : `${counts.shown} ${counts.shown === 1 ? 'opportunity' : 'opportunities'}`}
+            </Typography>
+          )}
+        </Box>
+
+        {(loading || status === 'success') && (
           <>
-            <Paper
-              elevation={0}
-              variant="outlined"
-              sx={{
-                p: 2.5,
-                bgcolor: 'background.paper',
-                borderRadius: 2,
-                boxShadow: (theme) => theme.palette.mode === 'light' 
-                  ? '0 2px 8px rgba(0,0,0,0.04)' 
-                  : '0 2px 8px rgba(0,0,0,0.16)',
-              }}
-            >
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexWrap: { xs: 'wrap' },
-                  gap: 2,
-                  alignItems: 'flex-start',
-                }}
-              >
-                <Box sx={{ flex: '1 1 140px', minWidth: 140 }}>
-                  <NumberPrefField
-                    label="Cargo capacity"
-                    value={prefs.cargoM3}
-                    unit="m³"
-                    helperText="Your hold — hides oversized hauls."
-                    onCommit={(cargoM3) => setPrefs({ ...prefs, cargoM3 })}
-                  />
-                </Box>
-
-                <Box sx={{ flex: '1 1 180px', minWidth: 180 }}>
-                  <RouteTypeSelect
-                    value={prefs.routeType}
-                    onChange={(routeType) => setPrefs({ ...prefs, routeType })}
-                  />
-                </Box>
-
-                <Box sx={{ flex: { xs: '1 1 auto', sm: '2 0 440px' }, minWidth: { xs: 0, sm: 440 } }}>
-                  <AttractivityWeightsControl />
-                </Box>
-              </Box>
-            </Paper>
-
-            {rows.length > 0 && (
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  mt: 2,
-                  mb: 1.5,
-                }}
-              >
-                <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem', whiteSpace: 'nowrap' }}>
-                  Available Opportunities
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {total > counts.shown
-                    ? `Top ${counts.shown} of ${total.toLocaleString()} by attractivity`
-                    : `${counts.shown} ${counts.shown === 1 ? 'opportunity' : 'opportunities'}`}
-                </Typography>
-              </Box>
-            )}
-
+            {/* Show chart if bubble chart FAB is toggled and rows exist */}
             {rows.length > 0 && (
               <>
                 <Slide direction="up" in={showChart}>
@@ -366,8 +357,8 @@ export function CourierContractsPage() {
               </>
             )}
 
-            {rows.length > 0 ? (
-              <CombinedGrid rows={sortedRows} highlightedKey={highlightedKey} />
+            {rows.length > 0 || loading ? (
+              <CombinedGrid rows={sortedRows} highlightedKey={highlightedKey} showSkeletons={loading} />
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Nothing matches. Widen the cargo / ISK / contract-type limits in Preferences.

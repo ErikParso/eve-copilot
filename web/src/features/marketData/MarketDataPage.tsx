@@ -9,6 +9,7 @@ import {
   LinearProgress,
   Stack,
   Typography,
+  Skeleton,
 } from '@mui/material';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 
@@ -96,26 +97,17 @@ export function MarketDataPage() {
     };
   }, []);
 
-  if (!data) {
-    if (failed) {
-      return (
-        <Alert severity="error">
-          Failed to connect to the backend server. Make sure the server is running.
-        </Alert>
-      );
-    }
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const regionsLoaded = data?.regionsLoaded ?? 0;
+  const regionsTotal = data?.regionsTotal ?? 0;
+  const orderCount = data?.orderCount ?? 0;
+  const status = data?.status ?? 'cold';
 
-  const { regionsLoaded, regionsTotal, orderCount, status } = data;
   const pct = regionsTotal > 0 ? Math.round((regionsLoaded / regionsTotal) * 100) : 0;
-  const withMarket = data.regions
-    .filter((r) => r.status !== 'empty')
-    .sort((a, b) => b.orderCount - a.orderCount);
+  const withMarket = data
+    ? data.regions
+        .filter((r) => r.status !== 'empty')
+        .sort((a, b) => b.orderCount - a.orderCount)
+    : [];
 
   return (
     <Stack spacing={3}>
@@ -128,124 +120,179 @@ export function MarketDataPage() {
         </Typography>
       </Box>
 
-      <Card
-        elevation={0}
-        variant="outlined"
-        sx={{
-          borderRadius: 2,
-          boxShadow: (theme) => theme.palette.mode === 'light' 
-            ? '0 2px 8px rgba(0,0,0,0.04)' 
-            : '0 2px 8px rgba(0,0,0,0.16)',
-        }}
-      >
-        <CardContent sx={{ p: { xs: 2, sm: 3 }, '&:last-child': { pb: { xs: 2, sm: 3 } } }}>
-          <Stack spacing={3}>
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: { xs: 'column', sm: 'row' },
-                alignItems: { xs: 'flex-start', sm: 'center' },
-                gap: 2,
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                {status !== 'ready' ? (
-                  <CircularProgress size={20} thickness={5} />
-                ) : (
-                  <FiberManualRecordIcon sx={{ fontSize: 18, color: 'success.main' }} />
-                )}
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  {status === 'ready' ? 'All regions loaded' : 'Synchronizing market data…'}
-                </Typography>
-              </Box>
+      {failed && (
+        <Alert severity="error">
+          Failed to connect to the backend server. Make sure the server is running.
+        </Alert>
+      )}
 
-              <Box sx={{ display: { xs: 'none', sm: 'block' }, flexGrow: 1 }} />
-
+      {!failed && (
+        <Card
+          elevation={0}
+          variant="outlined"
+          sx={{
+            borderRadius: 2,
+            boxShadow: (theme) => theme.palette.mode === 'light' 
+              ? '0 2px 8px rgba(0,0,0,0.04)' 
+              : '0 2px 8px rgba(0,0,0,0.16)',
+          }}
+        >
+          <CardContent sx={{ p: { xs: 2, sm: 3 }, '&:last-child': { pb: { xs: 2, sm: 3 } } }}>
+            <Stack spacing={3}>
               <Box
                 sx={{
                   display: 'flex',
-                  gap: 1,
-                  flexWrap: 'wrap',
-                  width: { xs: '100%', sm: 'auto' },
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  alignItems: { xs: 'flex-start', sm: 'center' },
+                  gap: 2,
                 }}
               >
-                <Chip
-                  label={`${regionsLoaded}/${regionsTotal} regions loaded`}
-                  color={status === 'ready' ? 'success' : 'primary'}
-                  variant="outlined"
-                  sx={{ flexGrow: { xs: 1, sm: 0 } }}
-                />
-                <Chip
-                  label={`${orderCount.toLocaleString()} total orders`}
-                  variant="outlined"
-                  sx={{ flexGrow: { xs: 1, sm: 0 } }}
-                />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  {data ? (
+                    status !== 'ready' ? (
+                      <CircularProgress size={20} thickness={5} />
+                    ) : (
+                      <FiberManualRecordIcon sx={{ fontSize: 18, color: 'success.main' }} />
+                    )
+                  ) : (
+                    <Skeleton variant="circular" width={20} height={20} />
+                  )}
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    {data ? (
+                      status === 'ready' ? 'All regions loaded' : 'Synchronizing market data…'
+                    ) : (
+                      <Skeleton variant="text" width={240} height={28} />
+                    )}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: { xs: 'none', sm: 'block' }, flexGrow: 1 }} />
+
+                <Box
+                  sx={{
+                    display: 'flex',
+                    gap: 1,
+                    flexWrap: 'wrap',
+                    width: { xs: '100%', sm: 'auto' },
+                  }}
+                >
+                  {data ? (
+                    <>
+                      <Chip
+                        label={`${regionsLoaded}/${regionsTotal} regions loaded`}
+                        color={status === 'ready' ? 'success' : 'primary'}
+                        variant="outlined"
+                        sx={{ flexGrow: { xs: 1, sm: 0 } }}
+                      />
+                      <Chip
+                        label={`${orderCount.toLocaleString()} total orders`}
+                        variant="outlined"
+                        sx={{ flexGrow: { xs: 1, sm: 0 } }}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Skeleton variant="rectangular" width={140} height={32} sx={{ borderRadius: 16 }} />
+                      <Skeleton variant="rectangular" width={140} height={32} sx={{ borderRadius: 16 }} />
+                    </>
+                  )}
+                </Box>
               </Box>
-            </Box>
 
-            {status !== 'ready' && (
-              <Box sx={{ width: '100%' }}>
-                <LinearProgress variant="determinate" value={pct} sx={{ height: 6, borderRadius: 3 }} />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, textAlign: 'right' }}>
-                  {pct}% Complete
-                </Typography>
-              </Box>
-            )}
+              {data && status !== 'ready' && (
+                <Box sx={{ width: '100%' }}>
+                  <LinearProgress variant="determinate" value={pct} sx={{ height: 6, borderRadius: 3 }} />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, textAlign: 'right' }}>
+                    {pct}% Complete
+                  </Typography>
+                </Box>
+              )}
 
-            <Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Each region's order book refreshes on ESI roughly every 5 minutes; the crawler re-checks them on a rolling
-                cycle. Regions with no active market are hidden.
-              </Typography>
-
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {withMarket.map((r) => (
-                  <Box
-                    key={r.regionId}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1.5,
-                      px: 1.5,
-                      py: 1,
-                      borderRadius: 1.5,
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      bgcolor: 'background.paper',
-                      flex: { xs: '1 1 100%', sm: '1 1 280px' },
-                      minWidth: 0,
-                      '&:hover': { bgcolor: 'action.hover' },
-                    }}
-                  >
-                    <FiberManualRecordIcon sx={{ fontSize: 10, color: STATUS_COLOR[r.status] }} />
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {r.name ?? `Region ${r.regionId}`}
-                    </Typography>
-                    <Box sx={{ flex: 1 }} />
-                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                      {r.status === 'loaded' ? (
-                        `${r.orderCount.toLocaleString()} orders · ${ageLabel(r.ageSeconds)}`
-                      ) : r.status === 'never' ? (
-                        'Not fetched'
-                      ) : (
-                        `Error: ${r.lastError ?? 'Failed'}`
-                      )}
-                    </Typography>
+              <Box>
+                {data ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Each region's order book refreshes on ESI roughly every 5 minutes; the crawler re-checks them on a rolling
+                    cycle. Regions with no active market are hidden.
+                  </Typography>
+                ) : (
+                  <Box sx={{ mb: 2 }}>
+                    <Skeleton variant="text" width="95%" height={20} />
+                    <Skeleton variant="text" width="65%" height={20} />
                   </Box>
-                ))}
+                )}
+
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {data ? (
+                    withMarket.map((r) => (
+                      <Box
+                        key={r.regionId}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1.5,
+                          px: 1.5,
+                          py: 1,
+                          borderRadius: 1.5,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          bgcolor: 'background.paper',
+                          flex: { xs: '1 1 100%', sm: '1 1 280px' },
+                          minWidth: 0,
+                          '&:hover': { bgcolor: 'action.hover' },
+                        }}
+                      >
+                        <FiberManualRecordIcon sx={{ fontSize: 10, color: STATUS_COLOR[r.status] }} />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {r.name ?? `Region ${r.regionId}`}
+                        </Typography>
+                        <Box sx={{ flex: 1 }} />
+                        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                          {r.status === 'loaded' ? (
+                            `${r.orderCount.toLocaleString()} orders · ${ageLabel(r.ageSeconds)}`
+                          ) : r.status === 'never' ? (
+                            'Not fetched'
+                          ) : (
+                            `Error: ${r.lastError ?? 'Failed'}`
+                          )}
+                        </Typography>
+                      </Box>
+                    ))
+                  ) : (
+                    Array.from({ length: 3 }).map((_, idx) => (
+                      <Box
+                        key={idx}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          px: 1.5,
+                          py: 1,
+                          borderRadius: 1.5,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          bgcolor: 'background.paper',
+                          flex: { xs: '1 1 100%', sm: '1 1 280px' },
+                          minWidth: 0,
+                          height: 38,
+                        }}
+                      >
+                        <Skeleton variant="rectangular" width="100%" height={16} sx={{ borderRadius: 0.5 }} />
+                      </Box>
+                    ))
+                  )}
+                </Box>
               </Box>
-            </Box>
-          </Stack>
-        </CardContent>
-      </Card>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
     </Stack>
   );
 }

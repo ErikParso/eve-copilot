@@ -79,11 +79,9 @@ export const haulingDataAtom = atom<HaulingData>({
  */
 export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const data = get(haulingDataAtom);
-  if (data.status !== 'success') return [];
-
   // Available rows arrive already filtered + scaled + scored from the server.
-  const courierRows = data.courier;
-  const arbRows = data.arbitrage;
+  const courierRows = data.status === 'success' ? data.courier : [];
+  const arbRows = data.status === 'success' ? data.arbitrage : [];
 
   const prefs = get(preferencesAtom);
   const origin = get(characterStatusAtom)?.systemId ?? null;
@@ -94,7 +92,7 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const liveCourierIds = new Set(data.courier.map((c) => c.id));
   const updatedPinnedCouriers = pinnedCouriers.map((c) => {
     const isSecured = c.status === 'secured';
-    const isUnavailable = c.status === 'planned' && !liveCourierIds.has(c.id);
+    const isUnavailable = c.status === 'planned' && data.status === 'success' && !liveCourierIds.has(c.id);
     let item = {
       ...c,
       unavailable: isUnavailable,
