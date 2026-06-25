@@ -79,9 +79,14 @@ export const haulingDataAtom = atom<HaulingData>({
  */
 export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const data = get(haulingDataAtom);
+  // Only render cards once we have a successful result. While loading (a user
+  // action cleared us to 'loading') the page shows a full skeleton grid INSTEAD
+  // of any cards — pinned items included — so nothing stale lingers next to the
+  // skeletons. Automatic reloads keep status 'success', so they never blank.
+  if (data.status !== 'success') return [];
   // Available rows arrive already filtered + scaled + scored from the server.
-  const courierRows = data.status === 'success' ? data.courier : [];
-  const arbRows = data.status === 'success' ? data.arbitrage : [];
+  const courierRows = data.courier;
+  const arbRows = data.arbitrage;
 
   const prefs = get(preferencesAtom);
   const origin = get(characterStatusAtom)?.systemId ?? null;
