@@ -119,8 +119,10 @@ export function useHaulingSearchController(): void {
   const store = useStore();
   const setData = useSetAtom(haulingDataAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
-  // Re-fetch triggers: anything that changes the server-side arbitrage result.
-  // (Weights are read at fetch time but are NOT a trigger — see haulingRowsAtom.)
+  // Re-fetch triggers split into two classes:
+  //  • USER actions (route type, cargo, tax, weights) → reload WITH skeletons.
+  //  • AUTOMATIC changes (current system, wallet) + the scheduled refresh →
+  //    reload SILENTLY (keep showing current cards, no skeletons).
   const prefs = useAtomValue(preferencesAtom);
   const routeType = prefs.routeType;
   const cargoM3 = prefs.cargoM3;
@@ -131,6 +133,9 @@ export function useHaulingSearchController(): void {
   // the FE no longer re-scores the list.
   const weights = useAtomValue(attractivityWeightsAtom);
   const abortRef = useRef<AbortController | null>(null);
+  // Skip the very first run of the automatic-trigger effect: the user-action
+  // effect already does the initial (skeleton) load on mount.
+  const autoMountedRef = useRef(false);
 
   const run = useCallback(async (isBackground = false): Promise<MarketMeta | null> => {
     abortRef.current?.abort();
@@ -287,6 +292,9 @@ export function useHaulingSearchController(): void {
     }
   }, [store, setData, updatePinnedStatuses]);
 
+  // USER-action triggers + the scheduled background refresh. The initial load
+  // and every user change show skeletons (isBg=false); the scheduled re-runs are
+  // silent (isBg=true).
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
@@ -302,5 +310,16 @@ export function useHaulingSearchController(): void {
       if (timer) clearTimeout(timer);
       abortRef.current?.abort();
     };
-  }, [run, routeType, origin, cargoM3, salesTaxPct, balance, weights.income, weights.totalJumps, weights.danger]);
+  }, [run, routeType, cargoM3, salesTaxPct, weights.income, weights.totalJumps, weights.danger]);
+
+  // AUTOMATIC triggers: current system / wallet changed (from the pollers).
+  // Reload silently so the grid + pinned cards update in place without flashing
+  // skeletons. Skip the mount run — the effect above already loaded once.
+  useEffect(() => {
+    if (!autoMountedRef.current) {
+      autoMountedRef.current = true;
+      return;
+    }
+    void run(true);
+  }, [run, origin, balance]);
 }

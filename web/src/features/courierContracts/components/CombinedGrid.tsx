@@ -14,12 +14,14 @@ export function CombinedGrid({
   rows,
   highlightedKey,
   showSkeletons = false,
+  skeletonCount = 8,
   hasMore = false,
   onShowMore,
 }: {
   rows: ResultCard[];
   highlightedKey: string | null;
   showSkeletons?: boolean;
+  skeletonCount?: number;
   hasMore?: boolean;
   onShowMore?: () => void;
 }) {
@@ -45,7 +47,7 @@ export function CombinedGrid({
           </Grid>
         ))}
         {showSkeletons &&
-          Array.from({ length: 3 }).map((_, idx) => (
+          Array.from({ length: skeletonCount }).map((_, idx) => (
             <Grid key={`skeleton-${idx}`} xs={12} sm={6} md={4} lg={3}>
               <OpportunityCardSkeleton />
             </Grid>
