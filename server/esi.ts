@@ -26,8 +26,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 // self-tuning, so the rate settles just under whatever this IP is allowed and
 // never forms a thundering herd. In-flight count is naturally bounded by
 // rate × latency (a few), so no separate concurrency gate is needed.
-const MIN_INTERVAL_MS = 120; // floor ≈ 8 req/s when healthy
-const MAX_INTERVAL_MS = 3000; // ceiling when heavily rate-limited (≈ 0.3 req/s)
+// Steady pace ≈ 7 req/s: comfortably above the ~5 req/s the workload needs (so it
+// keeps up), and far below the rate that actually trips ESI for this IP (the
+// server only broke at ~50 req/s bursts). The point is to AVOID the limit by
+// staying under it, not to hit it and wait for a reset.
+const MIN_INTERVAL_MS = 150; // floor ≈ 7 req/s when healthy
+const MAX_INTERVAL_MS = 3000; // safety-net ceiling if ever rate-limited (≈ 0.3 req/s)
 let intervalMs = MIN_INTERVAL_MS;
 let nextSlotAt = 0;
 let throttleLogged = false;
