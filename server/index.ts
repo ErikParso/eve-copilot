@@ -99,7 +99,7 @@ async function main() {
     void prewarmDeliveryRoutes();
   });
   void startMarketScheduler().catch((err) => console.error('Market scheduler failed to start', err));
-  console.log('Started incremental market scheduler (20s tick) + background resolve/route pre-warm.');
+  console.log('Started incremental market crawler (sequential worker) + background resolve/route pre-warm.');
 
   startPricesRefresh();
   console.log('Started reference-price refresh (refreshing every 60 min).');
