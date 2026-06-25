@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Box, Button } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
 import { ContractCard } from './ContractCard';
@@ -8,31 +7,27 @@ import type { ResultCard } from '../combined';
 
 /**
  * Nested MUI grid of mixed courier + arbitrage cards (denser now the page is
- * full-width: xs 12 / sm 6 / md 4 / lg 3). Show 12 cards initially, with a
- * "Show More" button at the bottom to load more.
+ * full-width: xs 12 / sm 6 / md 4 / lg 3). Renders the pre-paginated visible rows
+ * and shows a "Show More" button if hasMore is true.
  */
 export function CombinedGrid({
   rows,
   highlightedKey,
   showSkeletons = false,
+  hasMore = false,
+  onShowMore,
 }: {
   rows: ResultCard[];
   highlightedKey: string | null;
   showSkeletons?: boolean;
+  hasMore?: boolean;
+  onShowMore?: () => void;
 }) {
-  const [visibleCount, setVisibleCount] = useState(12);
-
-  const handleShowMore = () => {
-    setVisibleCount((prev) => prev + 12);
-  };
-
-  const hasMore = rows.length > visibleCount;
-
   return (
     <Box>
       {/* pt leaves room for the cards' pop-out attractivity bubbles */}
       <Grid container spacing={2} sx={{ pt: '10px' }}>
-        {rows.slice(0, visibleCount).map((card) => (
+        {rows.map((card) => (
           <Grid
             key={card.key}
             id={`card-${card.key}`}
@@ -57,11 +52,11 @@ export function CombinedGrid({
           ))}
       </Grid>
 
-      {hasMore && (
+      {hasMore && onShowMore && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
           <Button
             variant="outlined"
-            onClick={handleShowMore}
+            onClick={onShowMore}
             sx={{
               px: 4,
               py: 1,
@@ -76,4 +71,5 @@ export function CombinedGrid({
     </Box>
   );
 }
+
 

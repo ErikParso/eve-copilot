@@ -130,6 +130,12 @@ export function CourierContractsPage() {
   // Sort live by attractivity always
   const sortedRows = useMemo(() => sortCombined(rows, 'attractivity'), [rows]);
 
+  const [visibleCount, setVisibleCount] = useState(12);
+
+  const visibleRows = useMemo(() => {
+    return sortedRows.slice(0, visibleCount);
+  }, [sortedRows, visibleCount]);
+
   // Courier vs arbitrage split of the shown menu (pinned excluded — those are
   // your active hauls, not part of the server's "best N of total" pick).
   const counts = useMemo(() => {
@@ -256,7 +262,7 @@ export function CourierContractsPage() {
                       pt: 2.5, // leaves room for the overlapping FAB centered on the top border
                     })}
                   >
-                    <HaulingBubbleChart rows={sortedRows} onBubbleClick={handleBubbleClick} />
+                    <HaulingBubbleChart rows={visibleRows} onBubbleClick={handleBubbleClick} />
                   </Paper>
                 </Slide>
 
@@ -302,7 +308,13 @@ export function CourierContractsPage() {
             )}
 
             {rows.length > 0 || loading ? (
-              <CombinedGrid rows={sortedRows} highlightedKey={highlightedKey} showSkeletons={loading} />
+              <CombinedGrid
+                rows={visibleRows}
+                highlightedKey={highlightedKey}
+                showSkeletons={loading}
+                hasMore={sortedRows.length > visibleCount}
+                onShowMore={() => setVisibleCount((prev) => prev + 12)}
+              />
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Nothing matches. Widen the cargo / ISK / contract-type limits in Preferences.
