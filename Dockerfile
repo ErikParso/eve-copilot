@@ -19,7 +19,14 @@ RUN npm ci
 
 # Build the frontend using the Hugging Face secret mount
 RUN --mount=type=secret,id=VITE_EVE_CLIENT_ID,mode=0444,required=true \
-    VITE_EVE_CLIENT_ID=$(cat /run/secrets/VITE_EVE_CLIENT_ID) npm run build
+    --mount=type=secret,id=VITE_ADSENSE_CLIENT_ID,mode=0444,required=false \
+    --mount=type=secret,id=VITE_ADSENSE_DESKTOP_SLOT_ID,mode=0444,required=false \
+    --mount=type=secret,id=VITE_ADSENSE_MOBILE_SLOT_ID,mode=0444,required=false \
+    VITE_EVE_CLIENT_ID=$(cat /run/secrets/VITE_EVE_CLIENT_ID) \
+    VITE_ADSENSE_CLIENT_ID=$( [ -f /run/secrets/VITE_ADSENSE_CLIENT_ID ] && cat /run/secrets/VITE_ADSENSE_CLIENT_ID || echo "" ) \
+    VITE_ADSENSE_DESKTOP_SLOT_ID=$( [ -f /run/secrets/VITE_ADSENSE_DESKTOP_SLOT_ID ] && cat /run/secrets/VITE_ADSENSE_DESKTOP_SLOT_ID || echo "" ) \
+    VITE_ADSENSE_MOBILE_SLOT_ID=$( [ -f /run/secrets/VITE_ADSENSE_MOBILE_SLOT_ID ] && cat /run/secrets/VITE_ADSENSE_MOBILE_SLOT_ID || echo "" ) \
+    npm run build
 
 # Set up Nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
