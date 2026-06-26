@@ -166,6 +166,9 @@ export interface PinnedHaulStatusRequest {
    * max-income quantity that fits the requester's current cargo hold.
    */
   unitVolume?: number;
+  originalProfit?: number;
+  originalQuantity?: number;
+  originalBuyPrice?: number;
   /**
    * The order IDs that backed this haul on the previous check (echoed back from
    * the last response). When present, the server flags `stale` if the live set
@@ -194,4 +197,19 @@ export interface PinnedHaulStatusResponse {
   /** Live order IDs currently backing the haul — echo back next check for `stale`. */
   sourceOrderIds: number[];
   destOrderIds: number[];
+  
+  // Dynamic route & metrics resolved on back-end
+  approachRoute: RouteSystem[] | null;
+  deliveryRoute: RouteSystem[];
+  jumpsFromCurrent: number | null;
+  jumpsToDest: number | null;
+  totalJumps: number | null;
+  profitPerJump: number | null;
+  danger: number;
+  dangerSteps: string[];
+  
+  // Visual comparisons against original baseline
+  statusKind: 'up' | 'down' | 'zero' | null;
+  statusMessage: string;
+  borderColor: string;
 }

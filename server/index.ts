@@ -69,6 +69,9 @@ function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
     const status = e.status;
     const boughtPrice = e.boughtPrice !== undefined ? Number(e.boughtPrice) : undefined;
     const unitVolume = e.unitVolume !== undefined ? Number(e.unitVolume) : undefined;
+    const originalProfit = e.originalProfit !== undefined ? Number(e.originalProfit) : undefined;
+    const originalQuantity = e.originalQuantity !== undefined ? Number(e.originalQuantity) : undefined;
+    const originalBuyPrice = e.originalBuyPrice !== undefined ? Number(e.originalBuyPrice) : undefined;
 
     if (typeof id !== 'string') continue;
     if (![typeId, source, dest, quantity].every(Number.isFinite)) continue;
@@ -84,6 +87,9 @@ function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
       status: status as 'planning' | 'transit',
       boughtPrice,
       unitVolume: unitVolume !== undefined && Number.isFinite(unitVolume) ? unitVolume : undefined,
+      originalProfit: originalProfit !== undefined && Number.isFinite(originalProfit) ? originalProfit : undefined,
+      originalQuantity: originalQuantity !== undefined && Number.isFinite(originalQuantity) ? originalQuantity : undefined,
+      originalBuyPrice: originalBuyPrice !== undefined && Number.isFinite(originalBuyPrice) ? originalBuyPrice : undefined,
       // Echoed back from the previous response so the server can flag `stale`
       // (the specific orders backing the haul changed). Without these the stale
       // check is inert.
@@ -177,10 +183,16 @@ async function main() {
       });
       // Pins are re-optimized against the SAME cargo/wallet/tax as the grid, so a
       // pinned planning haul reflects exactly what the matching opportunity would.
+      const origin = parseOptionalNumber(req.query.origin);
+      const routeType = parseRouteType(req.query.routeType);
+      const kills = await getShipKills();
       const pinnedStatuses = resolvePinnedHaulsStatus(parsePinnedHaulsRequest(req.body?.hauls), {
         capacity,
         balance,
         taxFraction: taxPct / 100,
+        origin,
+        routeType,
+        kills,
       });
       res.json({ ...result, pinnedStatuses });
     } catch (err) {

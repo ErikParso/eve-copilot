@@ -18,6 +18,7 @@ import {
   pinnedCouriersAtom,
   pinnedRoutesAtom,
   updatePinnedStatusesAtom,
+  haulingRefreshTriggerAtom,
   type PinnedHaulStatus,
 } from '@/features/arbitrage/atoms';
 
@@ -119,6 +120,7 @@ export function useHaulingSearchController(): void {
   const store = useStore();
   const setData = useSetAtom(haulingDataAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
+  const refreshTrigger = useAtomValue(haulingRefreshTriggerAtom);
   // Re-fetch triggers split into two classes:
   //  • USER actions (route type, cargo, tax, weights) → reload WITH skeletons.
   //  • AUTOMATIC changes (current system, wallet) + the scheduled refresh →
@@ -185,6 +187,9 @@ export function useHaulingSearchController(): void {
           boughtPrice: h.boughtPrice,
           // Lets the server re-optimize a planning haul to the qty that fits cargo.
           unitVolume: h.unitVolume,
+          originalProfit: h.originalProfit,
+          originalQuantity: h.originalQuantity,
+          originalBuyPrice: h.originalBuyPrice,
           knownSourceOrderIds: h.sourceOrderIds,
           knownDestOrderIds: h.destOrderIds,
         }));
@@ -224,18 +229,11 @@ export function useHaulingSearchController(): void {
         updatePinnedStatuses(haulData.pinnedStatuses);
       }
 
-      // Fetch dynamic routes for in-transit/secured pinned items
-      const pinnedHauls = store.get(pinnedHaulsAtom);
+      // Fetch dynamic routes for secured pinned courier items (arbitrage routes are resolved on the server)
       const pinnedCouriers = store.get(pinnedCouriersAtom);
-      const transitHauls = pinnedHauls.filter((h) => h.status === 'transit');
       const securedCouriers = pinnedCouriers.filter((c) => c.status === 'secured');
 
       const queries: { id: string; destSys: number }[] = [];
-      transitHauls.forEach((h) => {
-        if (h.dest?.systemId) {
-          queries.push({ id: `a:${h.id}`, destSys: h.dest.systemId });
-        }
-      });
       securedCouriers.forEach((c) => {
         if (c.dropoff?.systemId) {
           queries.push({ id: `c:${c.id}`, destSys: c.dropoff.systemId });
@@ -321,5 +319,5 @@ export function useHaulingSearchController(): void {
       return;
     }
     void run(true);
-  }, [run, origin, balance]);
+  }, [run, origin, balance, refreshTrigger]);
 }
