@@ -19,6 +19,7 @@ const REFRESH_MS = 60 * 60 * 1000;
 let prices = new Map<number, number>();
 
 async function refresh(): Promise<void> {
+  if (process.env.OFFLINE === 'true') return;
   try {
     const rows = await esiGet<RawMarketPrice[]>('/markets/prices/');
     const next = new Map<number, number>();

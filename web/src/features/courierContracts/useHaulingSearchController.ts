@@ -121,6 +121,41 @@ export function useHaulingSearchController(): void {
   const setData = useSetAtom(haulingDataAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
   const refreshTrigger = useAtomValue(haulingRefreshTriggerAtom);
+  
+  const setWallet = useSetAtom(characterWalletAtom);
+  const setStatus = useSetAtom(characterStatusAtom);
+  const setRefreshTrigger = useSetAtom(haulingRefreshTriggerAtom);
+  const setPrefs = useSetAtom(preferencesAtom);
+
+  useEffect(() => {
+    (window as any).setTestWalletBalance = (balance: number | null) => {
+      setWallet(balance === null ? null : { balance, fetchedAt: Date.now() });
+    };
+    (window as any).setTestLocation = (systemId: number | null, systemName = 'Test System') => {
+      setStatus(systemId === null ? null : {
+        systemId,
+        systemName,
+        security: 1.0,
+        securityBand: 'high',
+        shipTypeName: 'Test Ship',
+        shipName: 'Test Ship',
+        online: true,
+        fetchedAt: Date.now()
+      });
+    };
+    (window as any).setTestSalesTax = (salesTaxPct: number | null) => {
+      setPrefs(prev => ({ ...prev, salesTaxPct: salesTaxPct ?? DEFAULT_SALES_TAX_PCT }));
+    };
+    (window as any).triggerHaulingRefresh = () => {
+      setRefreshTrigger(prev => prev + 1);
+    };
+    return () => {
+      delete (window as any).setTestWalletBalance;
+      delete (window as any).setTestLocation;
+      delete (window as any).setTestSalesTax;
+      delete (window as any).triggerHaulingRefresh;
+    };
+  }, [setWallet, setStatus, setRefreshTrigger, setPrefs]);
   // Re-fetch triggers split into two classes:
   //  • USER actions (route type, cargo, tax, weights) → reload WITH skeletons.
   //  • AUTOMATIC changes (current system, wallet) + the scheduled refresh →
