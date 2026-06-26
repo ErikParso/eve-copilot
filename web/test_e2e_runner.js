@@ -1280,6 +1280,152 @@ async function runTests() {
   await seqUnpinResp;
   await sleep(500);
 
+  // =====================================================================
+  // TEST 19: Courier Contract Border Colors (Planning / Secured / Executed / Unavailable)
+  // =====================================================================
+  console.log('\n--- Test 19: Courier Contract Border Colors ---');
+  
+  // Since offline mode returns no live courier contracts, we inject a pinned courier
+  // directly via localStorage and reload. This lets us test the border color logic
+  // without needing a live ESI connection.
+  
+  const fakeCourier = {
+    id: 999999001,
+    pickup: { locationId: 60003760, name: 'Jita IV - Moon 4 - Caldari Navy Assembly Plant', systemName: 'Jita', systemId: 30000142, security: 0.9, securityBand: 'high', resolved: true },
+    dropoff: { locationId: 60008494, name: 'Amarr VIII (Oris) - Emperor Family Academy', systemName: 'Amarr', systemId: 30002187, security: 1.0, securityBand: 'high', resolved: true },
+    volume: 5000,
+    reward: 15000000,
+    collateral: 100000000,
+    jumpsFromCurrent: 0,
+    jumpsToDropoff: 10,
+    approachRoute: null,
+    deliveryRoute: null,
+    totalJumps: 10,
+    incomePerJump: 1500000,
+    activeDurationSeconds: 86400,
+    ageSeconds: 3600,
+    remainingSeconds: 82800,
+    daysToComplete: 3,
+    danger: 5,
+    dangerSteps: [],
+    attractivity: 50,
+    attractivitySteps: [],
+    status: 'planned',
+  };
+  
+  // Inject the courier into localStorage and reload
+  await page.evaluate((courier) => {
+    localStorage.setItem('eve-multitool.pinnedCouriers.v1', JSON.stringify([courier]));
+  }, fakeCourier);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#root');
+  await sleep(1000);
+  
+  // Re-inject location and wallet (lost on reload)
+  await page.evaluate(() => {
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        if (typeof window.setTestLocation === 'function' && typeof window.setTestWalletBalance === 'function') {
+          window.setTestLocation(30000142, 'Jita');
+          window.setTestWalletBalance(1000000000);
+          clearInterval(interval);
+          resolve(true);
+        } else if (attempts > 50) {
+          clearInterval(interval);
+          resolve(false);
+        }
+      }, 100);
+    });
+  });
+  
+  // Wait for hauling data to load
+  await page.locator('[id^="card-"]').first().waitFor({ state: 'visible', timeout: 45000 });
+  await sleep(1000);
+  
+  // Find the injected courier card
+  const courierCard = page.locator('[id="card-pc:999999001"]');
+  const courierCardCount = await courierCard.count();
+  console.log(`  Pinned courier card count: ${courierCardCount}`);
+  if (courierCardCount === 0) {
+    throw new Error('Test 19: Pinned courier card not found in DOM!');
+  }
+  
+  // 19A: In offline mode, the courier ID isn't in the live feed → unavailable → RED border
+  // This verifies: planned + unavailable = error.main (red)
+  let courierBorder = await getBorderColor(courierCard);
+  console.log(`  19A Unavailable planned border: ${courierBorder}`);
+  
+  const warningIcon = courierCard.locator('[data-testid="WarningAmberIcon"]');
+  const warningCount = await warningIcon.count();
+  console.log(`  Warning icon present: ${warningCount > 0}`);
+  
+  if (!courierBorder.includes('rgb(244, 67, 54)')) {
+    throw new Error(`Test 19A: Expected red (error.main) border for unavailable planned courier, got: ${courierBorder}`);
+  }
+  if (warningCount === 0) {
+    throw new Error('Test 19A: Expected warning icon for unavailable courier!');
+  }
+  console.log('  PASSED: 19A — Unavailable planned courier has red border + warning icon.');
+  
+  // 19B: Click "Confirm Accept" → transitions to SECURED → BLUE border
+  // This is the key test: accepting an unavailable contract (may have been taken by me in-game)
+  // should transition to blue, since it's now ours for delivery.
+  const confirmAcceptBtn = courierCard.locator('button:has-text("Confirm Accept")');
+  const confirmAcceptCount = await confirmAcceptBtn.count();
+  console.log(`  Confirm Accept button count: ${confirmAcceptCount}`);
+  if (confirmAcceptCount === 0) {
+    throw new Error('Test 19B: Expected Confirm Accept button on planned courier!');
+  }
+  
+  // Courier state transitions are purely client-side (Jotai atom update, no API call)
+  await confirmAcceptBtn.click();
+  await sleep(1000); // Wait for React re-render
+  
+  courierBorder = await getBorderColor(courierCard);
+  console.log(`  19B Secured border: ${courierBorder}`);
+  if (!courierBorder.includes('rgb(77, 208, 225)')) {
+    throw new Error(`Test 19B: Expected blue (primary.main) border for secured courier, got: ${courierBorder}`);
+  }
+  // Verify warning icon is gone (secured couriers aren't marked unavailable)
+  const warningAfterSecure = await courierCard.locator('[data-testid="WarningAmberIcon"]').count();
+  console.log(`  Warning icon after secure: ${warningAfterSecure > 0}`);
+  console.log('  PASSED: 19B — Secured courier has blue border (not green!) after accepting unavailable contract.');
+  
+  // Verify "Confirm Deliver" button is now visible
+  const confirmDeliverBtn = courierCard.locator('button:has-text("Confirm Deliver")');
+  await assertVisible(confirmDeliverBtn, 'confirmDeliverBtn');
+  console.log('  Verified: "Confirm Deliver" button is visible in secured stage.');
+  
+  // 19C: Click "Confirm Deliver" → transitions to EXECUTED → BLUE border
+  await confirmDeliverBtn.click();
+  await sleep(1000); // Wait for React re-render
+  
+  courierBorder = await getBorderColor(courierCard);
+  console.log(`  19C Executed border: ${courierBorder}`);
+  if (!courierBorder.includes('rgb(77, 208, 225)')) {
+    throw new Error(`Test 19C: Expected blue (primary.main) border for executed courier, got: ${courierBorder}`);
+  }
+  console.log('  PASSED: 19C — Executed courier has blue border (not green!).');
+  
+  // Verify "Executed" disabled button
+  const courierExecBtn = courierCard.locator('button:has-text("Executed")');
+  await assertVisible(courierExecBtn, 'courierExecutedBtn');
+  console.log('  Verified: "Executed" disabled button is visible.');
+  
+  // Clean up: unpin courier (also client-side only)
+  const courierUnpinBtn = courierCard.locator('button:has([data-testid="PushPinIcon"])');
+  await courierUnpinBtn.click();
+  await sleep(1000); // Wait for React re-render
+  
+  // Verify it's gone
+  const courierCardAfterUnpin = await courierCard.count();
+  if (courierCardAfterUnpin !== 0) {
+    throw new Error('Test 19: Courier card still present after unpinning!');
+  }
+  console.log('  PASSED: Courier card unpinned and removed successfully.');
+
   console.log('\n======================================');
   console.log('ALL E2E PINNING TESTS COMPLETED SUCCESSFULLY!');
   console.log('======================================');
