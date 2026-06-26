@@ -1,3 +1,5 @@
+BUGS:
+
 1. courier contracts, when in transit stage are green 
 green border should indicate the income increase, accepting courier contract does not increase income. should stay neutral color (blue).
 
@@ -13,3 +15,9 @@ in transfering stage - the items are already bought. User wants to sell them in 
 // update the pinning.md
 // make tests, confirm its working
 // update pinning_e2e_tests.md
+
+IMPROVEMENTS: 
+
+1. When pinned card is updated, it should pulse for a while
+2. on pinned card with neutral profit state show dash icon (blue) with tooltip (income of this opportunity dindt change yet).
+3. move the icon on more prominent place (next to income value)
