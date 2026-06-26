@@ -34,6 +34,7 @@ import type {
   ScaledArbitrageItem,
   PinnedHaulStatusRequest,
   PinnedHaulStatusResponse,
+  RouteSystem,
 } from './types.js';
 
 // Sales tax assumed when scoring profit (mid Accounting skill). Baked in, not a
@@ -399,7 +400,14 @@ export function materializeArbitrageItem(c: ArbitrageCandidate, kills: Map<numbe
  */
 export function resolvePinnedHaulsStatus(
   hauls: PinnedHaulStatusRequest[],
-  opts: { capacity?: number; balance?: number; taxFraction?: number } = {},
+  opts: {
+    capacity?: number;
+    balance?: number;
+    taxFraction?: number;
+    origin: number | null;
+    routeType: 'safest' | 'shortest';
+    kills: Map<number, number>;
+  },
 ): PinnedHaulStatusResponse[] {
   const snap = getSnapshot();
   if (!snap) return [];
@@ -427,12 +435,13 @@ export function resolvePinnedHaulsStatus(
     const asks = book?.sells.find((s) => s.station === h.source)?.orders ?? [];
     // Range-aware destination depth: every bid reachable from the drop station,
     // not just those physically resting at it.
-    const dropSystem = book?.buys.find((b) => b.station === h.dest)?.system ?? getStation(h.dest)?.systemId ?? null;
+    const destSystem = book?.buys.find((b) => b.station === h.dest)?.system ?? getStation(h.dest)?.systemId ?? null;
+    const buySystem = book?.sells.find((s) => s.station === h.source)?.system ?? getStation(h.source)?.systemId ?? null;
     // Pool from the full buy book (not the MAX_DESTS perf-guard slice): there are
     // only a handful of pinned hauls, so accuracy beats the bound here.
     const bids =
-      book && dropSystem !== null
-        ? poolBidsForDrop(book.buys, { station: h.dest, system: dropSystem, best: -Infinity, orders: [] })
+      book && destSystem !== null
+        ? poolBidsForDrop(book.buys, { station: h.dest, system: destSystem, best: -Infinity, orders: [] })
         : [];
 
     const target = h.quantity;
@@ -521,6 +530,82 @@ export function resolvePinnedHaulsStatus(
     const dstChanged = h.knownDestOrderIds !== undefined && !sameIds(h.knownDestOrderIds, destOrderIds);
     const stale = srcChanged || dstChanged;
 
+    const buyerGone = bids.length === 0;
+    const supplyGone = h.status === 'planning' && asks.length === 0;
+
+    // --- Recalculate routes and metrics on the back-end ---
+    let approachRoute: RouteSystem[] | null = null;
+    let deliveryRoute: RouteSystem[] = [];
+    let jumpsFromCurrent: number | null = null;
+    let jumpsToDest: number | null = null;
+    let totalJumps: number | null = null;
+    let profitPerJump: number | null = null;
+    let danger = 0;
+    let dangerSteps: string[] = [];
+
+    if (buySystem !== null && destSystem !== null) {
+      let approachIds: number[] | null = null;
+      let deliveryIds: number[] | null = null;
+
+      if (h.status === 'planning') {
+        deliveryIds = getRoute(buySystem, destSystem, opts.routeType);
+        if (opts.origin !== null) {
+          approachIds = getRoute(opts.origin, buySystem, opts.routeType);
+        }
+      } else {
+        // transit: items are in ship, route starts from current origin -> dest
+        if (opts.origin !== null) {
+          deliveryIds = getRoute(opts.origin, destSystem, opts.routeType);
+        } else {
+          deliveryIds = getRoute(buySystem, destSystem, opts.routeType);
+        }
+      }
+
+      if (deliveryIds) {
+        deliveryRoute = toRouteSystems(deliveryIds, opts.kills);
+        jumpsToDest = Math.max(0, deliveryIds.length - 1);
+      }
+      if (approachIds) {
+        approachRoute = toRouteSystems(approachIds, opts.kills);
+        jumpsFromCurrent = Math.max(0, approachIds.length - 1);
+      }
+
+      totalJumps = (jumpsFromCurrent ?? 0) + (jumpsToDest ?? 0);
+      profitPerJump = totalJumps > 0 ? profit / totalJumps : null;
+
+      const dangerRoute = approachIds ? [...approachIds, ...(deliveryIds ? deliveryIds.slice(1) : [])] : (deliveryIds ?? []);
+      const { index, steps } = dangerForSystems(dangerRoute, opts.kills);
+      danger = index;
+      dangerSteps = steps;
+    }
+
+    // --- Visual comparisons against baseline ---
+    const baselineIncome = h.originalProfit !== undefined ? h.originalProfit : profit;
+    let statusKind: 'up' | 'down' | 'zero' | null = null;
+    let borderColor = 'primary.main';
+    let statusMessage = '';
+
+    if (profit <= 0) {
+      statusKind = 'zero';
+      borderColor = 'error.main';
+      const why = buyerGone
+        ? ' (bids at the destination are gone)'
+        : supplyGone
+          ? ' (sell orders at the source are gone)'
+          : '';
+      statusMessage = `Income dropped to zero: ${formatIskMillions(baselineIncome)} → ${formatIskMillions(profit)}${why}. You can still confirm the buy/price you actually paid.`;
+    } else if (profit > baselineIncome * 1.03) {
+      statusKind = 'up';
+      borderColor = 'success.main';
+      const staleNote = stale ? 'Orders changed — ' : '';
+      statusMessage = `${staleNote}Income up: ${formatIskMillions(baselineIncome)} → ${formatIskMillions(profit)} (${formatNumber(quantity, 0)} units).`;
+    } else if (profit < baselineIncome * 0.97) {
+      statusKind = 'down';
+      borderColor = 'warning.main';
+      const staleNote = stale ? 'Orders changed — ' : '';
+      statusMessage = `${staleNote}Income down: ${formatIskMillions(baselineIncome)} → ${formatIskMillions(profit)} (${formatNumber(quantity, 0)} units).`;
+    }
+
     out.push({
       id: h.id,
       quantity,
@@ -531,16 +616,44 @@ export function resolvePinnedHaulsStatus(
       // Planning is re-optimized (no fixed target), so "shortfall" only applies
       // to transit: cargo already bought that the live bids can't fully absorb.
       shortfall: h.status === 'transit' && quantity < target,
-      buyerGone: bids.length === 0,
-      supplyGone: h.status === 'planning' && asks.length === 0,
+      buyerGone,
+      supplyGone,
       stale,
       ladder,
       sourceOrderIds,
       destOrderIds,
+      approachRoute,
+      deliveryRoute,
+      jumpsFromCurrent,
+      jumpsToDest,
+      totalJumps,
+      profitPerJump,
+      danger,
+      dangerSteps,
+      statusKind,
+      statusMessage,
+      borderColor,
     });
   }
 
   return out;
+}
+
+function formatNumber(value: number, maxFractionDigits = 2): string {
+  if (!Number.isFinite(value)) return '—';
+  const negative = value < 0;
+  const abs = Math.abs(value);
+  const factor = 10 ** maxFractionDigits;
+  const rounded = Math.round(abs * factor) / factor;
+  const [intPart, fracPart] = rounded.toFixed(maxFractionDigits).split('.');
+  const groupedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const trimmedFrac = fracPart ? fracPart.replace(/0+$/, '') : '';
+  const body = trimmedFrac ? `${groupedInt}.${trimmedFrac}` : groupedInt;
+  return negative ? `-${body}` : body;
+}
+
+function formatIskMillions(value: number): string {
+  return `${formatNumber(value / 1_000_000, 2)} M ISK`;
 }
 
 /** Order-id set equality (order-independent). */

@@ -26,13 +26,6 @@ export interface PinnedHaul extends ArbitrageItem {
   boughtQuantity?: number;
   boughtPrice?: number;
   
-  // Live values returned from endpoint check
-  liveQuantity?: number;
-  liveBuyPrice?: number;
-  liveSellPrice?: number;
-  liveProfit?: number;
-  liveMarginPct?: number;
-  liveLadder?: ArbitrageRung[];
   buyerGone?: boolean;
   /** No asks left at the source (supply gone; planning hauls only). */
   supplyGone?: boolean;
@@ -42,6 +35,11 @@ export interface PinnedHaul extends ArbitrageItem {
   /** Live order IDs backing the haul — echoed back so the server can flag `stale`. */
   sourceOrderIds?: number[];
   destOrderIds?: number[];
+
+  // Visual status and style compared to baseline (pre-computed on server)
+  statusKind?: 'up' | 'down' | 'zero' | null;
+  statusMessage?: string;
+  borderColor?: string;
 }
 
 export interface PinnedCourier extends CourierRow {
@@ -50,6 +48,7 @@ export interface PinnedCourier extends CourierRow {
 }
 
 export const pinnedHaulsAtom = atomWithStorage<PinnedHaul[]>('eve-multitool.pinnedHauls.v1', []);
+export const haulingRefreshTriggerAtom = atom(0);
 export const pinnedCouriersAtom = atomWithStorage<PinnedCourier[]>('eve-multitool.pinnedCouriers.v1', []);
 
 export const pinCourierAtom = atom(null, (get, set, item: CourierRow) => {
@@ -129,6 +128,7 @@ export const pinHaulAtom = atom(null, (get, set, item: ArbitrageItem) => {
     originalBuyPrice: item.buyPrice,
   };
   set(pinnedHaulsAtom, [...current, pinned]);
+  set(haulingRefreshTriggerAtom, (prev) => prev + 1);
 });
 
 /**
@@ -136,6 +136,7 @@ export const pinHaulAtom = atom(null, (get, set, item: ArbitrageItem) => {
  */
 export const unpinHaulAtom = atom(null, (_get, set, id: string) => {
   set(pinnedHaulsAtom, (prev) => prev.filter((h) => h.id !== id));
+  set(haulingRefreshTriggerAtom, (prev) => prev + 1);
 });
 
 /**
@@ -150,17 +151,22 @@ export const confirmBuyHaulAtom = atom(null, (_get, set, p: { id: string; qty: n
             status: 'transit',
             boughtQuantity: p.qty,
             boughtPrice: p.price,
+            quantity: p.qty,
+            buyPrice: p.price,
+            buyCost: p.qty * p.price,
             profit: h.profit * (p.qty / h.quantity), // fallback estimation until next sync
           }
         : h
     )
   );
+  set(haulingRefreshTriggerAtom, (prev) => prev + 1);
 });
 
 export const executeHaulAtom = atom(null, (_get, set, id: string) => {
   set(pinnedHaulsAtom, (prev) =>
     prev.map((h) => (h.id === id ? { ...h, status: 'executed' } : h))
   );
+  set(haulingRefreshTriggerAtom, (prev) => prev + 1);
 });
 
 export const redirectHaulAtom = atom(
@@ -177,8 +183,6 @@ export const redirectHaulAtom = atom(
           sellPrice: p.newSellPrice,
           profit: p.newProfit,
           originalProfit: p.newProfit,
-          liveProfit: undefined,
-          liveQuantity: undefined,
           buyerGone: undefined,
           supplyGone: undefined,
           shortfall: undefined,
@@ -186,6 +190,7 @@ export const redirectHaulAtom = atom(
         };
       })
     );
+    set(haulingRefreshTriggerAtom, (prev) => prev + 1);
   }
 );
 
@@ -206,6 +211,21 @@ export interface PinnedHaulStatus {
   ladder: ArbitrageRung[];
   sourceOrderIds: number[];
   destOrderIds: number[];
+
+  // Dynamic route & metrics resolved on back-end
+  approachRoute: RouteSystem[] | null;
+  deliveryRoute: RouteSystem[] | null;
+  jumpsFromCurrent: number | null;
+  jumpsToDest: number | null;
+  totalJumps: number | null;
+  profitPerJump: number | null;
+  danger: number | null;
+  dangerSteps: string[];
+  
+  // Visual comparisons against original baseline
+  statusKind: 'up' | 'down' | 'zero' | null;
+  statusMessage: string;
+  borderColor: string;
 }
 
 export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: PinnedHaulStatus[]) => {
@@ -214,36 +234,41 @@ export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: PinnedH
     prev.map((h) => {
       const live = map.get(h.id);
       if (!live) return h;
-      // Common live fields tracked for every status.
-      const common = {
-        liveQuantity: live.quantity,
-        liveBuyPrice: live.buyPrice,
-        liveSellPrice: live.sellPrice,
-        liveProfit: live.profit,
-        liveMarginPct: live.marginPct,
-        liveLadder: live.ladder,
+      
+      return {
+        ...h,
+        // Sync live flags
         shortfall: live.shortfall,
         buyerGone: live.buyerGone,
         supplyGone: live.supplyGone,
         stale: live.stale,
         sourceOrderIds: live.sourceOrderIds,
         destOrderIds: live.destOrderIds,
+        
+        // Sync economics (calculated correctly by server for both planning and transit)
+        quantity: live.quantity,
+        buyPrice: live.buyPrice,
+        sellPrice: live.sellPrice,
+        profit: live.profit,
+        marginPct: live.marginPct,
+        ladder: live.ladder,
+        buyCost: live.quantity * live.buyPrice,
+        
+        // Sync routes & metrics (recalculated dynamically by server)
+        approachRoute: live.approachRoute,
+        deliveryRoute: live.deliveryRoute,
+        jumpsFromCurrent: live.jumpsFromCurrent,
+        jumpsToDest: live.jumpsToDest,
+        totalJumps: live.totalJumps,
+        profitPerJump: live.profitPerJump,
+        danger: live.danger,
+        dangerSteps: live.dangerSteps,
+        
+        // Sync comparisons & visual styles
+        statusKind: live.statusKind,
+        statusMessage: live.statusMessage,
+        borderColor: live.borderColor,
       };
-      // While planning, the live values ARE the displayed economics; in transit
-      // the pinned (bought) economics stand and live values are advisory only.
-      if (h.status === 'planning') {
-        return {
-          ...h,
-          ...common,
-          quantity: live.quantity,
-          buyPrice: live.buyPrice,
-          sellPrice: live.sellPrice,
-          profit: live.profit,
-          marginPct: live.marginPct,
-          ladder: live.ladder,
-        };
-      }
-      return { ...h, ...common };
     })
   );
 });

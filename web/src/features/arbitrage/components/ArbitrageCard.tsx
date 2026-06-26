@@ -250,64 +250,20 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const isPinnedMode = 'status' in row;
   const haulStatus = isPinnedMode ? (row as PinnedHaul).status : null;
   const isTransit = haulStatus === 'transit';
-  const boughtQty = isTransit ? (row as PinnedHaul).boughtQuantity ?? row.quantity : row.quantity;
-  const boughtPrice = isTransit ? (row as PinnedHaul).boughtPrice ?? row.buyPrice : row.buyPrice;
   
   // Baseline stats to display
-  const dispQty = isTransit ? boughtQty : row.quantity;
-  const dispBuyPrice = isTransit ? boughtPrice : ('buyPrice' in row ? row.buyPrice : 0);
+  const dispQty = row.quantity;
+  const dispBuyPrice = 'buyPrice' in row ? row.buyPrice : 0;
   const dispSellPrice = row.sellPrice;
-  const dispBuyCost = isTransit ? boughtQty * boughtPrice : row.buyCost;
+  const dispBuyCost = row.buyCost ?? (dispQty * dispBuyPrice);
   const dispProfit = row.profit;
   const dispMarginPct = row.marginPct;
   const dispVolume = dispQty * row.unitVolume;
 
-  // Live updates check (only relevant in Pinned Mode)
   const pinnedWithLive = isPinnedMode ? (row as PinnedHaul) : null;
-  const hasLiveUpdates = pinnedWithLive && pinnedWithLive.liveProfit !== undefined;
-  const buyerGone = !!(pinnedWithLive && pinnedWithLive.buyerGone);
-  const supplyGone = !!(pinnedWithLive && pinnedWithLive.supplyGone);
-  const stale = !!(pinnedWithLive && pinnedWithLive.stale);
-
-  // Live income (re-optimized) vs the income captured at the moment of pinning.
-  const liveProfit = pinnedWithLive?.liveProfit;
-  const liveQuantity = pinnedWithLive?.liveQuantity;
-  // The FIXED baseline: total income when the item was pinned. Every later reload
-  // compares against this (never against the previous reload), planning or transit.
-  const pinnedIncome = pinnedWithLive?.originalProfit ?? dispProfit;
-
-  // ±3% of the pinned income counts as unchanged so reload jitter doesn't flicker
-  // the arrow.
-  const PROFIT_BAND = 0.03;
-  const currentIncome = hasLiveUpdates ? (liveProfit ?? 0) : undefined;
-  // Direction vs the pinned income: up (green) / down (orange) / zero (red).
-  const incomeZero = currentIncome !== undefined && currentIncome <= 0;
-  const incomeUp =
-    currentIncome !== undefined && !incomeZero && currentIncome > pinnedIncome * (1 + PROFIT_BAND);
-  const incomeDown =
-    currentIncome !== undefined && !incomeZero && currentIncome < pinnedIncome * (1 - PROFIT_BAND);
-
-  // 'zero' = income collapsed to nothing (red down-arrow); 'down' = reduced but
-  // still positive (orange down-arrow); 'up' = increased (green up-arrow).
-  const statusKind: 'zero' | 'down' | 'up' | null =
-    incomeZero ? 'zero' : incomeUp ? 'up' : incomeDown ? 'down' : null;
-
-  const statusMessage = (() => {
-    if (statusKind === null) return '';
-    const from = formatIskMillions(pinnedIncome);
-    const to = formatIskMillions(currentIncome ?? 0);
-    if (statusKind === 'zero') {
-      const why = buyerGone
-        ? ' (bids at the destination are gone)'
-        : supplyGone
-          ? ' (sell orders at the source are gone)'
-          : '';
-      return `Income dropped to zero: ${from} → ${to}${why}. You can still confirm the buy/price you actually paid.`;
-    }
-    const staleNote = stale ? 'Orders changed — ' : '';
-    const dir = statusKind === 'up' ? 'up' : 'down';
-    return `${staleNote}Income ${dir}: ${from} → ${to} (${formatNumber(liveQuantity ?? 0, 0)} units).`;
-  })();
+  const statusKind = pinnedWithLive?.statusKind ?? null;
+  const statusMessage = pinnedWithLive?.statusMessage ?? '';
+  const incomeZero = statusKind === 'zero';
 
   const overpaying = isOverpaying(dispBuyPrice, row.marketPrice);
   const overValue =
@@ -324,10 +280,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
 
   const getPinnedBorderColor = () => {
     if (!isPinnedMode) return undefined;
-    if (statusKind === 'zero') return 'error.main'; // red — income collapsed to 0
-    if (statusKind === 'up') return 'success.main'; // green — income increased
-    if (statusKind === 'down') return 'warning.main'; // orange — income decreased
-    return 'primary.main'; // unchanged / not yet revalidated
+    return pinnedWithLive?.borderColor ?? 'primary.main';
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
