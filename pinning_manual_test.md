@@ -3,7 +3,7 @@ BUGS:
 1. courier contracts, when in transit stage are green 
 green border should indicate the income increase, accepting courier contract does not increase income. should stay neutral color (blue).
 
-2. confirming buy with much higher price results in negative income , but i see income 0 on card, even when tooltip says "Income dropped to zero: 1.8 M ISK → -12.2 M ISK. You can still confirm the buy/price you actually paid." (this can probably also be caused by demand change in transit state)
+2. confirming buy with much higher price results in negative income , but i see income 0 on card, even when tooltip says "Income dropped to zero: 1.8 M ISK → -12.2 M ISK. You can still confirm the buy/price you actually paid." (this can probably also be caused by demand change in transit state, and also margin is wrong 4.5% which is tax?)
 income 0 indicates player can get rid of items without lose but reality is he will lose 12mil. This is misleading, in transit state it should show negative value and not cap at 0.
 further explanation:
 in planning stage - update algorhitm caps at 0, no matching orders producing income = 0 amount and 0 income. This is valid there is no opportunity with income user can unpin this item.
