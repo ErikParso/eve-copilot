@@ -9,7 +9,7 @@ import { getEnrichedHauling } from './hauling.js';
 import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
-import { getShipKills } from './kills.js';
+import { getShipKills, setTestKills, clearTestKills } from './kills.js';
 import type { PinnedHaulStatusRequest } from './types.js';
 
 // Last-resort backstop: a stray rejected promise or thrown error in any
@@ -107,18 +107,33 @@ async function main() {
     `SDE loaded: ${meta.stations} stations, ${meta.systems} systems, ${meta.jumps} systems with jumps, ${meta.types} market types.`,
   );
 
-  startContractsRefresh();
-  console.log('Started contracts crawl (refreshing every 10 min).');
-
-  // After each (throttled) index rebuild, re-resolve opportunities and pre-warm
-  // delivery-leg routes in the background — off the request path — so requests
-  // never pay the cold graph searches synchronously. prewarmDeliveryRoutes()
-  // calls getOpportunities() internally, so this is also the resolve trigger.
-  onMarketRefresh(() => {
+  if (process.env.OFFLINE === 'true') {
+    console.log('OFFLINE mode enabled: loading market-snapshot.json fixture...');
+    const fs = await import('fs');
+    const fileURLToPath = (await import('url')).fileURLToPath;
+    const fixturePath = fileURLToPath(new URL('./fixtures/market-snapshot.json', import.meta.url));
+    const raw = fs.readFileSync(fixturePath, 'utf8');
+    const { loadSnapshot } = await import('./market.js');
+    loadSnapshot(JSON.parse(raw));
+    console.log('Offline snapshot loaded successfully.');
+    
+    // Also run initial route pre-warm on offline load
+    const { prewarmDeliveryRoutes } = await import('./arbitrage.js');
     void prewarmDeliveryRoutes();
-  });
-  void startMarketScheduler().catch((err) => console.error('Market scheduler failed to start', err));
-  console.log('Started incremental market crawler (sequential worker) + background resolve/route pre-warm.');
+  } else {
+    startContractsRefresh();
+    console.log('Started contracts crawl (refreshing every 10 min).');
+
+    // After each (throttled) index rebuild, re-resolve opportunities and pre-warm
+    // delivery-leg routes in the background — off the request path — so requests
+    // never pay the cold graph searches synchronously. prewarmDeliveryRoutes()
+    // calls getOpportunities() internally, so this is also the resolve trigger.
+    onMarketRefresh(() => {
+      void prewarmDeliveryRoutes();
+    });
+    void startMarketScheduler().catch((err) => console.error('Market scheduler failed to start', err));
+    console.log('Started incremental market crawler (sequential worker) + background resolve/route pre-warm.');
+  }
 
   startPricesRefresh();
   console.log('Started reference-price refresh (refreshing every 60 min).');
@@ -146,6 +161,132 @@ async function main() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
+  });
+
+  // Test mutation route for E2E browser tests
+  app.post('/api/test/mutate-market', async (req, res) => {
+    try {
+      const { typeId, action, stationId, price, quantity, orderIds } = req.body;
+      const { getSnapshot, loadSnapshot } = await import('./market.js');
+      const snap = getSnapshot();
+
+      if (action === 'reset') {
+        const fs = await import('fs');
+        const fileURLToPath = (await import('url')).fileURLToPath;
+        const fixturePath = fileURLToPath(new URL('./fixtures/market-snapshot.json', import.meta.url));
+        const raw = fs.readFileSync(fixturePath, 'utf8');
+        loadSnapshot(JSON.parse(raw));
+        
+        const { prewarmDeliveryRoutes } = await import('./arbitrage.js');
+        await prewarmDeliveryRoutes();
+        
+        return res.json({ ok: true });
+      }
+
+      if (!snap) {
+        return res.status(400).json({ error: 'No live snapshot to mutate' });
+      }
+
+      const newByType = new Map(snap.byType);
+      const book = newByType.get(typeId);
+      if (!book) {
+        return res.status(404).json({ error: `Type ${typeId} not found in snapshot` });
+      }
+
+      // Clone book structure
+      const newBook = {
+        ...book,
+        sells: book.sells.map(s => ({ ...s, orders: s.orders.map(o => ({ ...o })) })),
+        buys: book.buys.map(b => ({ ...b, orders: b.orders.map(o => ({ ...o })) })),
+      };
+
+      if (action === 'change_sell_price') {
+        const sellSide = newBook.sells.find(s => s.station === stationId);
+        if (sellSide) {
+          sellSide.orders.forEach(o => {
+            o.price = price;
+          });
+        }
+      } else if (action === 'reduce_sell_volume') {
+        const sellSide = newBook.sells.find(s => s.station === stationId);
+        if (sellSide) {
+          sellSide.orders.forEach(o => {
+            o.volume = Math.min(o.volume, quantity);
+          });
+        }
+      } else if (action === 'remove_sells') {
+        newBook.sells = newBook.sells.filter(s => s.station !== stationId);
+      } else if (action === 'change_buy_price') {
+        const buySide = newBook.buys.find(b => b.station === stationId);
+        if (buySide) {
+          buySide.orders.forEach(o => {
+            o.price = price;
+          });
+        }
+      } else if (action === 'reduce_buy_volume') {
+        const buySide = newBook.buys.find(b => b.station === stationId);
+        if (buySide) {
+          buySide.orders.forEach(o => {
+            o.volume = Math.min(o.volume, quantity);
+          });
+        }
+      } else if (action === 'remove_buys') {
+        newBook.buys = newBook.buys.filter(b => b.station !== stationId);
+      } else if (action === 'change_order_ids') {
+        const sellSide = newBook.sells.find(s => s.station === stationId);
+        if (sellSide) {
+          sellSide.orders.forEach((o, i) => {
+            o.id = (orderIds && orderIds[i]) ?? (o.id + 1000000);
+          });
+        }
+        const buySide = newBook.buys.find(b => b.station === stationId);
+        if (buySide) {
+          buySide.orders.forEach((o, i) => {
+            o.id = (orderIds && orderIds[i]) ?? (o.id + 1000000);
+          });
+        }
+      }
+
+      newByType.set(typeId, newBook);
+      loadSnapshot({
+        builtAt: snap.builtAt,
+        lastModifiedAt: snap.lastModifiedAt,
+        orderCount: snap.orderCount,
+        regions: snap.regions,
+        byType: [...newByType.entries()],
+      });
+
+      const { prewarmDeliveryRoutes } = await import('./arbitrage.js');
+      await prewarmDeliveryRoutes();
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Market mutation failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Mutation error' });
+    }
+  });
+
+  // Test kills injection route for E2E browser tests (danger testing)
+  app.post('/api/test/mutate-kills', (req, res) => {
+    try {
+      const { action, kills: killsData } = req.body;
+      if (action === 'reset') {
+        clearTestKills();
+        return res.json({ ok: true });
+      }
+      if (action === 'set' && killsData && typeof killsData === 'object') {
+        const killsMap = new Map<number, number>();
+        for (const [systemId, count] of Object.entries(killsData)) {
+          killsMap.set(Number(systemId), Number(count));
+        }
+        setTestKills(killsMap);
+        return res.json({ ok: true });
+      }
+      return res.status(400).json({ error: 'Invalid action. Use "set" with kills data or "reset".' });
+    } catch (err) {
+      console.error('Kills mutation failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Mutation error' });
+    }
   });
 
   // Per-region market-data freshness, for the UI panel. Cheap — poll every few sec.

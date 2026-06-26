@@ -180,6 +180,9 @@ export async function getEnrichedContracts(
   type: RouteType,
   origin: number | null,
 ): Promise<ContractsResponse> {
+  if (process.env.OFFLINE === 'true') {
+    return { contracts: [], lastModifiedAt: Date.now(), total: 0 };
+  }
   if (!raw) await refresh();
   if (!raw) return { contracts: [], lastModifiedAt: null, total: 0 };
 
