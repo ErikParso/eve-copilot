@@ -1,7 +1,9 @@
 BUGS:
 
-1. courier contracts, when in transit stage are green 
+1. pinned courier contracts, when in transit stage, or planning are for some reason green.  
 green border should indicate the income increase, accepting courier contract does not increase income. should stay neutral color (blue).
+possible colors for courier contract borders: blue - available, red - taken/not available.
+note: when red taken, i still can accept (may have been taken by me in game). after accepting such contract it will be blue (available for delivery).
 
 2. confirming buy with much higher price results in negative income , but i see income 0 on card, even when tooltip says "Income dropped to zero: 1.8 M ISK → -12.2 M ISK. You can still confirm the buy/price you actually paid." (this can probably also be caused by demand change in transit state, and also margin is wrong 4.5% which is tax?)
 income 0 indicates player can get rid of items without lose but reality is he will lose 12mil. This is misleading, in transit state it should show negative value and not cap at 0.
