@@ -96,8 +96,11 @@ export const ContractCard = memo(function ContractCard({
 
   const getPinnedBorderColor = () => {
     if (!isPinned) return undefined;
-    if (row.unavailable) return 'error.main'; // Red if unavailable (taken by someone else)
-    return 'success.main'; // Green if fresh or secured
+    // After accepting (secured/executed), the contract is ours — always blue
+    if (row.status === 'secured' || row.status === 'executed') return 'primary.main';
+    // In planning stage: red if taken by someone else, blue if available
+    if (row.unavailable) return 'error.main';
+    return 'primary.main'; // Available — neutral blue (no income change to signal)
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
