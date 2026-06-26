@@ -11,5 +11,5 @@ in transfering stage - the items are already bought. User wants to sell them in 
 
 // fix
 // update the pinning.md
-// update pinning_e2e_tests.md 
 // make tests, confirm its working
+// update pinning_e2e_tests.md
