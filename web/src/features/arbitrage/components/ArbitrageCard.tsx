@@ -263,7 +263,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const pinnedWithLive = isPinnedMode ? (row as PinnedHaul) : null;
   const statusKind = pinnedWithLive?.statusKind ?? null;
   const statusMessage = pinnedWithLive?.statusMessage ?? '';
-  const incomeZero = statusKind === 'zero';
+
 
   const overpaying = isOverpaying(dispBuyPrice, row.marketPrice);
   const overValue =
@@ -386,10 +386,10 @@ export const ArbitrageCard = memo(function ArbitrageCard({
               sx={{
                 fontWeight: 700,
                 lineHeight: 1.2,
-                color: incomeZero || (isSell && dispProfit <= 0) ? 'error.main' : 'primary.main',
+                color: dispProfit <= 0 ? 'error.main' : 'primary.main',
               }}
             >
-              {incomeZero ? '0.00 ISK' : formatIskMillions(dispProfit)}
+              {formatIskMillions(dispProfit)}
             </Typography>
             <Typography variant="caption" color={isSell && dispMarginPct < 0 ? 'error.main' : 'success.main'} sx={{ fontWeight: 600 }}>
               {formatNumber(dispMarginPct, 1)}% margin
