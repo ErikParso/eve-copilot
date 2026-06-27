@@ -1,10 +1,11 @@
-import { useState, memo, type ReactNode } from 'react';
+import { useState, useRef, useEffect, memo, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Box, Card, CardContent, Divider, Stack, Tooltip, Typography, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, alpha } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import SegmentIcon from '@mui/icons-material/Segment';
+import RemoveIcon from '@mui/icons-material/Remove';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -183,6 +184,24 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const pinnedItem = pinnedHauls.find((h) => h.id === row.id);
   const isPinned = !!pinnedItem;
   
+  // Pulse the card border when the server returns a changed profit value.
+  const prevProfitRef = useRef<number | undefined>(undefined);
+  const [isPulsing, setIsPulsing] = useState(false);
+  const profit = row.profit;
+  useEffect(() => {
+    if (prevProfitRef.current !== undefined && prevProfitRef.current !== profit) {
+      setIsPulsing(true);
+      const timer = setTimeout(() => setIsPulsing(false), 4000);
+      return () => clearTimeout(timer);
+    }
+    prevProfitRef.current = profit;
+  }, [profit]);
+  // Also update ref when pulse fires (the effect above returns early on the
+  // first render, so subsequent changes need the ref updated here).
+  useEffect(() => {
+    prevProfitRef.current = profit;
+  });
+
   // Dialog state
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [sellModalOpen, setSellModalOpen] = useState(false);
@@ -333,7 +352,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
               },
             },
           },
-          animation: isHighlighted ? 'highlightPulse 0.5s ease-in-out 4 alternate' : undefined,
+          animation: (isHighlighted || isPulsing) ? 'highlightPulse 0.5s ease-in-out 4 alternate' : undefined,
           transition: 'box-shadow 0.6s ease-out',
         }}
       >
@@ -424,6 +443,11 @@ export const ArbitrageCard = memo(function ArbitrageCard({
                   <ArrowDownwardIcon
                     sx={{ fontSize: 18, color: statusKind === 'zero' ? 'error.main' : 'warning.main', cursor: 'help' }}
                   />
+                </Tooltip>
+              )}
+              {isPinnedMode && statusKind === null && (
+                <Tooltip title="Income of this opportunity didn't change yet" arrow>
+                  <RemoveIcon sx={{ fontSize: 18, color: 'primary.main', cursor: 'help' }} />
                 </Tooltip>
               )}
               <OpenMarketButton typeId={row.typeId} />
