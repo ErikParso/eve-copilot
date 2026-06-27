@@ -1,0 +1,5 @@
+User-agent: *
+
+Allow: /
+
+Sitemap: https://eve-online-copilot.hf.space/sitemap.xml
