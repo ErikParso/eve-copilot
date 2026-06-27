@@ -593,7 +593,11 @@ export function resolvePinnedHaulsStatus(
         : supplyGone
           ? ' (sell orders at the source are gone)'
           : '';
-      statusMessage = `Income dropped to zero: ${formatIskMillions(baselineIncome)} → ${formatIskMillions(profit)}${why}. You can still confirm the buy/price you actually paid.`;
+      if (h.status === 'transit') {
+        statusMessage = `Income is negative: ${formatIskMillions(baselineIncome)} → ${formatIskMillions(profit)}${why}. You can sell at a loss or find an alternative destination.`;
+      } else {
+        statusMessage = `Income dropped to zero: ${formatIskMillions(baselineIncome)} → ${formatIskMillions(profit)}${why}. You can still confirm the buy/price you actually paid.`;
+      }
     } else if (profit > baselineIncome * 1.03) {
       statusKind = 'up';
       borderColor = 'success.main';
