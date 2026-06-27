@@ -415,22 +415,21 @@ export function resolvePinnedHaulsStatus(
   const capacity = opts.capacity ?? Infinity;
   const balance = opts.balance ?? Infinity;
 
-  // Shared remaining-volume ledger across all hauls in this request (order id →
-  // units left). Lazily seeded from the snapshot the first time an order is hit.
-  const remaining = new Map<number, number>();
-  const remOf = (o: Order): number => {
-    let v = remaining.get(o.id);
-    if (v === undefined) {
-      v = o.volume;
-      remaining.set(o.id, v);
-    }
-    return v;
-  };
-  const consume = (o: Order, n: number) => remaining.set(o.id, remOf(o) - n);
-
   const out: PinnedHaulStatusResponse[] = [];
 
   for (const h of hauls) {
+    // Per-haul remaining-volume ledger — each pinned haul evaluates the order
+    // book independently so pins don't consume each other's orders.
+    const remaining = new Map<number, number>();
+    const remOf = (o: Order): number => {
+      let v = remaining.get(o.id);
+      if (v === undefined) {
+        v = o.volume;
+        remaining.set(o.id, v);
+      }
+      return v;
+    };
+    const consume = (o: Order, n: number) => remaining.set(o.id, remOf(o) - n);
     const book = snap.byType.get(h.typeId);
     const asks = book?.sells.find((s) => s.station === h.source)?.orders ?? [];
     // Range-aware destination depth: every bid reachable from the drop station,
