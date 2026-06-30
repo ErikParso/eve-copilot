@@ -20,7 +20,7 @@ import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import { getType, getStation, getSystem, getRegion, securityBand } from './sde.js';
 import { dangerForSystems } from './danger.js';
 import { getSnapshot, regionPriorityRank, type TypeBook } from './market.js';
-import { poolBidsForDrop, DEFAULT_SALES_TAX, type CandidateParams } from './arbitrage.js';
+import { poolBidsForDrop, DEFAULT_SALES_TAX, MIN_PROFIT, type CandidateParams } from './arbitrage.js';
 import { scoreAttractivity, type AttractivityWeights } from './arbitrageScore.js';
 import type { ContractEndpoint, PublicContract } from './types.js';
 import type {
@@ -76,6 +76,8 @@ let pendingQueue: number[] = [];
 const pendingSet = new Set<number>();
 /** Bumped whenever the cache changes, so opportunities recompute. */
 let contentsVersion = 0;
+/** When the contract set was last reconciled against a crawl (epoch ms), or null. */
+let lastReconcileAt: number | null = null;
 
 function regionRankOf(c: PublicContract): number {
   const systemId = getStation(c.start_location_id)?.systemId ?? null;
@@ -124,6 +126,7 @@ function reconcile(): void {
   pendingQueue.push(...toQueue);
 
   contentsVersion++;
+  lastReconcileAt = Date.now();
   console.log(
     `[Packages] Reconciled: ${meta.size} live sell contracts, ${contents.size} cached, ` +
       `${pendingQueue.length} queued (+${toQueue.length} new, −${evicted} evicted).`,
@@ -282,7 +285,14 @@ function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpp
   const best = bestDropForLines(lines, snap.byType);
   if (!best || best.sellValue <= 0) return null;
 
+  // Net-profit floor, identical to arbitrage's MIN_PROFIT: a package's "income" is
+  // its NET profit (gross sale value after tax, minus the fixed price), so this
+  // drops both negative- and low-income bundles from the discovery menu. Pinned
+  // packages bypass discovery (revalidated via resolvePinnedPackagesStatus), so a
+  // transit haul you already bought still shows a negative income if the market moved.
   const profit = best.sellValue * (1 - tax) - c.price;
+  if (profit < MIN_PROFIT) return null;
+
   return {
     id: String(c.contract_id),
     contractId: c.contract_id,
@@ -324,6 +334,45 @@ function getPackageOpportunities(): PackageOpportunity[] {
   oppsSnapshotAt = snap.builtAt;
   oppsContentsVersion = contentsVersion;
   return opportunities;
+}
+
+/** Processing stats for the Market Data tab's sell-contract panel. */
+export interface PackagesFreshness {
+  /** Worker started (live crawl) vs not (OFFLINE / pre-start). */
+  workerRunning: boolean;
+  /** Live sell contracts in the latest crawl set. */
+  liveContracts: number;
+  /** Contracts whose contents have been fetched (cached). */
+  cached: number;
+  /** Cached contracts that are sellable bundles (the rest are want-to-buy / skipped). */
+  sellable: number;
+  /** Cached contracts classified as not-a-sell (want-to-buy, empty, 404). */
+  skipped: number;
+  /** Contracts still queued for a contents fetch. */
+  pending: number;
+  /** Profitable bundles in the last computed opportunity set. */
+  opportunities: number;
+  /** When the contract set was last reconciled against a crawl (epoch ms). */
+  lastReconcileAt: number | null;
+}
+
+export function getPackagesFreshness(): PackagesFreshness {
+  let sellable = 0;
+  let skipped = 0;
+  for (const entry of contents.values()) {
+    if (entry === 'skip') skipped++;
+    else sellable++;
+  }
+  return {
+    workerRunning: workerStarted,
+    liveContracts: meta.size,
+    cached: contents.size,
+    sellable,
+    skipped,
+    pending: pendingQueue.length,
+    opportunities: opportunities.length,
+    lastReconcileAt,
+  };
 }
 
 // --- Per-request candidates (filter + route + jumps/danger) ------------------

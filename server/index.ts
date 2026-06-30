@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { loadSde } from './sde.js';
 import { startContractsRefresh } from './contracts.js';
-import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDestinations } from './packages.js';
+import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDestinations, getPackagesFreshness } from './packages.js';
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
 import { resolvePinnedHaulsStatus, resolveSellDestinations, prewarmDeliveryRoutes } from './arbitrage.js';
@@ -411,6 +411,12 @@ async function main() {
   // Per-region market-data freshness, for the UI panel. Cheap — poll every few sec.
   app.get('/api/market/freshness', (_req, res) => {
     res.json(getMarketFreshness());
+  });
+
+  // Sell-contract (package) processing stats, for the Market Data tab's bundle
+  // panel. Cheap — poll every few sec.
+  app.get('/api/packages/freshness', (_req, res) => {
+    res.json(getPackagesFreshness());
   });
 
 

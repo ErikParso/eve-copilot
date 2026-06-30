@@ -15,7 +15,7 @@ import packageBg from '@/assets/card-package.png';
 import { LocationCell } from '@/features/courierContracts/components/LocationCell';
 import { AttractivityCell } from '@/features/courierContracts/components/AttractivityCell';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';
-import { OpenMarketButton } from '@/features/arbitrage/components/OpenMarketButton';
+import { OpenContractButton } from '@/features/courierContracts/components/OpenContractButton';
 import { WaypointButton } from '@/features/arbitrage/components/WaypointButton';
 import type { ContractEndpoint } from '@/features/courierContracts/types';
 import type { PackageRow } from '../types';
@@ -259,6 +259,9 @@ export const PackageCard = memo(function PackageCard({
                   <RemoveIcon sx={{ fontSize: 18, color: 'primary.main', cursor: 'help' }} />
                 </Tooltip>
               )}
+              {/* A package is bought as an item_exchange contract, so the inline
+                  action opens the contract window (not a single item's market). */}
+              {!isSell && row.contractId > 0 && <OpenContractButton contractId={row.contractId} />}
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <Typography variant="caption" color="text.secondary">
@@ -299,16 +302,6 @@ export const PackageCard = memo(function PackageCard({
               color={soldUnits < totalUnits ? 'warning.main' : undefined}
             />
           </Stack>
-
-          {/* Open the first item's market (a convenience; full list in the tooltip). */}
-          {!isPinnedMode && !isSell && row.contents[0] && (
-            <Box sx={{ pt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Typography variant="caption" color="text.secondary">
-                Open market:
-              </Typography>
-              <OpenMarketButton typeId={row.contents[0].typeId} />
-            </Box>
-          )}
 
           {/* Pinned action buttons */}
           {isPinnedMode && (

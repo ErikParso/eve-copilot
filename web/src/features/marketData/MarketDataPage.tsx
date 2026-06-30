@@ -12,6 +12,7 @@ import {
   Skeleton,
 } from '@mui/material';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
+import { PackagesProcessingPanel } from './PackagesProcessingPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const POLL_MS = 5000;
@@ -293,6 +294,8 @@ export function MarketDataPage() {
           </CardContent>
         </Card>
       )}
+
+      {!failed && <PackagesProcessingPanel />}
     </Stack>
   );
 }
