@@ -4,7 +4,6 @@ import {
   Checkbox,
   Chip,
   FormControl,
-  FormHelperText,
   InputLabel,
   ListItemText,
   MenuItem,
