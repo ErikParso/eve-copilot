@@ -9,6 +9,7 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import { BreakdownModal } from '@/components/BreakdownModal';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import arbitrageBg from '@/assets/card-arbitrage.jpg';
 import { LocationCell } from '@/features/courierContracts/components/LocationCell';
@@ -127,38 +128,6 @@ function getDisplayRungs(row: ArbitrageRow): DisplayRung[] {
   return displayRungs;
 }
 
-const RungBreakdownTooltip = ({ rungs }: { rungs: DisplayRung[] }) => {
-  return (
-    <Box sx={{ p: 0.5 }}>
-      <Typography
-        variant="subtitle2"
-        sx={{
-          fontWeight: 700,
-          mb: 1,
-          borderBottom: '1px solid rgba(255,255,255,0.2)',
-          pb: 0.5,
-        }}
-      >
-        Order Depth Breakdown
-      </Typography>
-      <Stack spacing={0.75}>
-        {rungs.map((r, i) => (
-          <Box key={i} sx={{ display: 'flex', gap: 2, justifyContent: 'space-between' }}>
-            <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-              {formatNumber(r.units, 0)} units
-            </Typography>
-            <Typography variant="caption" sx={{ color: 'warning.light', fontFamily: 'monospace' }}>
-              Buy: {formatIsk(r.buy)}
-            </Typography>
-            <Typography variant="caption" sx={{ color: 'success.light', fontFamily: 'monospace' }}>
-              Sell: {formatIsk(r.sell)}
-            </Typography>
-          </Box>
-        ))}
-      </Stack>
-    </Box>
-  );
-};
 
 /** One arbitrage opportunity rendered as a card for the results grid. */
 export const ArbitrageCard = memo(function ArbitrageCard({
@@ -205,6 +174,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   // Dialog state
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [sellModalOpen, setSellModalOpen] = useState(false);
+  const [depthModalOpen, setDepthModalOpen] = useState(false);
   const [confirmQty, setConfirmQty] = useState(String(row.quantity));
   const [confirmPrice, setConfirmPrice] = useState(String(row.buyPrice));
   const [confirmTotal, setConfirmTotal] = useState(String((row.quantity * row.buyPrice) / 1_000_000));
@@ -295,7 +265,6 @@ export const ArbitrageCard = memo(function ArbitrageCard({
     `protect you. Verify the deal before committing.`;
 
   const displayRungs = getDisplayRungs(row as ArbitrageRow);
-  const breakdownTooltip = <RungBreakdownTooltip rungs={displayRungs} />;
 
   const getPinnedBorderColor = () => {
     if (!isPinnedMode) return undefined;
@@ -456,8 +425,12 @@ export const ArbitrageCard = memo(function ArbitrageCard({
               <Typography variant="caption" color="text.secondary">
                 {`${formatNumber(dispQty, 0)} unit${dispQty === 1 ? '' : 's'}`} · {formatVolume(dispVolume)}
               </Typography>
-              <Tooltip arrow title={breakdownTooltip} slotProps={{ tooltip: { sx: { maxWidth: 'none' } } }}>
-                <SegmentIcon sx={{ fontSize: 13, color: 'text.secondary', cursor: 'help', opacity: 0.8, '&:hover': { opacity: 1 } }} />
+              <Tooltip title="View order depth breakdown">
+                <IconButton
+                  onClick={() => setDepthModalOpen(true)}
+                  sx={{p: 0}}>
+                  <SegmentIcon fontSize="small" />
+                </IconButton>
               </Tooltip>
             </Box>
           </Box>
@@ -620,6 +593,47 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           haul={row as PinnedHaul}
         />
       )}
+
+      <BreakdownModal
+        open={depthModalOpen}
+        onClose={() => setDepthModalOpen(false)}
+        title="Order Depth Breakdown"
+        description={`Detailed breakdown of the order book depth ladder for ${row.itemName}.`}
+        columns={[
+          { header: 'Units', gridWidth: '1.2fr' },
+          { header: 'Buy / Unit', gridWidth: '1fr', align: 'right' },
+          { header: 'Sell / Unit', gridWidth: '1fr', align: 'right' },
+          { header: 'Profit / Unit', gridWidth: '1fr', align: 'right' },
+        ]}
+        items={displayRungs}
+        renderRow={(r) => {
+          const unitProfit = r.sell - r.buy;
+          return (
+            <>
+              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                {formatNumber(r.units, 0)}
+              </Typography>
+              <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'warning.main', textAlign: 'right' }}>
+                {formatIsk(r.buy)}
+              </Typography>
+              <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'success.main', textAlign: 'right' }}>
+                {formatIsk(r.sell)}
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{
+                  fontFamily: 'monospace',
+                  color: unitProfit > 0 ? 'primary.main' : 'error.main',
+                  fontWeight: 600,
+                  textAlign: 'right',
+                }}
+              >
+                {formatIsk(unitProfit)}
+              </Typography>
+            </>
+          );
+        }}
+      />
     </>
   );
 });
