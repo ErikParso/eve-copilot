@@ -14,6 +14,9 @@ import { buildArbitrageCandidates, materializeArbitrageItem } from './arbitrage.
 import { buildPackageCandidates, materializePackageItem } from './packages.js';
 import type { EnrichedContract, ScaledArbitrageItem, PackageItem, RouteSystem } from './types.js';
 
+/** The kinds of opportunity the hauling menu can return. */
+export type HaulingKind = 'courier' | 'arbitrage' | 'package';
+
 export interface HaulingParams {
   routeType: 'safest' | 'shortest';
   origin: number | null;
@@ -21,6 +24,8 @@ export interface HaulingParams {
   balance: number;
   taxPct: number;
   weights: AttractivityWeights;
+  /** Opportunity kinds to include; empty = no filter (all kinds). */
+  kinds: HaulingKind[];
   limit: number;
 }
 
@@ -64,13 +69,20 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
   const meta = getMarketMeta();
   const kills = await getShipKills();
 
-  const arb = buildArbitrageCandidates(params, kills);
-  const pkg = buildPackageCandidates(params, kills);
+  // Opportunity-type filter: an empty `kinds` means no filter (build all). When
+  // a kind is excluded we skip building it entirely so it costs nothing and is
+  // left out of both the scored set and the `total` candidate count.
+  const want = (k: HaulingKind) => params.kinds.length === 0 || params.kinds.includes(k);
+
+  const arb = want('arbitrage') ? buildArbitrageCandidates(params, kills) : [];
+  const pkg = want('package') ? buildPackageCandidates(params, kills) : [];
 
   const contracts = await getEnrichedContracts(params.routeType, params.origin);
   // Courier filtering (collateral ≤ wallet, volume ≤ hold) stays here — it's the
   // courier analogue of arbitrage's cargo/wallet scaling.
-  const courier = contracts.contracts.filter((c) => c.collateral <= params.balance && c.volume <= params.capacity);
+  const courier = want('courier')
+    ? contracts.contracts.filter((c) => c.collateral <= params.balance && c.volume <= params.capacity)
+    : [];
   const courierMetrics = courier.map((c) => contractMetrics(c, kills));
 
   // One joint normalisation across all three kinds (a courier 90, an arbitrage 90

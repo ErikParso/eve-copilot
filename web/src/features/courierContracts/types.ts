@@ -3,8 +3,11 @@ import type { SecurityBand } from '@/data/sde';
 /** Route preference, mapped server-side to the routing algorithm. */
 export type RouteType = 'safest' | 'shortest';
 
-/** Which kinds of opportunity to show. Empty = no filter (show all). */
-export type ContractType = 'arbitrage' | 'courier';
+/**
+ * Which kinds of opportunity to show. Empty = no filter (show all). The values
+ * are the internal card kinds; the UI labels them Courier / Market / Bundle.
+ */
+export type ContractType = 'courier' | 'arbitrage' | 'package';
 
 /** How the result cards are ordered (applied on Search). */
 export type SortOptionId =

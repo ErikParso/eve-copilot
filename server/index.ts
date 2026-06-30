@@ -6,7 +6,7 @@ import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDe
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
 import { resolvePinnedHaulsStatus, resolveSellDestinations, prewarmDeliveryRoutes } from './arbitrage.js';
-import { getEnrichedHauling } from './hauling.js';
+import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
@@ -47,6 +47,16 @@ function parseCeiling(value: unknown): number {
 function parseWeight(value: unknown, fallback: number): number {
   const n = parseOptionalNumber(value);
   return n === null ? fallback : Math.max(0, n);
+}
+
+/** Opportunity-kind filter (comma-separated); empty/absent ⇒ no filter (all kinds). */
+function parseHaulingKinds(value: unknown): HaulingKind[] {
+  if (typeof value !== 'string') return [];
+  const valid: HaulingKind[] = ['courier', 'arbitrage', 'package'];
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s): s is HaulingKind => (valid as string[]).includes(s));
 }
 
 
@@ -429,6 +439,7 @@ async function main() {
         balance,
         taxPct,
         weights,
+        kinds: parseHaulingKinds(req.query.types),
         limit: parseOptionalNumber(req.query.limit) ?? DEFAULT_SHIP_LIMIT,
       });
       // Pins are re-optimized against the SAME cargo/wallet/tax as the grid, so a

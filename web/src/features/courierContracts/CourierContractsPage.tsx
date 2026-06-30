@@ -22,6 +22,7 @@ import { sortCombined } from './combined';
 import { CombinedGrid } from './components/CombinedGrid';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { RouteTypeSelect } from './components/RouteTypeSelect';
+import { ContractTypeSelect } from './components/ContractTypeSelect';
 import { AttractivityWeightsControl } from './components/AttractivityWeightsControl';
 
 function parseOptionalNumber(raw: string): number | null {
@@ -208,6 +209,13 @@ export function CourierContractsPage() {
               <RouteTypeSelect
                 value={prefs.routeType}
                 onChange={(routeType) => setPrefs({ ...prefs, routeType })}
+              />
+            </Box>
+
+            <Box sx={{ flex: '1 1 180px', minWidth: 180 }}>
+              <ContractTypeSelect
+                value={prefs.contractTypes}
+                onChange={(contractTypes) => setPrefs({ ...prefs, contractTypes })}
               />
             </Box>
 
