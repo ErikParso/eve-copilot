@@ -451,10 +451,24 @@ function scaleBundleToCargo(lines: PackageLineResult[], capacity: number): Scale
   return { contents, realizedValue, hauledVolume, leftMarketValue, limited };
 }
 
+/** Collapse duplicate lines (same type + blueprint-copy flag) into one, summing
+ *  quantity. ESI lists a contract's items as separate stacks, so the same type can
+ *  appear as many lines — we want one line per type. */
+function mergeLines(lines: PackageLine[]): PackageLine[] {
+  const byKey = new Map<string, PackageLine>();
+  for (const l of lines) {
+    const key = `${l.typeId}:${l.isBlueprintCopy}`;
+    const existing = byKey.get(key);
+    if (existing) existing.quantity += l.quantity;
+    else byKey.set(key, { ...l });
+  }
+  return [...byKey.values()];
+}
+
 /** Resolve one sell contract into the route-free cached opportunity: best dest +
  *  per-line bid ladders. Economics are the capacity-unbounded fit; the discovery
  *  prune uses the full-bundle profit (an upper bound on any realized profit). */
-function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpportunity | null {
+function resolveOpportunity(c: PublicContract, rawLines: PackageLine[]): PackageOpportunity | null {
   const source = resolveEndpoint(c.start_location_id);
   if (source.systemId === null) return null; // can't route from an unplaceable structure
 
@@ -462,6 +476,7 @@ function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpp
   if (!snap) return null;
   const tax = DEFAULT_SALES_TAX;
 
+  const lines = mergeLines(rawLines);
   const best = bestDropForLines(lines, snap.byType);
   if (!best || best.sellValue <= 0) return null;
 
