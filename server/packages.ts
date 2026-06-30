@@ -541,6 +541,9 @@ export interface PackagesFreshness {
   opportunities: number;
   /** When the contract set was last reconciled against a crawl (epoch ms). */
   lastReconcileAt: number | null;
+  /** Current market snapshot build time (epoch ms) — bundle prices/best-dest are
+   *  recomputed whenever this changes, i.e. on the ~60s market cadence. */
+  marketBuiltAt: number | null;
 }
 
 export function getPackagesFreshness(): PackagesFreshness {
@@ -559,6 +562,7 @@ export function getPackagesFreshness(): PackagesFreshness {
     pending: pendingQueue.length,
     opportunities: opportunities.length,
     lastReconcileAt,
+    marketBuiltAt: getSnapshot()?.builtAt ?? null,
   };
 }
 
