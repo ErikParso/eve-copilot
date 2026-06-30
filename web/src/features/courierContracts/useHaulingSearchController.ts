@@ -211,6 +211,9 @@ export function useHaulingSearchController(): void {
   const routeType = prefs.routeType;
   const cargoM3 = prefs.cargoM3;
   const salesTaxPct = prefs.salesTaxPct;
+  // Stable key so the user-action effect re-fetches (with skeletons) when the
+  // opportunity-type filter changes, regardless of array identity/order.
+  const contractTypesKey = [...prefs.contractTypes].sort().join(',');
   const origin = useAtomValue(characterStatusAtom)?.systemId ?? null;
   const balance = useAtomValue(characterWalletAtom)?.balance ?? null;
   // Weights ARE a re-fetch trigger now: the server scores/truncates by them, and
@@ -252,6 +255,8 @@ export function useHaulingSearchController(): void {
       params.set('wIncome', String(weights.income));
       params.set('wJumps', String(weights.totalJumps));
       params.set('wDanger', String(weights.danger));
+      // Opportunity-type filter; empty = no filter (server returns all kinds).
+      if (prefsNow.contractTypes.length) params.set('types', prefsNow.contractTypes.join(','));
 
       // Pinned hauls are revalidated in the SAME request (and thus the same
       // market snapshot) as the opportunities. Only planning/transit hauls carry
@@ -420,7 +425,7 @@ export function useHaulingSearchController(): void {
       if (timer) clearTimeout(timer);
       abortRef.current?.abort();
     };
-  }, [run, routeType, cargoM3, salesTaxPct, weights.income, weights.totalJumps, weights.danger]);
+  }, [run, routeType, cargoM3, salesTaxPct, contractTypesKey, weights.income, weights.totalJumps, weights.danger]);
 
   // AUTOMATIC triggers: current system / wallet changed (from the pollers).
   // Reload silently so the grid + pinned cards update in place without flashing
