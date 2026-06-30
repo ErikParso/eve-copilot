@@ -15,7 +15,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
-import packageBg from '@/assets/card-package.png';
+import packageBg from '@/assets/card-package.jpg';
 import { LocationCell } from '@/features/courierContracts/components/LocationCell';
 import { AttractivityCell } from '@/features/courierContracts/components/AttractivityCell';
 import { DangerText } from '@/features/courierContracts/components/DangerCell';

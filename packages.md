@@ -17,6 +17,6 @@ Finished stage - same as arbitrage, user click confirm sell and card enters the 
 NOTES:
 The functionality is identical with arbitrage opportiunities, except it "sell contract" has fixed price and fixed content and contains multiple item types to transfer and trade elsewhere. Try to leverage this existing functionality and logic as much as possible to reduce the codebase.
 
-Fo package card use card-package.png
+Fo package card use card-package.jpg
 
 If possible, reuse crawlers to minimize 429 errors and throttles. If its better to make dedicated algorithm for sell contracts do so.
