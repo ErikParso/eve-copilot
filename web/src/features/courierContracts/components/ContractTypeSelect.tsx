@@ -1,5 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Checkbox, ListItemText, MenuItem, TextField } from '@mui/material';
+import {
+  Box,
+  Checkbox,
+  Chip,
+  FormControl,
+  FormHelperText,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  OutlinedInput,
+  Select,
+  type SelectChangeEvent,
+} from '@mui/material';
 import type { ContractType } from '../types';
 
 interface ContractTypeSelectProps {
@@ -38,33 +50,43 @@ export function ContractTypeSelect({ value, onChange }: ContractTypeSelectProps)
   };
 
   return (
-    <TextField
-      select
-      size="medium"
-      fullWidth
-      label="Opportunity type"
-      value={draft}
-      helperText="Empty = all kinds"
-      SelectProps={{
-        multiple: true,
-        onClose: commit,
-        renderValue: (selected) => {
-          const ids = selected as ContractType[];
-          if (ids.length === 0) return 'All';
-          return ids.map((id) => LABELS.get(id)).join(', ');
-        },
-      }}
-      onChange={(e) => {
-        const v = e.target.value;
-        setDraft((typeof v === 'string' ? v.split(',') : v) as ContractType[]);
-      }}
-    >
-      {OPTIONS.map((opt) => (
-        <MenuItem key={opt.value} value={opt.value}>
-          <Checkbox size="small" checked={draft.includes(opt.value)} />
-          <ListItemText primary={opt.label} />
-        </MenuItem>
-      ))}
-    </TextField>
+    <FormControl fullWidth size="medium">
+      {/* shrink/notched are driven off the selection count: with `renderValue`,
+          MUI otherwise keeps the label floated even when the array is empty. */}
+      <InputLabel id="opportunity-type-label">
+        Opportunity type
+      </InputLabel>
+      <Select
+        labelId="opportunity-type-label"
+        input={<OutlinedInput label="Opportunity type" />}
+        multiple
+        value={draft}
+        onClose={commit}
+        renderValue={(selected) => {
+          // Drop any unknown/stale ids so a missing label can't leave a stray
+          // comma; show the rest as chips.
+          const ids = (selected as ContractType[]).filter((id) => LABELS.has(id));
+		  if (!ids.length) return 'Any'; // show placeholder text
+          return (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {ids.map((id) => (
+                <Chip key={id} size="small" label={LABELS.get(id)} />
+              ))}
+            </Box>
+          );
+        }}
+        onChange={(e: SelectChangeEvent<ContractType[]>) => {
+          const v = e.target.value;
+          setDraft((typeof v === 'string' ? v.split(',') : v) as ContractType[]);
+        }}
+      >
+        {OPTIONS.map((opt) => (
+          <MenuItem key={opt.value} value={opt.value}>
+            <Checkbox size="small" checked={draft.includes(opt.value)} />
+            <ListItemText primary={opt.label} />
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
   );
 }
