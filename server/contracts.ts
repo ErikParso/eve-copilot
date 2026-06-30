@@ -55,7 +55,7 @@ async function fetchRegionContracts(
   return { couriers, sells, lastModified };
 }
 
-async function crawlContracts(): Promise<{
+export async function crawlContracts(): Promise<{
   contracts: PublicContract[];
   sells: PublicContract[];
   lastModifiedAt: number | null;
@@ -220,6 +220,15 @@ export async function getEnrichedContracts(
   origin: number | null,
 ): Promise<ContractsResponse> {
   if (process.env.OFFLINE === 'true') {
+    if (raw && raw.contracts.length > 0) {
+      const kills = await getShipKills();
+      const contracts: EnrichedContract[] = [];
+      for (const o of getOpportunities()) {
+        const enriched = resolveContract(o, type, origin, kills);
+        if (enriched) contracts.push(enriched);
+      }
+      return { contracts, lastModifiedAt: raw.lastModifiedAt, total: contracts.length };
+    }
     return { contracts: [], lastModifiedAt: Date.now(), total: 0 };
   }
   if (!raw) await refresh();
@@ -232,4 +241,23 @@ export async function getEnrichedContracts(
     if (enriched) contracts.push(enriched);
   }
   return { contracts, lastModifiedAt: raw.lastModifiedAt, total: contracts.length };
+}
+
+export function loadContractsSnapshot(data: { couriers: PublicContract[]; sells: PublicContract[]; lastModifiedAt: number | null }): void {
+  raw = {
+    contracts: data.couriers,
+    sells: data.sells,
+    lastModifiedAt: data.lastModifiedAt,
+    fetchedAt: Date.now(),
+  };
+  opportunities = raw.contracts.map(buildOpportunity);
+  opportunitiesFetchedAt = raw.fetchedAt;
+
+  for (const fn of refreshListeners) {
+    try {
+      fn();
+    } catch (err) {
+      console.error('[Contracts Crawl] load snapshot listener failed:', err);
+    }
+  }
 }

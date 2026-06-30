@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node --max-old-space-size=320 dist/index.js",
     "capture": "tsx captureSnapshot.ts",
+    "capture:contracts": "tsx captureContracts.ts",
     "compare": "tsx compareSnapshot.ts",
     "compare:limits": "tsx compareLimits.ts",
     "floor": "tsx profitFloor.ts",

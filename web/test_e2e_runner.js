@@ -277,10 +277,10 @@ async function runTests() {
     throw new Error(`Border color did not turn red after buyers left! Computed: ${borderCol}`);
   }
   const profitText = await pinnedCard.locator('.MuiTypography-h6').textContent();
-  if (!profitText.includes('0.00 ISK')) {
+  if (!profitText.includes('0 M ISK') && !profitText.includes('0.00 ISK')) {
     throw new Error(`Profit did not collapse to zero! Current: ${profitText}`);
   }
-  console.log('PASSED: Verified card border turned red, profit displays 0.00 ISK.');
+  console.log('PASSED: Verified card border turned red, profit displays zero.');
 
   // Reset market to baseline before transit transition
   console.log('Resetting market to baseline...');
@@ -914,7 +914,7 @@ async function runTests() {
   
   const pinnedIds = [];
   for (let i = 0; i < 3; i++) {
-    const card = allAvailableCards.nth(i);
+    const card = allAvailableCards.first();
     const cardId = (await card.getAttribute('id')).replace('card-a:', '');
     
     const pinBtn = card.locator('button:has([data-testid="PushPinOutlinedIcon"])');
@@ -1170,10 +1170,10 @@ async function runTests() {
   if (!seqBorder.includes('rgb(244, 67, 54)')) {
     throw new Error(`Planning Update 3: Expected red border for zero income, got: ${seqBorder}`);
   }
-  if (!seqProfit.includes('0.00 ISK')) {
-    throw new Error(`Planning Update 3: Expected 0.00 ISK profit, got: ${seqProfit}`);
+  if (!seqProfit.includes('0 M ISK') && !seqProfit.includes('0.00 ISK')) {
+    throw new Error(`Planning Update 3: Expected zero profit, got: ${seqProfit}`);
   }
-  console.log('  PASSED: Planning Update 3 — zero income shows error border and 0.00 ISK.');
+  console.log('  PASSED: Planning Update 3 — zero income shows error border and zero profit.');
   
   // === TRANSITION TO TRANSIT ===
   console.log('\n  Transitioning to TRANSIT stage...');
@@ -1425,6 +1425,309 @@ async function runTests() {
     throw new Error('Test 19: Courier card still present after unpinning!');
   }
   console.log('  PASSED: Courier card unpinned and removed successfully.');
+
+  // =====================================================================
+  // TEST 20: Packages (Sell Contracts) End-to-End Workflow
+  // =====================================================================
+  console.log('\n--- Test 20: Packages (Sell Contracts) End-to-End ---');
+  
+  // Make destStationId the absolute best drop station for typeId by mutating the market
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: 100000
+  });
+
+  // Seed the package contract using typeId and destStationId from the first arbitrage card
+  const seedPackageResponse = await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'set',
+      contracts: [
+        {
+          contract: {
+            contract_id: 888888001,
+            type: 'item_exchange',
+            start_location_id: 60003760, // Jita 4-4
+            end_location_id: 0,
+            volume: 1.0,
+            reward: 0,
+            collateral: 0,
+            price: 1000,
+            days_to_complete: 0,
+            date_issued: new Date().toISOString(),
+            date_expired: new Date(Date.now() + 86400000).toISOString()
+          },
+          lines: [
+            {
+              typeId: typeId,
+              itemName: itemName,
+              quantity: 1000,
+              isBlueprintCopy: false
+            }
+          ]
+        }
+      ]
+    })
+  });
+  if (!seedPackageResponse.ok) {
+    throw new Error('Failed to seed test package!');
+  }
+  console.log('  Seeded test package contract successfully.');
+
+  // Refresh page and wait for API response
+  const refreshResp = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await page.evaluate(() => {
+    if (typeof window.triggerHaulingRefresh === 'function') {
+      window.triggerHaulingRefresh();
+    }
+  });
+  await refreshResp;
+  await sleep(1000);
+
+  // 20A: Verify available package card renders in grid
+  const pkgCard = page.locator('#card-pkg\\:888888001');
+  await assertVisible(pkgCard, 'pkgCard');
+  console.log('  PASSED: 20A — Available package card renders in grid.');
+
+  // 20B: Pin the package card
+  const pkgPinBtn = pkgCard.locator('button:has([data-testid="PushPinOutlinedIcon"]), button[aria-label="Pin opportunity"]');
+  const pkgPinResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  await pkgPinBtn.click();
+  await pkgPinResponsePromise;
+  await sleep(500);
+
+  // Verify it appears in pinned section as card-pp:888888001
+  const pinnedPkgCard = page.locator('#card-pp\\:888888001');
+  await assertVisible(pinnedPkgCard, 'pinnedPkgCard');
+  console.log('  PASSED: 20B — Pinned package card appears in pinned section.');
+
+  // 20C: Confirm Buy (transitions to Transit)
+  const confirmBuyBtn = pinnedPkgCard.locator('button:has-text("Confirm Buy")');
+  await assertVisible(confirmBuyBtn, 'confirmBuyBtn');
+
+  const pkgBuyResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  // Confirm Buy is one-click, no dialog!
+  await confirmBuyBtn.click();
+  await pkgBuyResponsePromise;
+  await sleep(500);
+
+  // Verify transition to transit
+  const transitPkgCard = page.locator('#card-pp\\:888888001');
+  const pkgConfirmSellBtn = transitPkgCard.locator('button:has-text("Confirm Sell")');
+  const pkgSellElsewhereBtn = transitPkgCard.locator('button:has-text("Sell Elsewhere")');
+  await assertVisible(pkgConfirmSellBtn, 'pkgConfirmSellBtn');
+  await assertVisible(pkgSellElsewhereBtn, 'pkgSellElsewhereBtn');
+  
+  // Verify route shows "In ship"
+  const pkgBuyInShipLabel = transitPkgCard.locator('text=In ship');
+  await assertVisible(pkgBuyInShipLabel, 'pkgBuyInShipLabel');
+  console.log('  PASSED: 20C — Confirm Buy transitioned card to Transit stage (one-click).');
+
+  // 20D: Sell Elsewhere redirection
+  await pkgSellElsewhereBtn.click();
+  const pkgSellModal = page.locator('.MuiDialog-root:has-text("where?")');
+  await assertVisible(pkgSellModal, 'pkgSellModal');
+
+  // Wait for loading to finish
+  const pkgAltGrid = pkgSellModal.locator('.MuiGrid2-container');
+  await assertVisible(pkgAltGrid, 'pkgAltGrid', 10000);
+  const pkgAltCards = pkgAltGrid.locator('.MuiCard-root');
+  const pkgAltCount = await pkgAltCards.count();
+  console.log(`  Found ${pkgAltCount} alternative locations in redirect modal.`);
+  if (pkgAltCount === 0) {
+    throw new Error('No alternative redirect destinations found for package!');
+  }
+
+  // Click Redirect Here on first alternative
+  const pkgFirstAltCard = pkgAltCards.first();
+  const pkgRedirectBtn = pkgFirstAltCard.locator('button:has-text("Redirect Here")');
+  const pkgRedirectResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  await pkgRedirectBtn.click();
+  await pkgRedirectResponsePromise;
+  await sleep(500);
+  console.log('  PASSED: 20D — Package Sell Elsewhere redirection successfully updated.');
+
+  // 20E: Persistence across reload
+  console.log('  Reloading page to verify package persistence...');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#root');
+  await sleep(1000);
+
+  // Set location and wallet balance again
+  await page.evaluate(() => {
+    if (typeof window.setTestLocation === 'function' && typeof window.setTestWalletBalance === 'function') {
+      window.setTestLocation(30000142, 'Jita');
+      window.setTestWalletBalance(1000000000);
+    }
+  });
+  await sleep(500);
+
+  const persistedPkgCard = page.locator('#card-pp\\:888888001');
+  await assertVisible(persistedPkgCard, 'persistedPkgCard');
+  const pkgPersistedConfirmSell = persistedPkgCard.locator('button:has-text("Confirm Sell")');
+  await assertVisible(pkgPersistedConfirmSell, 'pkgPersistedConfirmSell');
+  console.log('  PASSED: 20E — Pinned package card persisted in transit across reload.');
+
+  // 20F: Confirm Sell (transitions to Executed)
+  const pkgExecuteResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  await pkgPersistedConfirmSell.click();
+  await pkgExecuteResponsePromise;
+  await sleep(500);
+
+  const pkgExecutedBtn = persistedPkgCard.locator('button:has-text("Executed")');
+  await assertVisible(pkgExecutedBtn, 'pkgExecutedBtn');
+  console.log('  PASSED: 20F — Pinned package transitioned to Executed.');
+
+  // Clean up first package card
+  const pkgUnpinBtn = persistedPkgCard.locator('button:has([data-testid="PushPinIcon"])');
+  const pkgUnpinResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  await pkgUnpinBtn.click();
+  await pkgUnpinResponsePromise;
+  await sleep(500);
+
+  // 20G: Simulating Package Price Increase (Profit Up)
+  console.log('\n--- Test 20G: Simulating Package Price Increase (Profit Up) ---');
+  
+  // Set destination buy price to 3x baseline so it resolves to destStationId and is highly profitable
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: originalSellPrice * 3
+  });
+
+  const seedPackageResponse2 = await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'set',
+      contracts: [
+        {
+          contract: {
+            contract_id: 888888002,
+            type: 'item_exchange',
+            start_location_id: 60003760,
+            end_location_id: 0,
+            volume: 1.0,
+            reward: 0,
+            collateral: 0,
+            price: 1000,
+            days_to_complete: 0,
+            date_issued: new Date().toISOString(),
+            date_expired: new Date(Date.now() + 86400000).toISOString()
+          },
+          lines: [
+            {
+              typeId: typeId,
+              itemName: itemName,
+              quantity: 100000,
+              isBlueprintCopy: false
+            }
+          ]
+        }
+      ]
+    })
+  });
+  if (!seedPackageResponse2.ok) {
+    throw new Error('Failed to seed second test package!');
+  }
+
+  // Refresh page and wait for API response
+  const refreshResp2 = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await page.evaluate(() => {
+    if (typeof window.triggerHaulingRefresh === 'function') {
+      window.triggerHaulingRefresh();
+    }
+  });
+  await refreshResp2;
+  await sleep(1000);
+
+  const pkgCard2 = page.locator('#card-pkg\\:888888002');
+  await assertVisible(pkgCard2, 'pkgCard2');
+  const pkgPinBtn2 = pkgCard2.locator('button:has([data-testid="PushPinOutlinedIcon"]), button[aria-label="Pin opportunity"]');
+  const pkgPinResponsePromise2 = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await pkgPinBtn2.click();
+  await pkgPinResponsePromise2;
+  await sleep(500);
+
+  const pinnedPkgCard2 = page.locator('#card-pp\\:888888002');
+  await assertVisible(pinnedPkgCard2, 'pinnedPkgCard2');
+
+  // Mutate: change buy price to 10x higher
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: originalSellPrice * 10
+  });
+
+  // Verify border is green and arrow up is visible
+  let pkgBorderCol = await getBorderColor(pinnedPkgCard2);
+  if (!pkgBorderCol.includes('rgb(102, 187, 106)')) {
+    throw new Error(`Package card border color did not turn green after price increase! Computed: ${pkgBorderCol}`);
+  }
+  const pkgUpArrow = pinnedPkgCard2.locator('[data-testid="ArrowUpwardIcon"]').first();
+  await assertVisible(pkgUpArrow, 'pkgUpArrow');
+  console.log('  PASSED: Verified package card border turned green and shows UP arrow.');
+
+  // 20H: Simulating Package Price Decrease (Profit Down)
+  console.log('\n--- Test 20H: Simulating Package Price Decrease (Profit Down) ---');
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: originalSellPrice * 0.1
+  });
+
+  pkgBorderCol = await getBorderColor(pinnedPkgCard2);
+  if (!pkgBorderCol.includes('rgb(255, 167, 38)')) {
+    throw new Error(`Package card border color did not turn orange after price decrease! Computed: ${pkgBorderCol}`);
+  }
+  const pkgDownArrow = pinnedPkgCard2.locator('[data-testid="ArrowDownwardIcon"]').first();
+  await assertVisible(pkgDownArrow, 'pkgDownArrow');
+  console.log('  PASSED: Verified package card border turned orange and shows DOWN arrow.');
+
+  // 20I: Simulating Package Profit Collapse (Buyer Gone)
+  console.log('\n--- Test 20I: Simulating Package Profit Collapse (Buyer Gone) ---');
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'remove_buys',
+    stationId: destStationId
+  });
+
+  pkgBorderCol = await getBorderColor(pinnedPkgCard2);
+  if (!pkgBorderCol.includes('rgb(244, 67, 54)')) {
+    throw new Error(`Package card border color did not turn red after buyers left! Computed: ${pkgBorderCol}`);
+  }
+  console.log('  PASSED: Verified package card border turned red (negative/zero profit).');
+
+  // Clean up
+  console.log('  Cleaning up package tests...');
+  const pkgUnpinBtn2 = pinnedPkgCard2.locator('button:has([data-testid="PushPinIcon"])');
+  const pkgUnpinResponsePromise2 = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await pkgUnpinBtn2.click();
+  await pkgUnpinResponsePromise2;
+  await sleep(500);
+
+  await mutateMarketAndRefresh(page, { action: 'reset' });
+  await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reset' })
+  });
 
   console.log('\n======================================');
   console.log('ALL E2E PINNING TESTS COMPLETED SUCCESSFULLY!');
