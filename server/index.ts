@@ -170,6 +170,22 @@ async function main() {
     const { loadSnapshot } = await import('./market.js');
     loadSnapshot(JSON.parse(raw));
     console.log('Offline snapshot loaded successfully.');
+
+    // Load contracts-snapshot.json if present
+    const contractsFixturePath = fileURLToPath(new URL('./fixtures/contracts-snapshot.json', import.meta.url));
+    if (fs.existsSync(contractsFixturePath)) {
+      console.log('Loading contracts-snapshot.json fixture...');
+      const contractsRaw = fs.readFileSync(contractsFixturePath, 'utf8');
+      const parsedContracts = JSON.parse(contractsRaw);
+      const { loadContractsSnapshot } = await import('./contracts.js');
+      loadContractsSnapshot(parsedContracts);
+
+      const { loadPackagesSnapshot } = await import('./packages.js');
+      loadPackagesSnapshot(parsedContracts.contents);
+      console.log('Offline contracts snapshot loaded successfully.');
+    } else {
+      console.log('No contracts-snapshot.json fixture found, starting with empty contracts.');
+    }
     
     // Also run initial route pre-warm on offline load
     const { prewarmDeliveryRoutes } = await import('./arbitrage.js');
@@ -345,6 +361,39 @@ async function main() {
       return res.status(400).json({ error: 'Invalid action. Use "set" with kills data or "reset".' });
     } catch (err) {
       console.error('Kills mutation failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Mutation error' });
+    }
+  });
+
+  // Test packages injection route for E2E browser tests
+  app.post('/api/test/mutate-packages', async (req, res) => {
+    try {
+      const { action, contracts } = req.body;
+      if (action === 'reset') {
+        const fs = await import('fs');
+        const fileURLToPath = (await import('url')).fileURLToPath;
+        const contractsFixturePath = fileURLToPath(new URL('./fixtures/contracts-snapshot.json', import.meta.url));
+        if (fs.existsSync(contractsFixturePath)) {
+          const contractsRaw = fs.readFileSync(contractsFixturePath, 'utf8');
+          const parsedContracts = JSON.parse(contractsRaw);
+          const { loadContractsSnapshot } = await import('./contracts.js');
+          loadContractsSnapshot(parsedContracts);
+          const { loadPackagesSnapshot } = await import('./packages.js');
+          loadPackagesSnapshot(parsedContracts.contents);
+        } else {
+          const { __seedTestPackages } = await import('./packages.js');
+          __seedTestPackages([]);
+        }
+        return res.json({ ok: true });
+      }
+      if (action === 'set' && Array.isArray(contracts)) {
+        const { __seedTestPackages } = await import('./packages.js');
+        __seedTestPackages(contracts);
+        return res.json({ ok: true });
+      }
+      return res.status(400).json({ error: 'Invalid action. Use "set" with contracts data or "reset".' });
+    } catch (err) {
+      console.error('Packages mutation failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Mutation error' });
     }
   });

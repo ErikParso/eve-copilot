@@ -134,7 +134,7 @@ function reconcile(): void {
 
 /** Fetch + classify one contract's contents. Returns the sellable lines, or
  *  'skip' for want-to-buy / mixed contracts. Throws on transient ESI errors. */
-async function fetchContents(id: number): Promise<ContentsEntry> {
+export async function fetchContents(id: number): Promise<ContentsEntry> {
   const first = await esiGetPaged<RawContractItem[]>(`/contracts/public/items/${id}/`, 1);
   const items: RawContractItem[] = [...first.data];
   for (let page = 2; page <= first.pages; page++) {
@@ -271,9 +271,6 @@ function bestDropForLines(lines: LiquidationLine[], byType: Map<number, TypeBook
   return best;
 }
 
-/** Resolve one sell contract into its best-destination opportunity (no routes).
- *  Returns null if the source can't be placed (unknown structure system) or
- *  nothing in the bundle can be sold anywhere. */
 function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpportunity | null {
   const source = resolveEndpoint(c.start_location_id);
   if (source.systemId === null) return null; // can't route from an unplaceable structure
@@ -623,4 +620,22 @@ export function resolvePackageSellDestinations(params: PackageSellDestinationPar
   items.forEach((it, i) => (it.attractivity = scores[i]));
   items.sort((a, b) => b.attractivity - a.attractivity);
   return items.slice(0, params.limit ?? DEFAULT_SELL_DEST_LIMIT);
+}
+
+export function loadPackagesSnapshot(contentsList: [number, ContentsEntry][]): void {
+  contents.clear();
+  for (const [id, entry] of contentsList) {
+    contents.set(id, entry);
+  }
+  reconcile();
+}
+
+export function __seedTestPackages(contracts: { contract: PublicContract; lines: PackageLine[] }[]): void {
+  meta.clear();
+  contents.clear();
+  for (const { contract, lines } of contracts) {
+    meta.set(contract.contract_id, contract);
+    contents.set(contract.contract_id, lines);
+  }
+  contentsVersion++;
 }
