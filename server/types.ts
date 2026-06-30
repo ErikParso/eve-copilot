@@ -170,21 +170,46 @@ export interface PackageLine {
   isBlueprintCopy: boolean;
 }
 
-/** Per-line liquidation result at the chosen destination. */
-export interface PackageLineResult extends PackageLine {
-  /** Units the destination's reachable buy orders can absorb (≤ quantity). */
-  soldQuantity: number;
-  /** Gross ISK the sold units fetch (before sales tax). */
-  sellValue: number;
-  /** Volume of one unit (m³). */
-  unitVolume: number;
+/** One matched rung of a line's destination bid ladder: `units` sellable at
+ *  `sell` ISK each (dearest first). Cached so the per-request cargo knapsack can
+ *  fill the hold by ISK-per-m³ without re-walking the live book. Server-internal. */
+export interface PackageRung {
+  units: number;
+  sell: number;
 }
 
 /**
- * A sell contract resolved into an opportunity BEFORE routing: fixed acquisition
- * price + content, plus the destination station that liquidates the bundle for
- * the most profit. This is the cached middle stage (recomputed when the market
- * snapshot or the contents cache changes). Routes are resolved per request.
+ * Per-line outcome once the bundle is fitted to a cargo hold: what you carry &
+ * sell at the destination, and what's left in station (valued at nominal market
+ * price). A type can straddle the cargo line — part hauled, part left.
+ * In the cached (capacity-unbounded) stage, `soldQuantity` is the full sellable
+ * depth and `leftQuantity` is only the unsellable units; the per-request knapsack
+ * recomputes both for the requester's hold.
+ */
+export interface PackageLineResult extends PackageLine {
+  /** Volume of one unit (m³). */
+  unitVolume: number;
+  /** CCP reference value per unit (ISK), or null — values the units left behind. */
+  marketPrice: number | null;
+  /** Units carried to the destination and sold there (≤ quantity). */
+  soldQuantity: number;
+  /** Gross ISK those hauled units fetch at the destination (before tax). */
+  sellValue: number;
+  /** Units left in station (don't fit the hold, or can't sell at the dest). */
+  leftQuantity: number;
+  /** Nominal market value of the left-behind units (leftQuantity × marketPrice). */
+  leftMarketValue: number;
+  /** Dest bid ladder (dearest first), capped. Server-internal — present on the
+   *  cached opportunity, stripped from shipped items. */
+  rungs?: PackageRung[];
+}
+
+/**
+ * A sell contract resolved into the route-free cached stage: fixed price + the
+ * destination that liquidates the FULL bundle best, each line carrying its dest
+ * bid ladder. The per-request step (buildPackageCandidates) fits this to the
+ * requester's cargo via a knapsack and prices the realized profit. The economic
+ * fields below describe the capacity-UNBOUNDED fit; they're recomputed per hold.
  */
 export interface PackageOpportunity {
   /** Stable id — the ESI contract_id as a string (matches the card key shape). */
@@ -194,14 +219,23 @@ export interface PackageOpportunity {
   source: ContractEndpoint;
   /** The station that liquidates the bundle for the most profit. */
   dest: ContractEndpoint;
-  /** Fixed price paid for the whole package (the capital at risk). */
+  /** Fixed price paid for the whole package (capital at risk, regardless of fit). */
   price: number;
-  /** Total package volume (m³) — for the binary cargo-fit check. */
+  /** Full bundle volume (m³). */
   totalVolume: number;
-  /** Per-line breakdown at `dest` (sold qty + value; unsold/BPC value 0). */
+  /** Volume actually carried to the destination (m³) — the fitted subset. */
+  hauledVolume: number;
+  /** Per-line breakdown (hauled vs left) at `dest`. */
   contents: PackageLineResult[];
-  /** Σ gross sell value across all lines at `dest` (before tax). */
+  /** Σ gross dest revenue of the hauled units (before tax). */
   sellValue: number;
+  /** Σ gross sell value of the FULL bundle at `dest` (capacity-unbounded), for
+   *  the discovery profit prune. */
+  fullSellValue: number;
+  /** Σ nominal market value of the units left in station. */
+  leftMarketValue: number;
+  /** True when cargo forced part of the bundle to be left behind. */
+  limited: boolean;
   /** Net profit after sales tax: sellValue·(1−tax) − price. */
   profit: number;
   /** profit ÷ price × 100. */
@@ -232,6 +266,9 @@ export interface PackageStatusLine {
   typeId: number;
   quantity: number;
   isBlueprintCopy: boolean;
+  /** Transit only: units of this type actually loaded in the ship (the frozen
+   *  subset). Absent for planning (the server re-knapsacks to the current hold). */
+  hauledQuantity?: number;
 }
 
 export interface PinnedPackageStatusRequest {
@@ -251,8 +288,14 @@ export interface PinnedPackageStatusRequest {
 
 export interface PinnedPackageStatusResponse {
   id: string;
-  /** Σ gross sell value at the targeted dest (before tax). */
+  /** Σ gross dest revenue of the hauled units (before tax). */
   sellValue: number;
+  /** Volume carried to the dest (m³) — the fitted subset. */
+  hauledVolume: number;
+  /** Σ nominal market value of the units left in station. */
+  leftMarketValue: number;
+  /** True when cargo forced part of the bundle to be left behind. */
+  limited: boolean;
   /** Net profit after tax at the targeted dest. */
   profit: number;
   marginPct: number;

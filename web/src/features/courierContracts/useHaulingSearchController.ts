@@ -87,8 +87,11 @@ type ApiPackageItem = Pick<
   | 'dest'
   | 'price'
   | 'totalVolume'
+  | 'hauledVolume'
   | 'contents'
   | 'sellValue'
+  | 'leftMarketValue'
+  | 'limited'
   | 'profit'
   | 'marginPct'
   | 'salesTax'
@@ -291,7 +294,14 @@ export function useHaulingSearchController(): void {
           contractId: p.contractId,
           status: p.status,
           price: p.price,
-          lines: p.contents.map((l) => ({ typeId: l.typeId, quantity: l.quantity, isBlueprintCopy: l.isBlueprintCopy })),
+          // Transit carries the frozen loaded subset (per-line soldQuantity); planning
+          // omits it so the server re-knapsacks to the current hold.
+          lines: p.contents.map((l) => ({
+            typeId: l.typeId,
+            quantity: l.quantity,
+            isBlueprintCopy: l.isBlueprintCopy,
+            ...(p.status === 'transit' ? { hauledQuantity: l.soldQuantity } : {}),
+          })),
           sourceSystem: p.source.systemId,
           dest: p.dest.locationId,
           destSystem: p.dest.systemId,

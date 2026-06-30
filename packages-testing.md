@@ -199,3 +199,116 @@ the arbitrage tests in `web/test_e2e_runner.js`.
 
 *(Ask the maintainer before adding this — it's a test-only surface. The author can
 wire it on request.)*
+
+---
+
+# Part 2 — Cargo knapsack ("buy whole, load what fits, leave the rest")
+
+This covers the newer behaviour: cargo capacity no longer **hides** a bundle — you
+buy the whole thing (paying the full price), then carry only the subset that fits
+your hold (highest ISK-per-m³ first) and abandon the rest in station, valued at
+nominal market price. Use the **deterministic seam** (Appendix B / `/api/test/mutate-packages`).
+
+### Setup notes specific to these tests
+
+- **Setting cargo capacity:** there is **no `window` hook** for it. Set it through
+  the UI — fill the **"Cargo capacity"** number field (it commits on blur and
+  triggers a `/api/hauling` refetch):
+  ```js
+  const cargoField = page.getByLabel('Cargo capacity');
+  await cargoField.fill('800');
+  await cargoField.blur();
+  await page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  ```
+  Clear it (empty) to mean "unlimited".
+- **Don't assert exact ISK for market value.** Left-behind value uses each type's
+  CCP reference price (`marketPrice`), fetched live even in OFFLINE — not
+  controllable. Read the actual numbers from the `/api/hauling` response (each
+  package item's `contents[]` carries `unitVolume`, `marketPrice`, `soldQuantity`,
+  `leftQuantity`, `leftMarketValue`, plus item-level `hauledVolume`/`leftMarketValue`/
+  `limited`) and assert **relationships**, not constants.
+- **Pick real typeIds + read their `unitVolume`** from a prior `/api/hauling`
+  response so you can size cargo precisely (cargo = `unitsYouWantToFit × unitVolume`).
+
+### New selectors (on top of Part 0)
+
+- Carried line on the card: text matches `/of \d+ units/` when limited, else
+  `/\d+ units · .* carried/`.
+- "Worth left at station" stat: text `Worth left at station` (only rendered when
+  something is left behind).
+- Open the contents breakdown: the **SegmentIcon icon-button** (Tooltip "View
+  package contents breakdown") → opens the `BreakdownModal`.
+- Breakdown separator row: text `Items below won't fit in the ship — left at the station`.
+
+### Test cases
+
+**21A — Cargo no longer hides a bundle.**
+Seed a bundle whose total volume is far larger than a tiny cargo but whose price is
+affordable (e.g. one cheap, low-volume, high-demand item is enough to clear the 100k
+realized floor). Set **Cargo capacity = a small number**. **Assert the
+`#card-pkg:<id>` still renders** (pre-rework it would have been hidden).
+
+**21B — Knapsack loads high ISK/m³ first; filler is left.**
+Seed one contract with **two lines**:
+- Item A: small `unitVolume`, high destination value (boost its dest buy price via
+  `/api/test/mutate-market change_buy_price`).
+- Item B: large `unitVolume`, little/no destination demand (`remove_buys` or a tiny
+  price), but a non-zero `marketPrice`.
+Set cargo small enough to fit A but not B. Assert from the API item: `soldQuantity>0`
+for A, `soldQuantity===0` & `leftQuantity>0` for B, `leftMarketValue>0`, `limited===true`.
+On the card: **"Worth left at station"** is visible. Open the breakdown → A appears
+**above** the separator, B **below** it.
+
+**21C — A type straddles the cargo line.**
+Seed one line, `quantity = 1000`, of a type with known `unitVolume` (read it from a
+prior response). Set **cargo = 800 × unitVolume**. Refetch. Assert the card shows
+`/800 of 1000 units/` (or your computed split), and in the breakdown the **same item
+name appears both above** (hauled 800) **and below** (left 200) the separator.
+
+**21D — Realized-profit floor drops a bundle nothing valuable fits.**
+Using the 21B contract, set **cargo below A's `unitVolume`** (so only filler "fits",
+realized ≈ 0). Refetch. Assert `#card-pkg:<id>` **disappears** (realized profit < 100k
+floor). Restore cargo → it returns.
+
+**21E — Transit freezes the loaded subset.**
+With a limited bundle (21C-style, partially fitting): pin → **Confirm Buy** (transit).
+Note the carried "X of Y units" on the pinned `#card-pp:<id>`. Now
+`change_buy_price` **down** at the dest and refetch a couple of times. **Assert the
+carried unit count does NOT change** (the load is frozen) while the profit headline /
+border react (down/zero). Then **Sell Elsewhere** → the modal lists destinations for
+the **carried subset**; Redirect updates the dest without changing the carried units.
+
+**21F — Bulky item is kept; the cheapest small item is dropped (income-maximizing,
+not greedy).**
+*Regression for the "bundle disappears when I shrink cargo" bug.* The fit maximizes
+destination income, so a big-volume / high-TOTAL-value unit (a ship) must be kept by
+dropping cheaper small items — NOT crowded out by small high-ISK/m³ modules.
+Seed one contract with:
+- **Bulky item** — 1 unit, large `unitVolume` (e.g. a ship ~10 000 m³), with a high
+  destination value (boost its dest buy price via `change_buy_price`). Alone it's
+  most of the bundle's worth.
+- **Several small items** — tiny `unitVolume` (e.g. 10 m³), with **distinct** dest
+  values so their ISK/m³ ordering is known (some far higher ISK/m³ than the ship).
+Set `price` so the bundle is only profitable if the ship is hauled.
+Steps & asserts (read `/api/hauling` `contents[]`):
+1. Cargo = full bundle volume → all fit, `limited===false`, note profit.
+2. Cargo = full − (one small item's volume): the **card still renders** (it must NOT
+   vanish), `limited===true`, the ship line has `soldQuantity===1` (kept), and the
+   **single left line is the lowest-dest-value small item** (`leftQuantity>0`), while
+   the higher-value smalls are still hauled. Realized profit stays above the 100k floor.
+3. Shrink cargo by one more small item's volume → it sheds the **next-cheapest** small
+   item, ship still kept, card still present.
+Before the fix this dropped the *ship* and the card disappeared — so the key assertion
+is **card present + ship hauled + cheapest small left**.
+
+> Scope note: the optimizer is exact for normal bundles (a handful of types, at most a
+> few bulky items). For a pathological bundle with **5+ distinct bulky types** it may
+> fall back to greedy (a bounded safety valve), so don't assert strict optimality there.
+
+**Pass criteria:** 21A–21F hold; the API `contents[]` math is self-consistent
+(`soldQuantity + leftQuantity === quantity` per line; `Σ soldQuantity·unitVolume ===
+hauledVolume`); no console errors.
+
+> Tip for 21B/21C seeding: give the seeded `contract.volume` a value consistent with
+> `Σ line.quantity × unitVolume` so the card's totals read sensibly, though the
+> knapsack itself uses per-line `unitVolume` from the SDE, not `contract.volume`.
