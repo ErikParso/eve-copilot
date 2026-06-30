@@ -40,7 +40,7 @@ export function ContractTypeSelect({ value, onChange }: ContractTypeSelectProps)
   return (
     <TextField
       select
-      size="small"
+      size="medium"
       fullWidth
       label="Opportunity type"
       value={draft}

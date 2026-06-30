@@ -77,7 +77,7 @@ function NumberPrefField({
 export function CourierContractsPage() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const { status, error, market, total } = useAtomValue(haulingDataAtom);
+  const { status, error, total } = useAtomValue(haulingDataAtom);
   const rows = useAtomValue(haulingRowsAtom);
   const [prefs, setPrefs] = useAtom(preferencesAtom);
 
@@ -112,7 +112,6 @@ export function CourierContractsPage() {
   }, []);
 
   const loading = status === 'idle' || status === 'loading';
-  const warming = status === 'success' && market !== null && market.status !== 'ready';
 
   // Pinned hauls are revalidated by the global hauling reload (same request +
   // same market snapshot as the opportunities), so there is no per-page polling.
@@ -166,13 +165,6 @@ export function CourierContractsPage() {
 
       <Stack spacing={2}>
         {status === 'error' && <Alert severity="error">Could not load the data: {error}</Alert>}
-
-        {warming && (
-          <Alert severity="warning">
-            The market data is still loading region by region — arbitrage hauls may be incomplete until every
-            region is in. This fills in and refreshes automatically; check the Market Data tab to watch progress.
-          </Alert>
-        )}
 
         {/* Settings Panel is always shown immediately */}
         <Paper
