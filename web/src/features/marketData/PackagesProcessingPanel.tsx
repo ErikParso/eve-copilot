@@ -15,6 +15,7 @@ interface PackagesFreshness {
   pending: number;
   opportunities: number;
   lastReconcileAt: number | null;
+  marketBuiltAt: number | null;
 }
 
 function ageLabel(ms: number | null): string {
@@ -134,8 +135,8 @@ export function PackagesProcessingPanel() {
           {data ? (
             <Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Public sell contracts (item_exchange bundles) ride on the contracts crawl; each contract's contents are fetched
-                once through the shared ESI rate limiter, hub regions first. Bought/expired contracts are evicted automatically.
+                Profit and the best destination for each bundle update live with the market — about once a minute, the same as
+                arbitrage. We also scan for newly-listed and bought/expired contracts every few minutes.
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 <StatPill label="Live contracts" value={live} />
@@ -145,9 +146,14 @@ export function PackagesProcessingPanel() {
                 <StatPill label="Skipped (want-to-buy)" value={data.skipped} />
                 <StatPill label="Profitable bundles" value={data.opportunities} />
               </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-                Last reconciled with the contracts crawl {ageLabel(data.lastReconcileAt)}.
-              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: 2 }}>
+                <Typography variant="caption" color="text.secondary">
+                  💹 Prices updated {ageLabel(data.marketBuiltAt)} (live with the market).
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  📦 Contract list checked {ageLabel(data.lastReconcileAt)}.
+                </Typography>
+              </Box>
             </Box>
           ) : (
             <Box>
