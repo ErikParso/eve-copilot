@@ -11,6 +11,9 @@ import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { BreakdownModal } from '@/components/BreakdownModal';
 import MapIcon from '@mui/icons-material/Map';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { formatIsk, formatIskMillions, formatNumber, formatVolume } from '@/utils/format';
 import packageBg from '@/assets/card-package.png';
 import { LocationCell } from '@/features/courierContracts/components/LocationCell';
@@ -88,6 +91,7 @@ export const PackageCard = memo(function PackageCard({
 	const isPinned = pinnedPackages.some((p) => p.id === row.id);
 	const [sellModalOpen, setSellModalOpen] = useState(false);
 	const [contentsModalOpen, setContentsModalOpen] = useState(false);
+	const [leftExpanded, setLeftExpanded] = useState(false); // left-at-station list collapsed by default
 
 	// Pulse the card border when the server returns a changed profit value.
 	const prevProfitRef = useRef<number | undefined>(undefined);
@@ -112,7 +116,22 @@ export const PackageCard = memo(function PackageCard({
 	const statusKind = pinnedWithLive?.statusKind ?? null;
 	const statusMessage = pinnedWithLive?.statusMessage ?? '';
 
+	const totalUnits = row.contents.reduce((s, l) => s + l.quantity, 0);
+	const hauledUnits = row.contents.reduce((s, l) => s + l.soldQuantity, 0);
+	const hasLeft = row.leftMarketValue > 0 || row.contents.some((l) => l.leftQuantity > 0);
 
+	// Breakdown rows: hauled items first, a separator, then the items left in station.
+	// A type can straddle the line, appearing in both halves.
+	type BreakdownRow =
+		| { kind: 'hauled'; line: PackageRow['contents'][number] }
+		| { kind: 'left'; line: PackageRow['contents'][number] }
+		| { kind: 'separator' };
+	const leftRows = row.contents.filter((l) => l.leftQuantity > 0).map((l) => ({ kind: 'left' as const, line: l }));
+	const breakdownRows: BreakdownRow[] = [
+		...row.contents.filter((l) => l.soldQuantity > 0).map((l) => ({ kind: 'hauled' as const, line: l })),
+		...(hasLeft ? [{ kind: 'separator' as const }] : []),
+		...(leftExpanded ? leftRows : []),
+	];
 
 	const handlePinClick = () => {
 		if (isPinned) unpinPackage(row.id);
@@ -235,7 +254,10 @@ export const PackageCard = memo(function PackageCard({
 						</Box>
 						<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
 							<Typography variant="caption" color="text.secondary">
-								{`${formatNumber(row.contents.reduce((s, l) => s + l.quantity, 0), 0)} unit${row.contents.reduce((s, l) => s + l.quantity, 0) === 1 ? '' : 's'}`} · {formatVolume(row.totalVolume)}
+								{hauledUnits === totalUnits
+									? `${formatNumber(totalUnits, 0)} unit${totalUnits === 1 ? '' : 's'}`
+									: `${formatNumber(hauledUnits, 0)} of ${formatNumber(totalUnits, 0)} units`}{' '}
+								· {formatVolume(row.hauledVolume)} carried
 							</Typography>
 							<Tooltip title="View package contents breakdown">
 								<IconButton
@@ -271,11 +293,22 @@ export const PackageCard = memo(function PackageCard({
 					<Stack spacing={0.5}>
 						<Stat label="Price (you pay)" value={formatIskMillions(row.price)} />
 						<Stat label="Sale value (you get)" value={formatIskMillions(row.sellValue)} />
-						<Stat
-							label="Items sellable"
-							value={`${formatNumber(row.contents.reduce((s, l) => s + l.soldQuantity, 0), 0)} / ${formatNumber(row.contents.reduce((s, l) => s + l.quantity, 0), 0)}`}
-							color={row.contents.reduce((s, l) => s + l.soldQuantity, 0) < row.contents.reduce((s, l) => s + l.quantity, 0) ? 'warning.main' : undefined}
-						/>
+						<Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'center' }}>
+							<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+								<Typography variant="caption" color="text.secondary">
+									Worth left at station
+								</Typography>
+								<Tooltip
+									arrow
+									title="Items that didn't fit your ship are left at the station. Valued at nominal market price — you keep the bundle's full price as a cost, but won't sell these here."
+								>
+									<InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.secondary', cursor: 'help', opacity: 0.8, '&:hover': { opacity: 1 } }} />
+								</Tooltip>
+							</Box>
+							<Typography variant="caption" sx={{ fontWeight: 600, textAlign: 'right', color: 'text.secondary' }}>
+								{formatIskMillions(row.leftMarketValue)}
+							</Typography>
+						</Box>
 					</Stack>
 
 					{/* Pinned action buttons */}
@@ -321,19 +354,48 @@ export const PackageCard = memo(function PackageCard({
 				open={contentsModalOpen}
 				onClose={() => setContentsModalOpen(false)}
 				title={`Package Contents (${row.contents.length} ${row.contents.length === 1 ? 'type' : 'types'})`}
-				description="Detailed list of items included in this package contract."
+				description="You buy the whole bundle, then carry only what fits your hold — the rest is left at the station."
 				columns={[
 					{ header: 'Item Name', gridWidth: '2fr' },
 					{ header: 'Quantity', gridWidth: '1fr', align: 'right' },
-					{ header: 'Est. Sell Value', gridWidth: '1fr', align: 'right' },
+					{ header: 'Volume', gridWidth: '1fr', align: 'right' },
+					{ header: 'Value', gridWidth: '1fr', align: 'right' },
 				]}
-				items={row.contents}
-				renderRow={(line) => {
-					const unsellable = line.isBlueprintCopy || line.sellValue <= 0;
-					const hasShortfall = line.soldQuantity < line.quantity;
+				items={breakdownRows}
+				renderRow={(brow) => {
+					if (brow.kind === 'separator') {
+						return (
+							<Box
+								onClick={() => setLeftExpanded((v) => !v)}
+								sx={{
+									gridColumn: '1 / -1',
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									gap: 1,
+									cursor: 'pointer',
+									userSelect: 'none',
+									'&:hover': { opacity: 0.85 },
+								}}
+							>
+								<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+									{leftExpanded ? <ExpandLessIcon sx={{ fontSize: 16, color: 'warning.main' }} /> : <ExpandMoreIcon sx={{ fontSize: 16, color: 'warning.main' }} />}
+									<Typography variant="caption" sx={{ fontWeight: 700, color: 'warning.main', textTransform: 'uppercase', letterSpacing: 0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+										Won't fit — left at the station
+									</Typography>
+								</Box>
+								<Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+									{leftRows.length} {leftRows.length === 1 ? 'item' : 'items'} · worth ~{formatIsk(row.leftMarketValue)}
+								</Typography>
+							</Box>
+						);
+					}
+					const { line } = brow;
+					const isLeft = brow.kind === 'left';
+					const qty = isLeft ? line.leftQuantity : line.soldQuantity;
 					return (
 						<>
-							<Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', opacity: unsellable ? 0.6 : 1 }}>
+							<Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', opacity: isLeft ? 0.6 : 1 }}>
 								{line.itemName}
 								{line.isBlueprintCopy && (
 									<Typography component="span" variant="caption" sx={{ ml: 1, color: 'info.main', bgcolor: 'info.light', px: 0.5, py: 0.1, borderRadius: 0.5, opacity: 0.8 }}>
@@ -341,24 +403,26 @@ export const PackageCard = memo(function PackageCard({
 									</Typography>
 								)}
 							</Typography>
-							<Typography variant="body2" sx={{ fontFamily: 'monospace', textAlign: 'right', opacity: unsellable ? 0.6 : 1 }}>
-								{formatNumber(line.quantity, 0)}
-								{hasShortfall && !unsellable && (
-									<Typography component="span" variant="caption" sx={{ display: 'block', color: 'warning.main', fontSize: '0.75rem' }}>
-										(Sold: {formatNumber(line.soldQuantity, 0)})
-									</Typography>
-								)}
+							<Typography variant="body2" sx={{ fontFamily: 'monospace', textAlign: 'right', opacity: isLeft ? 0.6 : 1 }}>
+								{formatNumber(qty, 0)}
+							</Typography>
+							<Typography variant="body2" sx={{ fontFamily: 'monospace', textAlign: 'right', color: 'text.secondary', opacity: isLeft ? 0.6 : 1 }}>
+								{formatVolume(qty * line.unitVolume)}
 							</Typography>
 							<Typography
 								variant="body2"
 								sx={{
 									fontFamily: 'monospace',
-									color: unsellable ? 'text.disabled' : 'success.main',
+									color: isLeft ? 'text.disabled' : 'success.main',
 									textAlign: 'right',
-									opacity: unsellable ? 0.6 : 1,
+									opacity: isLeft ? 0.6 : 1,
 								}}
 							>
-								{unsellable ? "Can't sell" : formatIsk(line.sellValue)}
+								{isLeft
+									? line.marketPrice === null
+										? '—'
+										: `~${formatIsk(line.leftMarketValue)}`
+									: formatIsk(line.sellValue)}
 							</Typography>
 						</>
 					);

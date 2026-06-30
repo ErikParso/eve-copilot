@@ -52,6 +52,9 @@ export function PackageSellDestinationsModal({ open, onClose, pkg }: { open: boo
       newSellValue: option.sellValue,
       newProfit: option.profit,
       newContents: option.contents,
+      newHauledVolume: option.hauledVolume,
+      newLeftMarketValue: option.leftMarketValue,
+      newLimited: option.limited,
     });
     onClose();
   };
@@ -76,7 +79,11 @@ export function PackageSellDestinationsModal({ open, onClose, pkg }: { open: boo
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            lines: pkg.contents.map((l) => ({ typeId: l.typeId, quantity: l.quantity, isBlueprintCopy: l.isBlueprintCopy })),
+            // The carried subset (what's actually in the ship) is what we're trying
+            // to offload elsewhere.
+            lines: pkg.contents
+              .filter((l) => l.soldQuantity > 0)
+              .map((l) => ({ typeId: l.typeId, quantity: l.soldQuantity, isBlueprintCopy: l.isBlueprintCopy })),
             price: pkg.price,
             origin,
             routeType: prefs.routeType,

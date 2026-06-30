@@ -1,19 +1,26 @@
 import type { ContractEndpoint, RouteSystem } from '@/features/courierContracts/types';
 
-/** One line of a sell-contract package, with its liquidation result at the
- *  chosen destination (sold qty + gross value; unsold/BPC lines value 0). */
+/** One line of a sell-contract package, fitted to the cargo hold: what you carry
+ *  & sell at the destination, and what's left in station (valued at market). A
+ *  type can straddle the cargo line — part hauled, part left. */
 export interface PackageLineResult {
   typeId: number;
   itemName: string;
   quantity: number;
   /** Blueprint copies can't be sold on the market — always valued at 0. */
   isBlueprintCopy: boolean;
-  /** Units the destination's reachable buy orders can absorb (≤ quantity). */
-  soldQuantity: number;
-  /** Gross ISK the sold units fetch (before sales tax). */
-  sellValue: number;
   /** Volume of one unit (m³). */
   unitVolume: number;
+  /** CCP reference value per unit (ISK), or null. */
+  marketPrice: number | null;
+  /** Units carried to the destination and sold there. */
+  soldQuantity: number;
+  /** Gross ISK those hauled units fetch at the destination (before tax). */
+  sellValue: number;
+  /** Units left in station (don't fit the hold, or can't sell at the dest). */
+  leftQuantity: number;
+  /** Nominal market value of the left-behind units. */
+  leftMarketValue: number;
 }
 
 /**
@@ -28,14 +35,20 @@ export interface PackageItem {
   source: ContractEndpoint;
   /** The station that liquidates the bundle for the most profit. */
   dest: ContractEndpoint;
-  /** Fixed price paid for the whole package (the capital at risk). */
+  /** Fixed price paid for the whole package (capital at risk, regardless of fit). */
   price: number;
-  /** Total package volume (m³). */
+  /** Full bundle volume (m³). */
   totalVolume: number;
-  /** Per-line breakdown at `dest`. */
+  /** Volume actually carried to the destination (m³) — the fitted subset. */
+  hauledVolume: number;
+  /** Per-line fitted breakdown (hauled vs left) at `dest`. */
   contents: PackageLineResult[];
-  /** Σ gross sell value across all lines at `dest` (before tax). */
+  /** Σ gross dest revenue of the hauled units (before tax). */
   sellValue: number;
+  /** Σ nominal market value of the units left in station. */
+  leftMarketValue: number;
+  /** True when cargo forced part of the bundle to be left behind. */
+  limited: boolean;
   /** Net profit after sales tax: sellValue·(1−tax) − price. */
   profit: number;
   /** profit ÷ price × 100. */

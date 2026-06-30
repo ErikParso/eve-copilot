@@ -53,7 +53,20 @@ export const executePackageAtom = atom(null, (_get, set, id: string) => {
 /** Reroute a transit package to a different destination (sell elsewhere). */
 export const redirectPackageAtom = atom(
   null,
-  (_get, set, p: { id: string; newDest: ContractEndpoint; newSellValue: number; newProfit: number; newContents: PackageLineResult[] }) => {
+  (
+    _get,
+    set,
+    p: {
+      id: string;
+      newDest: ContractEndpoint;
+      newSellValue: number;
+      newProfit: number;
+      newContents: PackageLineResult[];
+      newHauledVolume: number;
+      newLeftMarketValue: number;
+      newLimited: boolean;
+    },
+  ) => {
     set(pinnedPackagesAtom, (prev) =>
       prev.map((pkg) => {
         if (pkg.id !== p.id) return pkg;
@@ -63,6 +76,9 @@ export const redirectPackageAtom = atom(
           sellValue: p.newSellValue,
           profit: p.newProfit,
           contents: p.newContents,
+          hauledVolume: p.newHauledVolume,
+          leftMarketValue: p.newLeftMarketValue,
+          limited: p.newLimited,
           originalProfit: p.newProfit,
           buyerGone: undefined,
         };
@@ -76,6 +92,9 @@ export const redirectPackageAtom = atom(
 export interface PinnedPackageStatus {
   id: string;
   sellValue: number;
+  hauledVolume: number;
+  leftMarketValue: number;
+  limited: boolean;
   profit: number;
   marginPct: number;
   contents: PackageLineResult[];
@@ -100,12 +119,19 @@ export const updatePinnedPackageStatusesAtom = atom(null, (_get, set, statuses: 
     prev.map((p) => {
       const live = map.get(p.id);
       if (!live) return p;
+      // Transit: the load is committed in the ship, so keep the frozen manifest
+      // (contents / hauled volume / worth-left) and only refresh the live economics
+      // + routes. Planning re-knapsacks, so take the server's fitted breakdown.
+      const frozen = p.status === 'transit';
       return {
         ...p,
         sellValue: live.sellValue,
+        hauledVolume: frozen ? p.hauledVolume : live.hauledVolume,
+        leftMarketValue: frozen ? p.leftMarketValue : live.leftMarketValue,
+        limited: frozen ? p.limited : live.limited,
         profit: live.profit,
         marginPct: live.marginPct,
-        contents: live.contents,
+        contents: frozen ? p.contents : live.contents,
         contractGone: live.contractGone,
         buyerGone: live.buyerGone,
         approachRoute: live.approachRoute,

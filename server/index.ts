@@ -128,7 +128,8 @@ function parsePackageStatusLines(value: unknown): PackageStatusLine[] {
     const typeId = Number(e.typeId);
     const quantity = Number(e.quantity);
     if (!Number.isFinite(typeId) || !Number.isFinite(quantity)) continue;
-    out.push({ typeId, quantity, isBlueprintCopy: e.isBlueprintCopy === true });
+    const hauledQuantity = e.hauledQuantity !== undefined && Number.isFinite(Number(e.hauledQuantity)) ? Number(e.hauledQuantity) : undefined;
+    out.push({ typeId, quantity, isBlueprintCopy: e.isBlueprintCopy === true, hauledQuantity });
   }
   return out;
 }
@@ -464,6 +465,7 @@ async function main() {
       // Pinned packages revalidated against the SAME snapshot as the opportunities.
       const pinnedPackageStatuses = resolvePinnedPackagesStatus(parsePinnedPackagesRequest(req.body?.packages), {
         taxFraction: taxPct / 100,
+        capacity,
         origin,
         routeType,
         kills,

@@ -22,10 +22,12 @@ import { dangerForSystems } from './danger.js';
 import { getSnapshot, regionPriorityRank, type TypeBook } from './market.js';
 import { poolBidsForDrop, DEFAULT_SALES_TAX, MIN_PROFIT, type CandidateParams } from './arbitrage.js';
 import { scoreAttractivity, type AttractivityWeights } from './arbitrageScore.js';
+import { getMarketPrice } from './prices.js';
 import type { ContractEndpoint, PublicContract } from './types.js';
 import type {
   PackageLine,
   PackageLineResult,
+  PackageRung,
   PackageOpportunity,
   PackageItem,
   PackageStatusLine,
@@ -33,6 +35,10 @@ import type {
   PinnedPackageStatusResponse,
   RouteSystem,
 } from './types.js';
+
+// Most bid rungs we keep per line for the cargo knapsack — generous enough for
+// normal items; pathologically deep ones keep the dearest top.
+const MAX_LADDER_RUNGS = 80;
 
 // --- ESI contract-contents shape ---------------------------------------------
 
@@ -224,45 +230,59 @@ interface Drop {
 }
 
 /** Liquidate one line against the bids reachable from a drop station, up to the
- *  line quantity (no profitability break — the bundle is owned whole). */
-function liquidateLine(line: LiquidationLine, book: TypeBook | undefined, drop: Drop): { soldQuantity: number; sellValue: number } {
-  if (!book || line.isBlueprintCopy) return { soldQuantity: 0, sellValue: 0 };
+ *  line quantity (no profitability break — the bundle is owned whole). Records the
+ *  consumed bid ladder so the per-request cargo knapsack can re-fill by ISK/m³. */
+function liquidateLine(line: LiquidationLine, book: TypeBook | undefined, drop: Drop): { soldQuantity: number; sellValue: number; rungs: PackageRung[] } {
+  if (!book || line.isBlueprintCopy) return { soldQuantity: 0, sellValue: 0, rungs: [] };
   const dests = book.buys.length > MAX_DEST_STATIONS_PER_LINE ? book.buys.slice(0, MAX_DEST_STATIONS_PER_LINE) : book.buys;
   const bids = poolBidsForDrop(dests, { station: drop.station, system: drop.system, best: -Infinity, orders: [] });
   let sold = 0;
   let value = 0;
+  const rungs: PackageRung[] = [];
   for (const bid of bids) {
     if (sold >= line.quantity) break;
     const take = Math.min(bid.volume, line.quantity - sold);
     if (take <= 0) continue;
     sold += take;
     value += take * bid.price;
+    if (rungs.length < MAX_LADDER_RUNGS) rungs.push({ units: take, sell: bid.price });
   }
-  return { soldQuantity: sold, sellValue: value };
+  return { soldQuantity: sold, sellValue: value, rungs };
 }
 
-/** Price the whole bundle at one drop station: per-line results + total gross. */
+/**
+ * Price the whole bundle at one drop station as the capacity-UNBOUNDED fit:
+ * everything sellable is "hauled", units with no dest bid are "left" (valued at
+ * nominal market price). Each line carries its bid ladder for the later knapsack.
+ */
 function priceLinesAtDrop(lines: LiquidationLine[], drop: Drop, byType: Map<number, TypeBook>): { results: PackageLineResult[]; sellValue: number } {
   let total = 0;
   const results: PackageLineResult[] = [];
   for (const line of lines) {
-    const { soldQuantity, sellValue } = liquidateLine(line, byType.get(line.typeId), drop);
+    const { soldQuantity, sellValue, rungs } = liquidateLine(line, byType.get(line.typeId), drop);
     const type = getType(line.typeId);
+    const unitVolume = type?.volume ?? 0;
+    const marketPrice = getMarketPrice(line.typeId);
+    const leftQuantity = Math.max(0, line.quantity - soldQuantity);
     results.push({
       typeId: line.typeId,
       itemName: type?.name ?? `Type ${line.typeId}`,
       quantity: line.quantity,
       isBlueprintCopy: line.isBlueprintCopy,
-      unitVolume: type?.volume ?? 0,
+      unitVolume,
+      marketPrice,
       soldQuantity,
       sellValue,
+      leftQuantity,
+      leftMarketValue: leftQuantity * (marketPrice ?? 0),
+      rungs,
     });
     total += sellValue;
   }
   return { results, sellValue: total };
 }
 
-/** Pick the drop station that liquidates the bundle for the most gross value. */
+/** Pick the drop station that liquidates the FULL bundle for the most gross value. */
 function bestDropForLines(lines: LiquidationLine[], byType: Map<number, TypeBook>): { drop: Drop; results: PackageLineResult[]; sellValue: number } | null {
   const candidates = collectCandidateDrops(lines.map((l) => byType.get(l.typeId)));
   if (candidates.length === 0) return null;
@@ -274,6 +294,166 @@ function bestDropForLines(lines: LiquidationLine[], byType: Map<number, TypeBook
   return best;
 }
 
+/**
+ * Fit a priced bundle to a cargo hold. You pay the full price regardless; you
+ * carry the subset that maximises destination revenue within `capacity` and
+ * abandon the rest in station (valued at nominal market price). A type can
+ * straddle the cargo line (part hauled, part left). Strips the rungs from the
+ * result.
+ *
+ * Greedy-by-ISK/m³ alone is wrong here: it's only optimal for divisible goods,
+ * so a single big-volume / low-ISK-per-m³ but high-TOTAL-value unit (a ship) gets
+ * crowded out by small high-density modules even when carrying it (and dropping a
+ * cheap module instead) is far better. So we ENUMERATE the bulky units (those few
+ * enough to fit that integrality matters) and greedily fill the divisible
+ * remainder for each combination — exact for the common "one ship + modules" case,
+ * with a combination cap that falls back to pure greedy for pathological bundles.
+ */
+interface ScaledBundle {
+  contents: PackageLineResult[];
+  realizedValue: number;
+  hauledVolume: number;
+  leftMarketValue: number;
+  limited: boolean;
+}
+// A line is "bulky" (enumerated) when fewer than this many of its units fit — i.e.
+// unitVolume × this > capacity; greedy's integrality gap only bites such items.
+const BULKY_FIT_THRESHOLD = 10;
+// Cap on enumerated bulky combinations before falling back to pure greedy.
+const MAX_BULKY_COMBOS = 20_000;
+
+function scaleBundleToCargo(lines: PackageLineResult[], capacity: number): ScaledBundle {
+  const n = lines.length;
+  const sellableUnits = lines.map((l) => (l.rungs ?? []).reduce((s, r) => s + r.units, 0));
+  // Gross revenue of the top-k (dearest) units of a line.
+  const valueOfTopK = (li: number, k: number): number => {
+    let rem = k;
+    let v = 0;
+    for (const r of lines[li].rungs ?? []) {
+      if (rem <= 0) break;
+      const t = Math.min(r.units, rem);
+      v += t * r.sell;
+      rem -= t;
+    }
+    return v;
+  };
+
+  // hauled[li] = units of line li carried in the best fit found.
+  let hauled = new Array<number>(n).fill(0);
+
+  if (capacity === Infinity) {
+    hauled = sellableUnits.slice(); // everything sellable fits
+  } else {
+    const fitOf = (li: number): number => {
+      const uv = lines[li].unitVolume;
+      return Math.min(sellableUnits[li], uv > 0 ? Math.floor(capacity / uv) : sellableUnits[li]);
+    };
+    let bulky: number[] = [];
+    const fine: number[] = [];
+    for (let li = 0; li < n; li++) {
+      if (lines[li].unitVolume > 0 && lines[li].unitVolume * BULKY_FIT_THRESHOLD > capacity && sellableUnits[li] > 0) bulky.push(li);
+      else fine.push(li);
+    }
+    // Bound the enumeration; fall back to pure greedy (all-fine) if too large.
+    let combos = 1;
+    for (const li of bulky) combos *= fitOf(li) + 1;
+    if (combos > MAX_BULKY_COMBOS) {
+      bulky = [];
+      fine.length = 0;
+      for (let li = 0; li < n; li++) fine.push(li);
+    }
+
+    // Pre-sort the divisible (fine) rungs by ISK/m³ once; greedy fill is optimal for them.
+    interface FR {
+      li: number;
+      units: number;
+      sell: number;
+      uv: number;
+    }
+    const fineRungs: FR[] = [];
+    for (const li of fine) for (const r of lines[li].rungs ?? []) fineRungs.push({ li, units: r.units, sell: r.sell, uv: lines[li].unitVolume });
+    fineRungs.sort((a, b) => b.sell / (b.uv || Number.EPSILON) - a.sell / (a.uv || Number.EPSILON));
+    const fineFill = (cap: number): { counts: number[]; value: number } => {
+      const counts = new Array<number>(n).fill(0);
+      let value = 0;
+      let c = cap;
+      for (const r of fineRungs) {
+        let take = r.units;
+        if (r.uv > 0) {
+          const fit = Math.floor(c / r.uv);
+          if (fit <= 0) continue;
+          take = Math.min(take, fit);
+        }
+        if (take <= 0) continue;
+        counts[r.li] += take;
+        value += take * r.sell;
+        if (r.uv > 0) c -= take * r.uv;
+      }
+      return { counts, value };
+    };
+
+    // Enumerate how many units to take of each bulky line; greedily fill the rest.
+    const bulkyFit = bulky.map(fitOf);
+    let bestValue = -Infinity;
+    const picks = new Array<number>(n).fill(0);
+    const choose = (idx: number, volUsed: number, valAcc: number): void => {
+      if (idx === bulky.length) {
+        const fr = fineFill(capacity - volUsed);
+        const total = valAcc + fr.value;
+        if (total > bestValue) {
+          bestValue = total;
+          const h = fr.counts;
+          for (const li of bulky) h[li] = picks[li];
+          hauled = h;
+        }
+        return;
+      }
+      const li = bulky[idx];
+      const uv = lines[li].unitVolume;
+      for (let k = 0; k <= bulkyFit[idx]; k++) {
+        const vol = volUsed + k * uv;
+        if (vol > capacity) break;
+        picks[li] = k;
+        choose(idx + 1, vol, valAcc + valueOfTopK(li, k));
+      }
+      picks[li] = 0;
+    };
+    choose(0, 0, 0);
+  }
+
+  let realizedValue = 0;
+  let hauledVolume = 0;
+  let leftMarketValue = 0;
+  let limited = false;
+  const contents: PackageLineResult[] = lines.map((l, li) => {
+    const soldQuantity = hauled[li];
+    const sellValue = valueOfTopK(li, soldQuantity);
+    const leftQuantity = Math.max(0, l.quantity - soldQuantity);
+    const leftMV = leftQuantity * (l.marketPrice ?? 0);
+    realizedValue += sellValue;
+    hauledVolume += soldQuantity * l.unitVolume;
+    leftMarketValue += leftMV;
+    if (leftQuantity > 0) limited = true;
+    // Shipped line: drop the rungs.
+    return {
+      typeId: l.typeId,
+      itemName: l.itemName,
+      quantity: l.quantity,
+      isBlueprintCopy: l.isBlueprintCopy,
+      unitVolume: l.unitVolume,
+      marketPrice: l.marketPrice,
+      soldQuantity,
+      sellValue,
+      leftQuantity,
+      leftMarketValue: leftMV,
+    };
+  });
+  return { contents, realizedValue, hauledVolume, leftMarketValue, limited };
+}
+
+/** Resolve one sell contract into the route-free cached opportunity: best dest +
+ *  per-line bid ladders. Economics are the capacity-unbounded fit; the discovery
+ *  prune uses the full-bundle profit (an upper bound on any realized profit). */
 function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpportunity | null {
   const source = resolveEndpoint(c.start_location_id);
   if (source.systemId === null) return null; // can't route from an unplaceable structure
@@ -285,13 +465,16 @@ function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpp
   const best = bestDropForLines(lines, snap.byType);
   if (!best || best.sellValue <= 0) return null;
 
-  // Net-profit floor, identical to arbitrage's MIN_PROFIT: a package's "income" is
-  // its NET profit (gross sale value after tax, minus the fixed price), so this
-  // drops both negative- and low-income bundles from the discovery menu. Pinned
-  // packages bypass discovery (revalidated via resolvePinnedPackagesStatus), so a
-  // transit haul you already bought still shows a negative income if the market moved.
-  const profit = best.sellValue * (1 - tax) - c.price;
-  if (profit < MIN_PROFIT) return null;
+  // Discovery floor on the FULL-bundle (capacity-unbounded) profit — an upper
+  // bound on any realized profit, so anything that can't clear MIN_PROFIT even
+  // fully sold is dropped before the per-request knapsack. The per-request step
+  // re-applies the floor to the realized (fitting) profit.
+  const fullProfit = best.sellValue * (1 - tax) - c.price;
+  if (fullProfit < MIN_PROFIT) return null;
+
+  const hauledVolume = best.results.reduce((s, l) => s + l.soldQuantity * l.unitVolume, 0);
+  const leftMarketValue = best.results.reduce((s, l) => s + l.leftMarketValue, 0);
+  const limited = best.results.some((l) => l.leftQuantity > 0);
 
   return {
     id: String(c.contract_id),
@@ -300,10 +483,14 @@ function resolveOpportunity(c: PublicContract, lines: PackageLine[]): PackageOpp
     dest: resolveEndpoint(best.drop.station, best.drop.system),
     price: c.price,
     totalVolume: c.volume,
+    hauledVolume,
     contents: best.results,
     sellValue: best.sellValue,
-    profit,
-    marginPct: c.price > 0 ? (profit / c.price) * 100 : 0,
+    fullSellValue: best.sellValue,
+    leftMarketValue,
+    limited,
+    profit: fullProfit,
+    marginPct: c.price > 0 ? (fullProfit / c.price) * 100 : 0,
     salesTax: tax,
     issuedAt: Date.parse(c.date_issued),
     expiresAt: Date.parse(c.date_expired),
@@ -399,11 +586,20 @@ export function buildPackageCandidates(params: CandidateParams, kills: Map<numbe
   const tax = params.taxPct / 100;
   const out: PackageCandidate[] = [];
   for (const raw of getPackageOpportunities()) {
-    if (raw.totalVolume > params.capacity) continue; // whole package must fit the hold
-    if (raw.price > params.balance) continue; // must afford the fixed price
+    // You can buy a bundle even if it's bigger than your hold — cargo no longer
+    // hides it. It only gates on whether you can AFFORD the fixed price.
+    if (raw.price > params.balance) continue;
     const srcSys = raw.source.systemId;
     const dstSys = raw.dest.systemId;
     if (srcSys === null || dstSys === null) continue;
+
+    // Fit the bundle to the hold (carry the highest ISK/m³ items, abandon the rest)
+    // and re-price the realized profit to the requester's tax.
+    const fit = scaleBundleToCargo(raw.contents, params.capacity);
+    const profit = fit.realizedValue * (1 - tax) - raw.price;
+    // Realized-profit floor (stricter than the discovery prune): a bundle drops
+    // out if nothing valuable enough fits your hold.
+    if (profit < MIN_PROFIT) continue;
 
     const deliveryIds = getRoute(srcSys, dstSys, params.routeType);
     if (!deliveryIds) continue; // can't haul source → dest
@@ -413,12 +609,17 @@ export function buildPackageCandidates(params: CandidateParams, kills: Map<numbe
       if (!approachIds) continue; // can't reach the package from here
     }
 
-    // Re-price to the requester's sales tax (the cached opp uses the default).
-    const profit = raw.sellValue * (1 - tax) - raw.price;
-    const opp: PackageOpportunity =
-      tax === raw.salesTax
-        ? raw
-        : { ...raw, profit, marginPct: raw.price > 0 ? (profit / raw.price) * 100 : 0, salesTax: tax };
+    const opp: PackageOpportunity = {
+      ...raw,
+      contents: fit.contents,
+      sellValue: fit.realizedValue,
+      hauledVolume: fit.hauledVolume,
+      leftMarketValue: fit.leftMarketValue,
+      limited: fit.limited,
+      profit,
+      marginPct: raw.price > 0 ? (profit / raw.price) * 100 : 0,
+      salesTax: tax,
+    };
 
     const totalJumps =
       Math.max(0, deliveryIds.length - 1) + (approachIds ? Math.max(0, approachIds.length - 1) : 0);
@@ -465,18 +666,65 @@ const formatIskMillions = (value: number): string => `${formatNumber(value / 1_0
  */
 export function resolvePinnedPackagesStatus(
   reqs: PinnedPackageStatusRequest[],
-  opts: { taxFraction?: number; origin: number | null; routeType: 'safest' | 'shortest'; kills: Map<number, number> },
+  opts: { taxFraction?: number; capacity?: number; origin: number | null; routeType: 'safest' | 'shortest'; kills: Map<number, number> },
 ): PinnedPackageStatusResponse[] {
   const snap = getSnapshot();
   if (!snap) return [];
   const tax = opts.taxFraction ?? DEFAULT_SALES_TAX;
+  const capacity = opts.capacity ?? Infinity;
   const liveIds = new Set(meta.keys());
   const out: PinnedPackageStatusResponse[] = [];
 
   for (const r of reqs) {
     const drop: Drop = { station: r.dest, system: r.destSystem ?? -1 };
-    const { results, sellValue } =
-      r.destSystem !== null ? priceLinesAtDrop(r.lines, drop, snap.byType) : { results: [] as PackageLineResult[], sellValue: 0 };
+    // Planning re-knapsacks to the current hold (the load you'd take); transit
+    // re-prices the loaded subset (each line's `hauledQuantity`), leaving the rest
+    // at market value (the choice is frozen — the cargo is already aboard).
+    let results: PackageLineResult[] = [];
+    let sellValue = 0;
+    let hauledVolume = 0;
+    let leftMarketValue = 0;
+    let limited = false;
+    if (r.destSystem !== null) {
+      if (r.status === 'planning') {
+        const priced = priceLinesAtDrop(r.lines, drop, snap.byType);
+        const fit = scaleBundleToCargo(priced.results, capacity);
+        results = fit.contents;
+        sellValue = fit.realizedValue;
+        hauledVolume = fit.hauledVolume;
+        leftMarketValue = fit.leftMarketValue;
+        limited = fit.limited;
+      } else {
+        for (const line of r.lines) {
+          const hauled = line.hauledQuantity ?? line.quantity;
+          const { soldQuantity, sellValue: v } = liquidateLine(
+            { typeId: line.typeId, quantity: hauled, isBlueprintCopy: line.isBlueprintCopy },
+            snap.byType.get(line.typeId),
+            drop,
+          );
+          const type = getType(line.typeId);
+          const uv = type?.volume ?? 0;
+          const mp = getMarketPrice(line.typeId);
+          const leftQ = Math.max(0, line.quantity - hauled);
+          results.push({
+            typeId: line.typeId,
+            itemName: type?.name ?? `Type ${line.typeId}`,
+            quantity: line.quantity,
+            isBlueprintCopy: line.isBlueprintCopy,
+            unitVolume: uv,
+            marketPrice: mp,
+            soldQuantity,
+            sellValue: v,
+            leftQuantity: leftQ,
+            leftMarketValue: leftQ * (mp ?? 0),
+          });
+          sellValue += v;
+          hauledVolume += soldQuantity * uv;
+          leftMarketValue += leftQ * (mp ?? 0);
+          if (leftQ > 0) limited = true;
+        }
+      }
+    }
     const soldUnits = results.reduce((s, l) => s + l.soldQuantity, 0);
     const profit = sellValue * (1 - tax) - r.price;
     const marginPct = r.price > 0 ? (profit / r.price) * 100 : 0;
@@ -551,6 +799,9 @@ export function resolvePinnedPackagesStatus(
     out.push({
       id: r.id,
       sellValue,
+      hauledVolume,
+      leftMarketValue,
+      limited,
       profit,
       marginPct,
       contents: results,
@@ -640,6 +891,11 @@ export function resolvePackageSellDestinations(params: PackageSellDestinationPar
     if (!deliveryIds) continue;
     const { index: danger, steps: dangerSteps } = dangerForSystems(deliveryIds, kills);
     const profit = liq.sellValue * (1 - tax) - params.price;
+    const hauledVolume = liq.results.reduce((s, l) => s + l.soldQuantity * l.unitVolume, 0);
+    const leftMarketValue = liq.results.reduce((s, l) => s + l.leftMarketValue, 0);
+    const limited = liq.results.some((l) => l.leftQuantity > 0);
+    // Strip the cached bid ladders from the shipped lines.
+    const contents: PackageLineResult[] = liq.results.map(({ rungs: _rungs, ...rest }) => rest);
     items.push({
       id: `pkgsell:${liq.drop.station}`,
       contractId: 0,
@@ -647,8 +903,12 @@ export function resolvePackageSellDestinations(params: PackageSellDestinationPar
       dest: resolveEndpoint(liq.drop.station, liq.drop.system),
       price: params.price,
       totalVolume,
-      contents: liq.results,
+      hauledVolume,
+      contents,
       sellValue: liq.sellValue,
+      fullSellValue: liq.sellValue,
+      leftMarketValue,
+      limited,
       profit,
       marginPct: params.price > 0 ? (profit / params.price) * 100 : 0,
       salesTax: tax,
