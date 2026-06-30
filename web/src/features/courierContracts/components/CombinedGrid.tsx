@@ -2,6 +2,7 @@ import { Box, Button } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
 import { ContractCard } from './ContractCard';
 import { ArbitrageCard } from '@/features/arbitrage/components/ArbitrageCard';
+import { PackageCard } from '@/features/packages/components/PackageCard';
 import { OpportunityCardSkeleton } from './OpportunityCardSkeleton';
 import type { ResultCard } from '../combined';
 
@@ -41,6 +42,8 @@ export function CombinedGrid({
           >
             {card.kind === 'courier' || card.kind === 'pinned-courier' ? (
               <ContractCard row={card.row} isHighlighted={highlightedKey === card.key} />
+            ) : card.kind === 'package' || card.kind === 'pinned-package' ? (
+              <PackageCard row={card.row} isHighlighted={highlightedKey === card.key} />
             ) : (
               <ArbitrageCard row={card.row} isHighlighted={highlightedKey === card.key} />
             )}

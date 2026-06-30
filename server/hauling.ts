@@ -11,7 +11,8 @@ import { dangerForSystems } from './danger.js';
 import { scoreAttractivity, type AttractivityWeights } from './arbitrageScore.js';
 import { getEnrichedContracts } from './contracts.js';
 import { buildArbitrageCandidates, materializeArbitrageItem } from './arbitrage.js';
-import type { EnrichedContract, ScaledArbitrageItem, RouteSystem } from './types.js';
+import { buildPackageCandidates, materializePackageItem } from './packages.js';
+import type { EnrichedContract, ScaledArbitrageItem, PackageItem, RouteSystem } from './types.js';
 
 export interface HaulingParams {
   routeType: 'safest' | 'shortest';
@@ -27,7 +28,8 @@ export interface HaulingParams {
 // the FE renders these directly and computes no danger of its own.
 export type HaulingItem =
   | ({ kind: 'courier'; attractivity: number; danger: number; dangerSteps: string[] } & EnrichedContract)
-  | ({ kind: 'arbitrage'; attractivity: number; danger: number; dangerSteps: string[] } & ScaledArbitrageItem);
+  | ({ kind: 'arbitrage'; attractivity: number; danger: number; dangerSteps: string[] } & ScaledArbitrageItem)
+  | ({ kind: 'package'; attractivity: number; danger: number; dangerSteps: string[] } & PackageItem);
 
 export interface HaulingResponse {
   items: HaulingItem[];
@@ -63,6 +65,7 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
   const kills = await getShipKills();
 
   const arb = buildArbitrageCandidates(params, kills);
+  const pkg = buildPackageCandidates(params, kills);
 
   const contracts = await getEnrichedContracts(params.routeType, params.origin);
   // Courier filtering (collateral ≤ wallet, volume ≤ hold) stays here — it's the
@@ -70,41 +73,54 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
   const courier = contracts.contracts.filter((c) => c.collateral <= params.balance && c.volume <= params.capacity);
   const courierMetrics = courier.map((c) => contractMetrics(c, kills));
 
-  // One joint normalisation across both kinds.
+  // One joint normalisation across all three kinds (a courier 90, an arbitrage 90
+  // and a package 90 are comparable).
   const scorables = [
     ...courier.map((c, i) => ({ income: c.reward, totalJumps: courierMetrics[i].totalJumps, danger: courierMetrics[i].danger })),
     ...arb.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger })),
+    ...pkg.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger })),
   ];
   const scores = scoreAttractivity(scorables, params.weights);
 
   interface Tagged {
-    kind: 'courier' | 'arbitrage';
+    kind: 'courier' | 'arbitrage' | 'package';
     attractivity: number;
     idx: number;
   }
   const tagged: Tagged[] = [
     ...courier.map((_, i) => ({ kind: 'courier' as const, attractivity: scores[i], idx: i })),
     ...arb.map((_, j) => ({ kind: 'arbitrage' as const, attractivity: scores[courier.length + j], idx: j })),
+    ...pkg.map((_, k) => ({ kind: 'package' as const, attractivity: scores[courier.length + arb.length + k], idx: k })),
   ];
   tagged.sort((a, b) => b.attractivity - a.attractivity);
 
-  const items: HaulingItem[] = tagged.slice(0, params.limit).map((t) =>
-    t.kind === 'courier'
-      ? {
-          kind: 'courier',
-          attractivity: t.attractivity,
-          danger: courierMetrics[t.idx].danger,
-          dangerSteps: courierMetrics[t.idx].dangerSteps,
-          ...courier[t.idx],
-        }
-      : {
-          kind: 'arbitrage',
-          attractivity: t.attractivity,
-          danger: arb[t.idx].danger,
-          dangerSteps: arb[t.idx].dangerSteps,
-          ...materializeArbitrageItem(arb[t.idx], kills),
-        },
-  );
+  const items: HaulingItem[] = tagged.slice(0, params.limit).map((t) => {
+    if (t.kind === 'courier') {
+      return {
+        kind: 'courier',
+        attractivity: t.attractivity,
+        danger: courierMetrics[t.idx].danger,
+        dangerSteps: courierMetrics[t.idx].dangerSteps,
+        ...courier[t.idx],
+      };
+    }
+    if (t.kind === 'arbitrage') {
+      return {
+        kind: 'arbitrage',
+        attractivity: t.attractivity,
+        danger: arb[t.idx].danger,
+        dangerSteps: arb[t.idx].dangerSteps,
+        ...materializeArbitrageItem(arb[t.idx], kills),
+      };
+    }
+    return {
+      kind: 'package',
+      attractivity: t.attractivity,
+      danger: pkg[t.idx].danger,
+      dangerSteps: pkg[t.idx].dangerSteps,
+      ...materializePackageItem(pkg[t.idx], kills),
+    };
+  });
 
-  return { items, meta, contractsAsOf: contracts.lastModifiedAt, total: courier.length + arb.length };
+  return { items, meta, contractsAsOf: contracts.lastModifiedAt, total: courier.length + arb.length + pkg.length };
 }

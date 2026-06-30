@@ -132,7 +132,7 @@ function bidReaches(order: Order, dropStation: number, dropSystem: number, dropR
  * region- or system-range buy order resting at another station is fillable from
  * `drop` and so adds to the sellable depth there.
  */
-function poolBidsForDrop(dests: StationOrders[], drop: StationOrders): Order[] {
+export function poolBidsForDrop(dests: StationOrders[], drop: StationOrders): Order[] {
   const dropRegion = getRegion(drop.system);
   const pooled: Order[] = [];
   for (const station of dests) {

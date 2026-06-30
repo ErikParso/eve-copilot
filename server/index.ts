@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { loadSde } from './sde.js';
 import { startContractsRefresh } from './contracts.js';
+import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDestinations } from './packages.js';
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
 import { resolvePinnedHaulsStatus, resolveSellDestinations, prewarmDeliveryRoutes } from './arbitrage.js';
@@ -10,7 +11,7 @@ import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getShipKills, setTestKills, clearTestKills } from './kills.js';
-import type { PinnedHaulStatusRequest } from './types.js';
+import type { PinnedHaulStatusRequest, PinnedPackageStatusRequest, PackageStatusLine } from './types.js';
 
 // Last-resort backstop: a stray rejected promise or thrown error in any
 // background crawl must never take the whole server down (a transient ESI 504
@@ -100,6 +101,59 @@ function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
   return out;
 }
 
+/** Body numbers arrive as JSON numbers (not strings), so parseOptionalNumber —
+ *  which only accepts strings — would wrongly null them. */
+function numberOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parsePackageStatusLines(value: unknown): PackageStatusLine[] {
+  if (!Array.isArray(value)) return [];
+  const out: PackageStatusLine[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const typeId = Number(e.typeId);
+    const quantity = Number(e.quantity);
+    if (!Number.isFinite(typeId) || !Number.isFinite(quantity)) continue;
+    out.push({ typeId, quantity, isBlueprintCopy: e.isBlueprintCopy === true });
+  }
+  return out;
+}
+
+function parsePinnedPackagesRequest(value: unknown): PinnedPackageStatusRequest[] {
+  if (!Array.isArray(value)) return [];
+  const out: PinnedPackageStatusRequest[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const id = e.id;
+    const contractId = Number(e.contractId);
+    const price = Number(e.price);
+    const dest = Number(e.dest);
+    const status = e.status;
+    if (typeof id !== 'string') continue;
+    if (![contractId, price, dest].every(Number.isFinite)) continue;
+    if (status !== 'planning' && status !== 'transit') continue;
+    const lines = parsePackageStatusLines(e.lines);
+    if (lines.length === 0) continue;
+    out.push({
+      id,
+      contractId,
+      status: status as 'planning' | 'transit',
+      price,
+      lines,
+      sourceSystem: numberOrNull(e.sourceSystem),
+      dest,
+      destSystem: numberOrNull(e.destSystem),
+      originalProfit: e.originalProfit !== undefined && Number.isFinite(Number(e.originalProfit)) ? Number(e.originalProfit) : undefined,
+    });
+  }
+  return out;
+}
+
 async function main() {
   console.log('Loading SDE (stations, systems, jump graph)…');
   const meta = await loadSde();
@@ -123,6 +177,12 @@ async function main() {
   } else {
     startContractsRefresh();
     console.log('Started contracts crawl (refreshing every 10 min).');
+
+    // Sell-contract (package) service: reconciles its contract set on every
+    // contracts crawl and fetches each contract's contents once in the background
+    // (hub regions first), through the shared ESI rate limiter.
+    startPackagesService();
+    console.log('Started sell-contract (package) service.');
 
     // After each (throttled) index rebuild, re-resolve opportunities and pre-warm
     // delivery-leg routes in the background — off the request path — so requests
@@ -335,7 +395,14 @@ async function main() {
         routeType,
         kills,
       });
-      res.json({ ...result, pinnedStatuses });
+      // Pinned packages revalidated against the SAME snapshot as the opportunities.
+      const pinnedPackageStatuses = resolvePinnedPackagesStatus(parsePinnedPackagesRequest(req.body?.packages), {
+        taxFraction: taxPct / 100,
+        origin,
+        routeType,
+        kills,
+      });
+      res.json({ ...result, pinnedStatuses, pinnedPackageStatuses });
     } catch (err) {
       console.error('POST /api/hauling failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
@@ -377,6 +444,36 @@ async function main() {
       res.json({ items });
     } catch (err) {
       console.error('POST /api/arbitrage/sell-destinations failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // Where can I sell the package I'm carrying? Multi-type liquidation search,
+  // ranked by the same attractivity weights as the hauling list, routed from the
+  // caller's current system. On-demand (a transit package card's "Sell elsewhere").
+  app.post('/api/packages/sell-destinations', async (req, res) => {
+    try {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const origin = Number(b.origin);
+      const price = Number(b.price);
+      const lines = parsePackageStatusLines(b.lines);
+      if (!Number.isFinite(origin) || !Number.isFinite(price) || lines.length === 0) {
+        return res.status(400).json({ error: 'origin, price and lines are required' });
+      }
+      const w = (b.weights ?? {}) as Record<string, unknown>;
+      const weights = {
+        income: parseWeight(w.income, 5),
+        totalJumps: parseWeight(w.totalJumps, 5),
+        danger: parseWeight(w.danger, 5),
+      };
+      const kills = await getShipKills();
+      const items = resolvePackageSellDestinations(
+        { lines, price, origin, routeType: parseRouteType(b.routeType), taxPct: parseOptionalNumber(b.taxPct) ?? 4.5, weights },
+        kills,
+      );
+      res.json({ items });
+    } catch (err) {
+      console.error('POST /api/packages/sell-destinations failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });

@@ -10,9 +10,10 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom, DEFAULT_SALES_TAX_PCT } from '@/features/preferences/atoms';
 import { deriveJourney, perJump } from './journey';
-import { haulingDataAtom, attractivityWeightsAtom, type CourierBase, type ScoredCourier, type ScoredArbitrage } from './atoms';
+import { haulingDataAtom, attractivityWeightsAtom, type CourierBase, type ScoredCourier, type ScoredArbitrage, type ScoredPackage } from './atoms';
 import type { ContractEndpoint, RouteSystem } from './types';
 import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
+import type { PackageItem, PackageRow } from '@/features/packages/types';
 import {
   pinnedHaulsAtom,
   pinnedCouriersAtom,
@@ -21,6 +22,12 @@ import {
   haulingRefreshTriggerAtom,
   type PinnedHaulStatus,
 } from '@/features/arbitrage/atoms';
+import {
+  pinnedPackagesAtom,
+  updatePinnedPackageStatusesAtom,
+  packagesRefreshTriggerAtom,
+  type PinnedPackageStatus,
+} from '@/features/packages/atoms';
 
 // Background refresh aligns to the server crawl cadence (~10 min); retry sooner
 // while the market crawl is still warming up on a cold server.
@@ -72,9 +79,29 @@ type ApiArbitrageItem = Pick<
   | 'danger'
   | 'dangerSteps'
 > & { deliveryRoute: RouteSystem[] };
+type ApiPackageItem = Pick<
+  PackageItem,
+  | 'id'
+  | 'contractId'
+  | 'source'
+  | 'dest'
+  | 'price'
+  | 'totalVolume'
+  | 'contents'
+  | 'sellValue'
+  | 'profit'
+  | 'marginPct'
+  | 'salesTax'
+  | 'issuedAt'
+  | 'expiresAt'
+  | 'approachRoute'
+  | 'danger'
+  | 'dangerSteps'
+> & { deliveryRoute: RouteSystem[] };
 type ApiHaulingItem =
   | ({ kind: 'courier'; attractivity: number } & ApiContract)
-  | ({ kind: 'arbitrage'; attractivity: number } & ApiArbitrageItem);
+  | ({ kind: 'arbitrage'; attractivity: number } & ApiArbitrageItem)
+  | ({ kind: 'package'; attractivity: number } & ApiPackageItem);
 interface HaulingResponse {
   items: ApiHaulingItem[];
   meta: MarketMeta;
@@ -83,6 +110,8 @@ interface HaulingResponse {
   // Revalidation of the pinned hauls posted with the request, resolved against
   // the same snapshot as `items`.
   pinnedStatuses: PinnedHaulStatus[];
+  // Same-snapshot revalidation of the pinned packages posted with the request.
+  pinnedPackageStatuses: PinnedPackageStatus[];
 }
 
 /** Add the route-derived fields (jumps, per-jump rate, danger) + listing times. */
@@ -116,11 +145,29 @@ function hydrateArbitrage(a: ApiArbitrageItem): ScaledArbitrage {
   };
 }
 
+function hydratePackage(p: ApiPackageItem): PackageRow {
+  const j = deriveJourney(p.approachRoute, p.deliveryRoute);
+  return {
+    ...p,
+    jumpsFromCurrent: j.jumpsFromCurrent,
+    jumpsToDest: j.jumpsToDest,
+    totalJumps: j.totalJumps,
+    profitPerJump: perJump(p.profit, j.totalJumps),
+    danger: p.danger,
+    dangerSteps: p.dangerSteps,
+    // attractivity is attached in the split loop below.
+    attractivity: 0,
+    attractivitySteps: [],
+  };
+}
+
 export function useHaulingSearchController(): void {
   const store = useStore();
   const setData = useSetAtom(haulingDataAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
+  const updatePinnedPackageStatuses = useSetAtom(updatePinnedPackageStatusesAtom);
   const refreshTrigger = useAtomValue(haulingRefreshTriggerAtom);
+  const packagesRefreshTrigger = useAtomValue(packagesRefreshTriggerAtom);
   
   const setWallet = useSetAtom(characterWalletAtom);
   const setStatus = useSetAtom(characterStatusAtom);
@@ -229,11 +276,28 @@ export function useHaulingSearchController(): void {
           knownDestOrderIds: h.destOrderIds,
         }));
 
+      // Pinned packages revalidated in the SAME request/snapshot. The FE carries
+      // the full content + price, so the server needs no cache lookup.
+      const pinnedPackagesForCheck = store
+        .get(pinnedPackagesAtom)
+        .filter((p) => p.status === 'planning' || p.status === 'transit')
+        .map((p) => ({
+          id: p.id,
+          contractId: p.contractId,
+          status: p.status,
+          price: p.price,
+          lines: p.contents.map((l) => ({ typeId: l.typeId, quantity: l.quantity, isBlueprintCopy: l.isBlueprintCopy })),
+          sourceSystem: p.source.systemId,
+          dest: p.dest.locationId,
+          destSystem: p.dest.systemId,
+          originalProfit: p.originalProfit,
+        }));
+
       const haulRes = await fetch(`${API_BASE}/api/hauling?${params.toString()}`, {
         signal,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hauls: pinnedForCheck }),
+        body: JSON.stringify({ hauls: pinnedForCheck, packages: pinnedPackagesForCheck }),
       });
       if (!haulRes.ok) throw new Error(`Hauling API returned ${haulRes.status}`);
       const haulData = (await haulRes.json()) as HaulingResponse;
@@ -243,15 +307,18 @@ export function useHaulingSearchController(): void {
       // carries its attractivity); the FE does NOT re-score the list.
       const courier: ScoredCourier[] = [];
       const arbitrage: ScoredArbitrage[] = [];
+      const packages: ScoredPackage[] = [];
       for (const it of haulData.items) {
         if (it.kind === 'courier') courier.push({ ...hydrateContract(it), attractivity: it.attractivity });
-        else arbitrage.push({ ...hydrateArbitrage(it), attractivity: it.attractivity });
+        else if (it.kind === 'arbitrage') arbitrage.push({ ...hydrateArbitrage(it), attractivity: it.attractivity });
+        else packages.push({ ...hydratePackage(it), attractivity: it.attractivity });
       }
 
       setData({
         status: 'success',
         courier,
         arbitrage,
+        packages,
         error: null,
         contractsAsOf: haulData.contractsAsOf,
         market: haulData.meta,
@@ -262,6 +329,9 @@ export function useHaulingSearchController(): void {
       // back (none posted, or already executed) are left untouched.
       if (haulData.pinnedStatuses?.length) {
         updatePinnedStatuses(haulData.pinnedStatuses);
+      }
+      if (haulData.pinnedPackageStatuses?.length) {
+        updatePinnedPackageStatuses(haulData.pinnedPackageStatuses);
       }
 
       // Fetch dynamic routes for secured pinned courier items (arbitrage routes are resolved on the server)
@@ -274,6 +344,13 @@ export function useHaulingSearchController(): void {
           queries.push({ id: `c:${c.id}`, destSys: c.dropoff.systemId });
         }
       });
+      // Transit packages need the current-location → dest route too.
+      store
+        .get(pinnedPackagesAtom)
+        .filter((p) => p.status === 'transit')
+        .forEach((p) => {
+          if (p.dest?.systemId) queries.push({ id: `pp:${p.id}`, destSys: p.dest.systemId });
+        });
 
       if (org !== null && queries.length > 0) {
         const currentCache = store.get(pinnedRoutesAtom);
@@ -319,11 +396,11 @@ export function useHaulingSearchController(): void {
       setData((d) =>
         d.status === 'success'
           ? d
-          : { status: 'error', courier: [], arbitrage: [], error: message, contractsAsOf: null, market: null, total: 0 },
+          : { status: 'error', courier: [], arbitrage: [], packages: [], error: message, contractsAsOf: null, market: null, total: 0 },
       );
       return null;
     }
-  }, [store, setData, updatePinnedStatuses]);
+  }, [store, setData, updatePinnedStatuses, updatePinnedPackageStatuses]);
 
   // USER-action triggers + the scheduled background refresh. The initial load
   // and every user change show skeletons (isBg=false); the scheduled re-runs are
@@ -354,5 +431,5 @@ export function useHaulingSearchController(): void {
       return;
     }
     void run(true);
-  }, [run, origin, balance, refreshTrigger]);
+  }, [run, origin, balance, refreshTrigger, packagesRefreshTrigger]);
 }

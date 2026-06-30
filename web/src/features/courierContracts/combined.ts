@@ -7,19 +7,47 @@
 import type { CourierRow, SortOptionId } from './types';
 import { SORT_OPTIONS } from './sortContracts';
 import type { ArbitrageRow } from '@/features/arbitrage/types';
+import type { PackageRow } from '@/features/packages/types';
 import type { PinnedHaul, PinnedCourier } from '@/features/arbitrage/atoms';
+import type { PinnedPackage } from '@/features/packages/atoms';
 
 export type ResultCard =
   | { kind: 'courier'; key: string; row: CourierRow }
   | { kind: 'arbitrage'; key: string; row: ArbitrageRow }
+  | { kind: 'package'; key: string; row: PackageRow }
   | { kind: 'pinned-arbitrage'; key: string; row: PinnedHaul & { attractivity: number; attractivitySteps: string[] } }
-  | { kind: 'pinned-courier'; key: string; row: PinnedCourier & { attractivity: number; attractivitySteps: string[] } };
+  | { kind: 'pinned-courier'; key: string; row: PinnedCourier & { attractivity: number; attractivitySteps: string[] } }
+  | { kind: 'pinned-package'; key: string; row: PinnedPackage & { attractivity: number; attractivitySteps: string[] } };
 
 /** Sort value for a card under a given option (null sorts last). */
 function sortValue(card: ResultCard, sortBy: SortOptionId): number | null {
   if (card.kind === 'courier' || card.kind === 'pinned-courier') {
     const opt = SORT_OPTIONS.find((o) => o.id === sortBy);
     return opt ? opt.get(card.row) : card.row.attractivity;
+  }
+  if (card.kind === 'package' || card.kind === 'pinned-package') {
+    const p = card.row;
+    switch (sortBy) {
+      case 'attractivity':
+        return p.attractivity;
+      case 'danger':
+        return p.danger;
+      case 'income':
+        return p.profit;
+      case 'collateral':
+        return p.price; // capital tied up = the fixed package price
+      case 'cargo':
+        return p.totalVolume;
+      case 'totalJumps':
+        return p.totalJumps;
+      case 'jumpsToPickup':
+        return p.jumpsFromCurrent;
+      case 'timeRemaining':
+      case 'listedAge':
+        return null;
+      default:
+        return p.attractivity;
+    }
   }
   // Map the courier sort options onto arbitrage fields where they make sense.
   const r = card.row;
@@ -53,8 +81,8 @@ const DIRECTION = new Map(SORT_OPTIONS.map((o) => [o.id, o.direction]));
 export function sortCombined(cards: ResultCard[], sortBy: SortOptionId): ResultCard[] {
   const factor = (DIRECTION.get(sortBy) ?? 'desc') === 'asc' ? 1 : -1;
   return [...cards].sort((a, b) => {
-    const aPinned = a.kind === 'pinned-arbitrage' || a.kind === 'pinned-courier';
-    const bPinned = b.kind === 'pinned-arbitrage' || b.kind === 'pinned-courier';
+    const aPinned = a.kind === 'pinned-arbitrage' || a.kind === 'pinned-courier' || a.kind === 'pinned-package';
+    const bPinned = b.kind === 'pinned-arbitrage' || b.kind === 'pinned-courier' || b.kind === 'pinned-package';
     if (aPinned && !bPinned) return -1;
     if (!aPinned && bPinned) return 1;
 
