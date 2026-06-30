@@ -153,6 +153,130 @@ export interface ScaledArbitrageItem extends ArbitrageItem {
   limited: boolean;
 }
 
+// --- Sell contracts (packages) ----------------------------------------------
+//
+// A "package" is a public item_exchange contract sold whole for a fixed price,
+// containing multiple item types. The play mirrors arbitrage: buy the bundle at
+// the contract's station, haul it, and liquidate every type against destination
+// buy orders. Profit = Σ(per-type sell revenue after tax) − the fixed price;
+// types that can't be sold there (no bids, or blueprint copies) contribute 0.
+
+/** One line of a sell-contract package (an item type + how many). */
+export interface PackageLine {
+  typeId: number;
+  itemName: string;
+  quantity: number;
+  /** Blueprint copies can't be sold on the market — always valued at 0. */
+  isBlueprintCopy: boolean;
+}
+
+/** Per-line liquidation result at the chosen destination. */
+export interface PackageLineResult extends PackageLine {
+  /** Units the destination's reachable buy orders can absorb (≤ quantity). */
+  soldQuantity: number;
+  /** Gross ISK the sold units fetch (before sales tax). */
+  sellValue: number;
+  /** Volume of one unit (m³). */
+  unitVolume: number;
+}
+
+/**
+ * A sell contract resolved into an opportunity BEFORE routing: fixed acquisition
+ * price + content, plus the destination station that liquidates the bundle for
+ * the most profit. This is the cached middle stage (recomputed when the market
+ * snapshot or the contents cache changes). Routes are resolved per request.
+ */
+export interface PackageOpportunity {
+  /** Stable id — the ESI contract_id as a string (matches the card key shape). */
+  id: string;
+  contractId: number;
+  /** Where the package sits — you buy it whole here for `price`. */
+  source: ContractEndpoint;
+  /** The station that liquidates the bundle for the most profit. */
+  dest: ContractEndpoint;
+  /** Fixed price paid for the whole package (the capital at risk). */
+  price: number;
+  /** Total package volume (m³) — for the binary cargo-fit check. */
+  totalVolume: number;
+  /** Per-line breakdown at `dest` (sold qty + value; unsold/BPC value 0). */
+  contents: PackageLineResult[];
+  /** Σ gross sell value across all lines at `dest` (before tax). */
+  sellValue: number;
+  /** Net profit after sales tax: sellValue·(1−tax) − price. */
+  profit: number;
+  /** profit ÷ price × 100. */
+  marginPct: number;
+  /** Sales tax baked into `profit`, so it can be re-priced when the user's differs. */
+  salesTax: number;
+  /** Contract listed-at, epoch ms. */
+  issuedAt: number;
+  /** Contract expiry, epoch ms. */
+  expiresAt: number;
+}
+
+/**
+ * A package opportunity enhanced with its route legs (the per-request stage).
+ * Unreachable packages are filtered out before this is built, so `deliveryRoute`
+ * is always present and `approachRoute` is null only when no origin was given.
+ */
+export interface PackageItem extends PackageOpportunity {
+  /** Systems on the current-system → source route (null when no origin). */
+  approachRoute: RouteSystem[] | null;
+  /** Systems on the source → dest route (always reachable). */
+  deliveryRoute: RouteSystem[];
+}
+
+/** Minimal line for re-pricing a pinned package against the live book — the FE
+ *  carries the full content, so the server needs no cache lookup. */
+export interface PackageStatusLine {
+  typeId: number;
+  quantity: number;
+  isBlueprintCopy: boolean;
+}
+
+export interface PinnedPackageStatusRequest {
+  id: string;
+  contractId: number;
+  status: 'planning' | 'transit';
+  /** Fixed package price (the sunk/at-risk cost). */
+  price: number;
+  lines: PackageStatusLine[];
+  /** Source (contract) system, for routing. */
+  sourceSystem: number | null;
+  /** Currently-targeted dest station + system (re-priced here; reroute = sell elsewhere). */
+  dest: number;
+  destSystem: number | null;
+  originalProfit?: number;
+}
+
+export interface PinnedPackageStatusResponse {
+  id: string;
+  /** Σ gross sell value at the targeted dest (before tax). */
+  sellValue: number;
+  /** Net profit after tax at the targeted dest. */
+  profit: number;
+  marginPct: number;
+  /** Re-priced per-line breakdown at the targeted dest. */
+  contents: PackageLineResult[];
+  /** Planning only: the contract is no longer in the live public set (bought/expired). */
+  contractGone: boolean;
+  /** No bids at the dest can absorb any of the bundle any more. */
+  buyerGone: boolean;
+
+  approachRoute: RouteSystem[] | null;
+  deliveryRoute: RouteSystem[];
+  jumpsFromCurrent: number | null;
+  jumpsToDest: number | null;
+  totalJumps: number | null;
+  profitPerJump: number | null;
+  danger: number;
+  dangerSteps: string[];
+
+  statusKind: 'up' | 'down' | 'zero' | null;
+  statusMessage: string;
+  borderColor: string;
+}
+
 export interface PinnedHaulStatusRequest {
   id: string;
   typeId: number;

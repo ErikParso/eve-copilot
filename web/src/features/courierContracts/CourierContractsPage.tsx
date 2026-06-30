@@ -141,11 +141,13 @@ export function CourierContractsPage() {
   const counts = useMemo(() => {
     let courier = 0;
     let arbitrage = 0;
+    let packages = 0;
     for (const r of rows) {
       if (r.kind === 'courier') courier += 1;
       else if (r.kind === 'arbitrage') arbitrage += 1;
+      else if (r.kind === 'package') packages += 1;
     }
-    return { courier, arbitrage, shown: courier + arbitrage };
+    return { courier, arbitrage, packages, shown: courier + arbitrage + packages };
   }, [rows]);
 
   return (

@@ -15,16 +15,27 @@ async function fetchRegionIds(): Promise<number[]> {
   return esiGet<number[]>('/universe/regions/');
 }
 
-async function fetchRegionCouriers(
+/**
+ * Fetch one region's public contracts and split out the two kinds we care about
+ * in a single pass (no extra region calls): courier contracts, and item_exchange
+ * "sell" contracts (a fixed price > 0 — the package feature). Want-to-buy
+ * item_exchange contracts (price 0 / asking for items) are filtered later, once
+ * their item list is known.
+ */
+async function fetchRegionContracts(
   regionId: number,
-): Promise<{ contracts: PublicContract[]; lastModified: number | null }> {
-  const collected: PublicContract[] = [];
+): Promise<{ couriers: PublicContract[]; sells: PublicContract[]; lastModified: number | null }> {
+  const couriers: PublicContract[] = [];
+  const sells: PublicContract[] = [];
   let lastModified: number | null = null;
   try {
     const first = await esiGetPaged<PublicContract[]>(`/contracts/public/${regionId}/`, 1);
     lastModified = first.lastModified;
     const keep = (list: PublicContract[]) => {
-      for (const c of list) if (c.type === 'courier') collected.push(c);
+      for (const c of list) {
+        if (c.type === 'courier') couriers.push(c);
+        else if (c.type === 'item_exchange' && c.price > 0) sells.push(c);
+      }
     };
     keep(first.data);
     if (first.pages > 1) {
@@ -41,27 +52,34 @@ async function fetchRegionCouriers(
       console.error(`[Contracts Crawl] Error fetching region ${regionId}: ${reason}`);
     }
   }
-  return { contracts: collected, lastModified };
+  return { couriers, sells, lastModified };
 }
 
-async function crawlContracts(): Promise<{ contracts: PublicContract[]; lastModifiedAt: number | null }> {
+async function crawlContracts(): Promise<{
+  contracts: PublicContract[];
+  sells: PublicContract[];
+  lastModifiedAt: number | null;
+}> {
   const regionIds = await fetchRegionIds();
-  console.log(`[Contracts Crawl] Starting crawl for public courier contracts in ${regionIds.length} regions...`);
+  console.log(`[Contracts Crawl] Starting crawl for public courier + sell contracts in ${regionIds.length} regions...`);
   let regionsParsed = 0;
   let totalCouriers = 0;
+  let totalSells = 0;
   const perRegion = await mapWithConcurrency(regionIds, 16, async (regionId) => {
-    const res = await fetchRegionCouriers(regionId);
+    const res = await fetchRegionContracts(regionId);
     regionsParsed++;
-    totalCouriers += res.contracts.length;
+    totalCouriers += res.couriers.length;
+    totalSells += res.sells.length;
     if (regionsParsed % 10 === 0 || regionsParsed === regionIds.length) {
-      console.log(`[Contracts Crawl] Progress: ${regionsParsed}/${regionIds.length} regions parsed (${totalCouriers} couriers found)...`);
+      console.log(`[Contracts Crawl] Progress: ${regionsParsed}/${regionIds.length} regions parsed (${totalCouriers} couriers, ${totalSells} sell contracts found)...`);
     }
     return res;
   });
-  console.log(`[Contracts Crawl] Finished! Cached ${totalCouriers} courier contracts.`);
+  console.log(`[Contracts Crawl] Finished! Cached ${totalCouriers} courier + ${totalSells} sell contracts.`);
   const lms = perRegion.map((r) => r.lastModified).filter((v): v is number => v !== null);
   return {
-    contracts: perRegion.flatMap((r) => r.contracts),
+    contracts: perRegion.flatMap((r) => r.couriers),
+    sells: perRegion.flatMap((r) => r.sells),
     lastModifiedAt: lms.length ? Math.max(...lms) : null,
   };
 }
@@ -121,6 +139,8 @@ function resolveContract(
 
 interface RawState {
   contracts: PublicContract[];
+  /** item_exchange sell contracts (price > 0) — consumed by the packages module. */
+  sells: PublicContract[];
   lastModifiedAt: number | null;
   fetchedAt: number;
 }
@@ -130,12 +150,31 @@ let crawling: Promise<void> | null = null;
 let opportunities: ContractOpportunity[] = [];
 let opportunitiesFetchedAt = -1;
 
+// Listeners fired after each successful crawl so the packages module can
+// reconcile its contract-id set (enqueue new, evict gone) against the latest set.
+const refreshListeners: Array<() => void> = [];
+export function onContractsRefresh(fn: () => void): void {
+  refreshListeners.push(fn);
+}
+
+/** The latest crawl's item_exchange sell contracts (price > 0), or []. */
+export function getRawSellContracts(): PublicContract[] {
+  return raw?.sells ?? [];
+}
+
 async function refresh(): Promise<void> {
   if (crawling) return crawling;
   crawling = (async () => {
     try {
       const result = await crawlContracts();
       raw = { ...result, fetchedAt: Date.now() };
+      for (const fn of refreshListeners) {
+        try {
+          fn();
+        } catch (err) {
+          console.error('[Contracts Crawl] refresh listener failed:', err);
+        }
+      }
     } catch (err) {
       // A whole-crawl failure (e.g. the region-list fetch 504s during an ESI
       // outage) must NOT crash the process — keep the last good cache and let the

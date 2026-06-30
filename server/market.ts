@@ -416,6 +416,12 @@ function priorityRank(rc: RegionCache): number {
   return PRIORITY_RANK.get(rc.regionId) ?? 1000;
 }
 
+/** Trade-hub priority rank of a region (lower = higher priority; 1000 = the long
+ *  tail). Shared so other crawlers (e.g. packages) can warm hubs first too. */
+export function regionPriorityRank(regionId: number | null): number {
+  return regionId === null ? 1000 : PRIORITY_RANK.get(regionId) ?? 1000;
+}
+
 /** Due regions (ESI cache expired, not in flight), most-overdue first but hubs ahead of the tail. */
 function dueRegions(now: number): RegionCache[] {
   return [...regionCaches.values()]

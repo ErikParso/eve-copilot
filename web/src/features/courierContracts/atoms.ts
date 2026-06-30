@@ -10,7 +10,9 @@ import { DEFAULT_WEIGHTS, type AttractivityWeights } from './attractivity';
 import { type ResultCard } from './combined';
 import type { CourierRow, SearchStatus, SortOptionId } from './types';
 import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
+import type { PackageRow } from '@/features/packages/types';
 import { pinnedHaulsAtom, pinnedCouriersAtom, pinnedRoutesAtom } from '@/features/arbitrage/atoms';
+import { pinnedPackagesAtom } from '@/features/packages/atoms';
 
 /** Contextual Hauling-page view state (the grid's sort order). */
 export interface HaulingView {
@@ -40,6 +42,8 @@ export type CourierBase = Omit<CourierRow, 'attractivity' | 'attractivitySteps'>
 export type ScoredCourier = CourierBase & { attractivity: number };
 /** Server-scored, already-scaled arbitrage row (attractivity from the BE). */
 export type ScoredArbitrage = ScaledArbitrage & { attractivity: number };
+/** Server-scored sell-contract (package) row (attractivity from the BE). */
+export type ScoredPackage = PackageRow;
 
 /**
  * Hauling data from the server: courier + arbitrage scored TOGETHER on the BE
@@ -51,6 +55,8 @@ export interface HaulingData {
   courier: ScoredCourier[];
   /** Already scaled to the requester's cargo/wallet + tax-repriced server-side. */
   arbitrage: ScoredArbitrage[];
+  /** Sell contracts (packages) that fit the requester's hold/wallet, server-scored. */
+  packages: ScoredPackage[];
   error: string | null;
   /** When the contracts snapshot was built by CCP (epoch ms), or null. */
   contractsAsOf: number | null;
@@ -64,6 +70,7 @@ export const haulingDataAtom = atom<HaulingData>({
   status: 'idle',
   courier: [],
   arbitrage: [],
+  packages: [],
   total: 0,
   error: null,
   contractsAsOf: null,
@@ -87,6 +94,7 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   // Available rows arrive already filtered + scaled + scored from the server.
   const courierRows = data.courier;
   const arbRows = data.arbitrage;
+  const packageRows = data.packages;
 
   const prefs = get(preferencesAtom);
   const origin = get(characterStatusAtom)?.systemId ?? null;
@@ -146,6 +154,30 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
   const pinnedIds = new Set(pinnedHauls.map((h) => h.id));
   const filteredArbRows = arbRows.filter((a) => !pinnedIds.has(a.id));
 
+  const pinnedPackages = get(pinnedPackagesAtom);
+  const updatedPinnedPackages = pinnedPackages.map((p) => {
+    const isTransit = p.status === 'transit';
+    let item = { ...p };
+    if (isTransit && origin !== null && p.dest?.systemId) {
+      const cacheKey = `${origin}-${p.dest.systemId}-${routeType}`;
+      const cached = routesCache[cacheKey];
+      if (cached) {
+        item = {
+          ...item,
+          approachRoute: null,
+          deliveryRoute: cached.route,
+          jumpsFromCurrent: null,
+          jumpsToDest: cached.jumps,
+          totalJumps: cached.jumps,
+          profitPerJump: cached.jumps !== null && cached.jumps > 0 ? (p.profit ?? 0) / cached.jumps : (p.profit ?? 0),
+        };
+      }
+    }
+    return item;
+  });
+  const pinnedPackageIds = new Set(pinnedPackages.map((p) => p.id));
+  const filteredPackageRows = packageRows.filter((p) => !pinnedPackageIds.has(p.id));
+
   // Wrap as cards. Available rows carry their server attractivity; pinned items
   // carry no score (shown first regardless) and no breakdown.
   const cards: ResultCard[] = [
@@ -159,6 +191,11 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
       key: `p:${h.id}`,
       row: { ...h, attractivity: 0, attractivitySteps: [] },
     })),
+    ...updatedPinnedPackages.map((p) => ({
+      kind: 'pinned-package' as const,
+      key: `pp:${p.id}`,
+      row: { ...p, attractivity: 0, attractivitySteps: [] },
+    })),
     ...filteredCourierRows.map((c) => ({
       kind: 'courier' as const,
       key: `c:${c.id}`,
@@ -168,6 +205,11 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
       kind: 'arbitrage' as const,
       key: `a:${a.id}`,
       row: { ...a, attractivitySteps: [] },
+    })),
+    ...filteredPackageRows.map((p) => ({
+      kind: 'package' as const,
+      key: `pkg:${p.id}`,
+      row: { ...p, attractivitySteps: [] },
     })),
   ];
   return cards;
