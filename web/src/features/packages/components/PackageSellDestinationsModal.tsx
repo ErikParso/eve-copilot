@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogTitle, DialogContent, IconButton, Box, Typography, CircularProgress, Alert } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
 import CloseIcon from '@mui/icons-material/Close';
@@ -39,10 +39,6 @@ export function PackageSellDestinationsModal({ open, onClose, pkg }: { open: boo
   const prefs = useAtomValue(preferencesAtom);
   const origin = useAtomValue(characterStatusAtom)?.systemId ?? null;
 
-  const [rows, setRows] = useState<PackageRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const redirectPackage = useSetAtom(redirectPackageAtom);
 
   const handleSelectAlternative = (option: PackageRow) => {
@@ -59,55 +55,29 @@ export function PackageSellDestinationsModal({ open, onClose, pkg }: { open: boo
     onClose();
   };
 
-  useEffect(() => {
-    if (!open) return;
-    if (origin === null) {
-      setError('Your current location is unknown — start the character location tracker to find sell destinations.');
-      setRows([]);
-      return;
-    }
+  // The carried subset (what's actually in the ship) is what we're offloading.
+  const lines = pkg.contents
+    .filter((l) => l.soldQuantity > 0)
+    .map((l) => ({ typeId: l.typeId, quantity: l.soldQuantity, isBlueprintCopy: l.isBlueprintCopy }));
+  const taxPct = prefs.salesTaxPct ?? DEFAULT_SALES_TAX_PCT;
 
-    let active = true;
-    const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/packages/sell-destinations`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            // The carried subset (what's actually in the ship) is what we're trying
-            // to offload elsewhere.
-            lines: pkg.contents
-              .filter((l) => l.soldQuantity > 0)
-              .map((l) => ({ typeId: l.typeId, quantity: l.soldQuantity, isBlueprintCopy: l.isBlueprintCopy })),
-            price: pkg.price,
-            origin,
-            routeType: prefs.routeType,
-            taxPct: prefs.salesTaxPct ?? DEFAULT_SALES_TAX_PCT,
-            weights,
-          }),
-        });
-        if (!res.ok) throw new Error(`Sell-destination search returned ${res.status}`);
-        const data = (await res.json()) as { items?: ApiPackageSellDestination[] };
-        if (!active) return;
-        setRows((data.items ?? []).map(hydrate));
-      } catch (err) {
-        if (controller.signal.aborted || !active) return;
-        setError(err instanceof Error ? err.message : 'Search failed');
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [open, origin, pkg.contents, pkg.price, prefs.routeType, prefs.salesTaxPct, weights]);
+  const { data: rows = [], isFetching, error } = useQuery({
+    // Only runs while open with a known location; refetches whenever any input
+    // (weights included) changes. TanStack Query owns cancellation + caching.
+    enabled: open && origin !== null,
+    queryKey: ['pkgSellDest', lines, pkg.price, origin, prefs.routeType, taxPct, weights],
+    queryFn: async ({ signal }): Promise<PackageRow[]> => {
+      const res = await fetch(`${API_BASE}/api/packages/sell-destinations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({ lines, price: pkg.price, origin, routeType: prefs.routeType, taxPct, weights }),
+      });
+      if (!res.ok) throw new Error(`Sell-destination search returned ${res.status}`);
+      const data = (await res.json()) as { items?: ApiPackageSellDestination[] };
+      return (data.items ?? []).map(hydrate);
+    },
+  });
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
@@ -121,15 +91,20 @@ export function PackageSellDestinationsModal({ open, onClose, pkg }: { open: boo
         </IconButton>
       </DialogTitle>
       <DialogContent dividers>
-        {loading && (
+        {origin === null && (
+          <Alert severity="warning">
+            Your current location is unknown — start the character location tracker to find sell destinations.
+          </Alert>
+        )}
+        {origin !== null && isFetching && (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1.5, py: 6 }}>
             <CircularProgress size={22} />
             <Typography color="text.secondary">Routing the markets that buy this bundle…</Typography>
           </Box>
         )}
-        {!loading && error && <Alert severity="warning">{error}</Alert>}
-        {!loading && !error && rows.length === 0 && <Alert severity="info">No market is currently buying this bundle within reach.</Alert>}
-        {!loading && !error && rows.length > 0 && (
+        {origin !== null && !isFetching && error && <Alert severity="warning">{error.message}</Alert>}
+        {origin !== null && !isFetching && !error && rows.length === 0 && <Alert severity="info">No market is currently buying this bundle within reach.</Alert>}
+        {origin !== null && !isFetching && !error && rows.length > 0 && (
           <Grid container spacing={2} sx={{ pt: '10px' }}>
             {rows.map((row) => (
               <Grid key={row.id} xs={12} sm={6} md={4} lg={3}>
