@@ -2,7 +2,7 @@
 // endpoints and route-system arrays the client cards render. Used by both the
 // courier-contract and arbitrage pipelines.
 import { getStation, getSystem, securityBand } from './sde.js';
-import { isGankRisk } from './danger.js';
+import { isGankRisk, gateKillsForSystem, systemDanger } from './danger.js';
 import type { ContractEndpoint, RouteSystem } from './types.js';
 
 /**
@@ -25,20 +25,35 @@ export function resolveEndpoint(locationId: number, systemIdHint?: number): Cont
   };
 }
 
-/** Turn an ordered list of system ids into route systems with kill counts. */
-export function toRouteSystems(systemIds: number[], kills: Map<number, number>): RouteSystem[] {
-  return systemIds.map((id) => {
+/**
+ * Turn an ORDERED list of system ids into route systems, each carrying the kills
+ * on the two gates it uses on this route (to the previous & next system) plus
+ * those neighbours' names for the "N kills at gate to X" tooltip. `gank` (skull)
+ * fires when the two gate counts sum to the skull threshold or more.
+ */
+export function toRouteSystems(systemIds: number[], gateKills: Map<number, number>): RouteSystem[] {
+  return systemIds.map((id, i) => {
     const system = getSystem(id);
     const security = system?.security ?? 0;
     const band = securityBand(security);
-    const shipKills = kills.get(id) ?? 0;
+    const prev = i > 0 ? systemIds[i - 1] : undefined;
+    const next = i < systemIds.length - 1 ? systemIds[i + 1] : undefined;
+    const { toPrev, toNext } = gateKillsForSystem(systemIds, i, gateKills);
+    const nameOf = (sid: number | undefined) =>
+      sid !== undefined ? (getSystem(sid)?.name ?? `System ${sid}`) : null;
+    const { index: danger, steps: dangerSteps } = systemDanger(security, toPrev, toNext);
     return {
       systemId: id,
       name: system?.name ?? `System ${id}`,
       security,
       securityBand: band,
-      shipKills,
-      gank: isGankRisk(band, shipKills),
+      gateKillsToPrev: toPrev,
+      gateKillsToNext: toNext,
+      prevName: nameOf(prev),
+      nextName: nameOf(next),
+      danger,
+      dangerSteps,
+      gank: isGankRisk(toPrev + toNext),
     };
   });
 }

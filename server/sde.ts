@@ -2,6 +2,7 @@
 // stargate jump graph (for local routing). Loaded once from the Fuzzwork CSV
 // mirror at startup.
 import { parseCsv } from './csv.js';
+import { STARGATES } from './data/gates.js';
 
 const BASE = 'https://www.fuzzwork.co.uk/dump/latest/csv';
 
@@ -85,6 +86,11 @@ const typeById = new Map<number, ItemType>();
 const regionNameById = new Map<number, string>();
 /** systemId -> neighbouring systemIds (via stargates). */
 const adjacency = new Map<number, number[]>();
+/** stargate itemId -> the system it sits in and the system it jumps to. */
+const gateConnection = new Map<number, { sys: number; dest: number }>();
+/** "fromSys-toSys" -> the stargate itemId in fromSys that jumps to toSys. */
+const gateByPair = new Map<string, number>();
+const pairKey = (from: number, to: number) => `${from}-${to}`;
 
 export function securityBand(security: number): SecurityBand {
   if (security >= 0.45) return 'high';
@@ -96,6 +102,14 @@ export const getStation = (id: number) => stationById.get(id);
 export const getSystem = (id: number) => systemById.get(id);
 export const getType = (id: number) => typeById.get(id);
 export const neighbors = (id: number) => adjacency.get(id) ?? [];
+/** The stargate itemId in `fromSys` that jumps to `toSys`, or undefined if not adjacent. */
+export const connectionGate = (fromSys: number, toSys: number): number | undefined =>
+  gateByPair.get(pairKey(fromSys, toSys));
+/** Whether an id is a stargate — i.e. a location where a "gate kill" can occur. */
+export const isStargate = (id: number): boolean => gateConnection.has(id);
+/** The system a stargate sits in and the system it jumps to, or undefined. */
+export const getGateConnection = (gateId: number): { sys: number; dest: number } | undefined =>
+  gateConnection.get(gateId);
 /** Region of a solar system, or null if unknown. */
 export const getRegion = (systemId: number): number | null => systemById.get(systemId)?.regionId ?? null;
 /** Display name of a region, or null if unknown. */
@@ -116,6 +130,7 @@ export interface SdeMeta {
   systems: number;
   jumps: number;
   types: number;
+  gates: number;
 }
 
 /** Load stations, systems, item types, and the jump graph into memory sequentially to conserve RAM. */
@@ -158,6 +173,14 @@ export async function loadSde(): Promise<SdeMeta> {
     adjacency.get(from)!.push(to);
   }
 
+  // Stargate topology (bundled, static): itemId -> {system, destination system}.
+  // Lets a zKillboard kill's zkb.locationID be resolved to the specific on-route
+  // gate it happened at (station/belt/mission kills carry non-stargate ids).
+  for (const [gateId, sys, dest] of STARGATES) {
+    gateConnection.set(gateId, { sys, dest });
+    gateByPair.set(pairKey(sys, dest), gateId);
+  }
+
   // Only keep market-relevant types (published, with a non-zero volume) to
   // keep the map small; that's all arbitrage ever looks up.
   console.log('Loading invTypes SDE...');
@@ -181,5 +204,6 @@ export async function loadSde(): Promise<SdeMeta> {
     systems: systemById.size,
     jumps: adjacency.size,
     types: typeById.size,
+    gates: gateConnection.size,
   };
 }

@@ -5,7 +5,7 @@
 // the list. Pinned hauls/couriers are the only thing scored (well, not) on the
 // client: they're private localStorage state the server never sees, and they
 // carry no attractivity score (shown first regardless).
-import { getShipKills } from './kills.js';
+import { getGateKills } from './gateKills.js';
 import { getMarketMeta, type MarketMeta } from './market.js';
 import { dangerForSystems } from './danger.js';
 import { scoreAttractivity, type AttractivityWeights } from './arbitrageScore.js';
@@ -67,7 +67,7 @@ function contractMetrics(
  */
 export async function getEnrichedHauling(params: HaulingParams): Promise<HaulingResponse> {
   const meta = getMarketMeta();
-  const kills = await getShipKills();
+  const kills = await getGateKills();
 
   // Opportunity-type filter: an empty `kinds` means no filter (build all). When
   // a kind is excluded we skip building it entirely so it costs nothing and is

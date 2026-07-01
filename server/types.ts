@@ -20,8 +20,19 @@ export interface RouteSystem {
   name: string;
   security: number;
   securityBand: SecurityBand;
-  shipKills: number;
-  /** Gank/camp hotspot flag (danger ≥ skull threshold) — for the FE's skull markers. */
+  /** Kills (last 60m) on the gate this system uses toward the previous route system; 0 at route start. */
+  gateKillsToPrev: number;
+  /** Kills (last 60m) on the gate this system uses toward the next route system; 0 at route end. */
+  gateKillsToNext: number;
+  /** Previous route system's name (for the "gate to X" label); null at the start. */
+  prevName: string | null;
+  /** Next route system's name (for the "gate to X" label); null at the end. */
+  nextName: string | null;
+  /** This system's own danger index 0–100 (security floor + its two gate-kill counts). */
+  danger: number;
+  /** Exact-number breakdown of this system's danger index (per-square tooltip). */
+  dangerSteps: string[];
+  /** Gank/camp hotspot flag (gate kills ≥ threshold) — for the FE's skull markers. */
   gank: boolean;
 }
 

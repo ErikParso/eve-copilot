@@ -10,7 +10,7 @@ import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
-import { getShipKills, setTestKills, clearTestKills } from './kills.js';
+import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
 import type { PinnedHaulStatusRequest, PinnedPackageStatusRequest, PackageStatusLine } from './types.js';
 
 // Last-resort backstop: a stray rejected promise or thrown error in any
@@ -169,8 +169,12 @@ async function main() {
   console.log('Loading SDE (stations, systems, jump graph)…');
   const meta = await loadSde();
   console.log(
-    `SDE loaded: ${meta.stations} stations, ${meta.systems} systems, ${meta.jumps} systems with jumps, ${meta.types} market types.`,
+    `SDE loaded: ${meta.stations} stations, ${meta.systems} systems, ${meta.jumps} systems with jumps, ${meta.types} market types, ${meta.gates} stargates.`,
   );
+
+  // Start the RedisQ gate-kill firehose (forward-only; the 60-min window warms up
+  // over the first hour). No-op under OFFLINE, where tests inject kills directly.
+  startGateKillFeed();
 
   if (process.env.OFFLINE === 'true') {
     console.log('OFFLINE mode enabled: loading market-snapshot.json fixture...');
@@ -453,7 +457,7 @@ async function main() {
       // pinned planning haul reflects exactly what the matching opportunity would.
       const origin = parseOptionalNumber(req.query.origin);
       const routeType = parseRouteType(req.query.routeType);
-      const kills = await getShipKills();
+      const kills = await getGateKills();
       const pinnedStatuses = resolvePinnedHaulsStatus(parsePinnedHaulsRequest(req.body?.hauls), {
         capacity,
         balance,
@@ -496,7 +500,7 @@ async function main() {
         totalJumps: parseWeight(w.totalJumps, 5),
         danger: parseWeight(w.danger, 5),
       };
-      const kills = await getShipKills();
+      const kills = await getGateKills();
       const items = resolveSellDestinations(
         {
           typeId,
@@ -534,7 +538,7 @@ async function main() {
         totalJumps: parseWeight(w.totalJumps, 5),
         danger: parseWeight(w.danger, 5),
       };
-      const kills = await getShipKills();
+      const kills = await getGateKills();
       const items = resolvePackageSellDestinations(
         { lines, price, origin, routeType: parseRouteType(b.routeType), taxPct: parseOptionalNumber(b.taxPct) ?? 4.5, weights },
         kills,
@@ -542,6 +546,17 @@ async function main() {
       res.json({ items });
     } catch (err) {
       console.error('POST /api/packages/sell-destinations failed', err);
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // Kill Data page: systems with recent stargate kills (last 60 min, warming up
+  // over the first hour after boot), each with its per-gate breakdown.
+  app.get('/api/kills/gates', (_req, res) => {
+    try {
+      res.json(getGateKillReport());
+    } catch (err) {
+      console.error('GET /api/kills/gates failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
     }
   });
@@ -558,7 +573,7 @@ async function main() {
       if (!routeIds) {
         return res.json({ route: null, jumps: null });
       }
-      const kills = await getShipKills();
+      const kills = await getGateKills();
       const route = toRouteSystems(routeIds, kills);
       const jumps = Math.max(0, routeIds.length - 1);
       res.json({ route, jumps });

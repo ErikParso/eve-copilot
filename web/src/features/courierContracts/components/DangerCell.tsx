@@ -1,7 +1,7 @@
 import { Box, Tooltip, Typography } from '@mui/material';
 
 /** Colour from green (0, safe) through amber to red (100, deadly). */
-function dangerColor(score: number): string {
+export function dangerColor(score: number): string {
   const hue = (100 - Math.max(0, Math.min(100, score))) * 1.2; // 0 → green, 100 → red
   return `hsl(${hue}, 70%, 55%)`;
 }

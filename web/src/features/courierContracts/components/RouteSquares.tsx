@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { Box, Tooltip } from '@mui/material';
+import { Box, Divider, Tooltip, Typography } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { securityColor } from '@/data/sde';
 import { formatNumber } from '@/utils/format';
 import type { RouteSystem } from '../types';
+import { dangerColor } from './DangerCell';
 
 export type RouteMarker = 'current' | 'pickup' | 'dropoff';
 
@@ -27,13 +28,65 @@ const MARKER_LABEL: Record<RouteMarker, string> = {
   dropoff: 'Dropoff — ',
 };
 
-function systemTooltip(system: RouteSystem, marker?: RouteMarker): string {
+const killLabel = (n: number) => `${formatNumber(n, 0)} ${n === 1 ? 'kill' : 'kills'}`;
+
+/**
+ * Rich per-square tooltip: basic system info, this system's own danger index,
+ * the kills-at-gates breakdown, and the exact-number calculation of the index.
+ */
+function SystemTooltip({ system, marker }: { system: RouteSystem; marker?: RouteMarker }) {
   const prefix = marker ? MARKER_LABEL[marker] : '';
-  const danger = system.gank ? ' ☠ gank risk' : '';
-  return `${prefix}${system.name} · sec ${formatNumber(system.security, 1)} · ${formatNumber(
-    system.shipKills,
-    0,
-  )} kills/h${danger}`;
+  const gateKills: string[] = [];
+  if (system.nextName) {
+    gateKills.push(`${killLabel(system.gateKillsToNext)} at gate to ${system.nextName}`);
+  }
+  if (system.prevName) {
+    gateKills.push(`${killLabel(system.gateKillsToPrev)} at gate to ${system.prevName}`);
+  }
+
+  return (
+    <Box sx={{ py: 0.5 }}>
+      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+        {prefix}
+        {system.name} · {system.securityBand}-sec {formatNumber(system.security, 1)}
+      </Typography>
+
+      <Typography variant="caption" sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}>
+        <Box component="span" sx={{ color: 'text.secondary' }}>
+          Danger
+        </Box>
+        <Box component="span" sx={{ fontWeight: 700, color: dangerColor(system.danger) }}>
+          {system.danger}
+        </Box>
+        {system.gank && <Box component="span">· ☠ gank risk</Box>}
+      </Typography>
+
+      <Divider sx={{ my: 0.5 }} />
+
+      {gateKills.length > 0 ? (
+        gateKills.map((k, i) => (
+          <Typography key={i} variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
+            {k}
+          </Typography>
+        ))
+      ) : (
+        <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+          No recent gate kills
+        </Typography>
+      )}
+
+      <Divider sx={{ my: 0.5 }} />
+
+      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+        How this system's danger is calculated
+      </Typography>
+      {system.dangerSteps.map((step, i) => (
+        <Typography key={i} variant="caption" sx={{ display: 'block', lineHeight: 1.5, color: 'text.secondary' }}>
+          {step}
+        </Typography>
+      ))}
+    </Box>
+  );
 }
 
 /**
@@ -58,7 +111,7 @@ export function RouteSquares({ nodes, align = 'left' }: RouteSquaresProps) {
     >
       {nodes.map((node, i) => {
         const color = securityColor(node.system.security);
-        const title = systemTooltip(node.system, node.marker);
+        const title = <SystemTooltip system={node.system} marker={node.marker} />;
         const dangerous = node.system.gank;
 
         // Marker glyph takes priority; otherwise a skull for gank hotspots.
@@ -83,7 +136,12 @@ export function RouteSquares({ nodes, align = 'left' }: RouteSquaresProps) {
         }
 
         return (
-          <Tooltip key={`${node.system.systemId}-${i}`} arrow title={title}>
+          <Tooltip
+            key={`${node.system.systemId}-${i}`}
+            arrow
+            title={title}
+            slotProps={{ tooltip: { sx: { maxWidth: 320 } } }}
+          >
             <Box
               sx={{
                 width: SQUARE,

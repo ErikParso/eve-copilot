@@ -27,8 +27,18 @@ export interface RouteSystem {
   name: string;
   security: number;
   securityBand: SecurityBand;
-  /** Ship kills in this system in the last hour (0 if no recent activity). */
-  shipKills: number;
+  /** Kills (last 60m) at the gate to the previous route system (where you land); 0 at route start. */
+  gateKillsToPrev: number;
+  /** Kills (last 60m) at the gate to the next route system (where you jump out); 0 at route end. */
+  gateKillsToNext: number;
+  /** Previous route system's name, for the "N kills at gate to X" tooltip; null at start. */
+  prevName: string | null;
+  /** Next route system's name, for the "N kills at gate to X" tooltip; null at end. */
+  nextName: string | null;
+  /** This system's own danger index 0–100 (security floor + its two gate-kill counts). */
+  danger: number;
+  /** Exact-number breakdown of this system's danger index (per-square tooltip). */
+  dangerSteps: string[];
   /** Gank/camp hotspot flag (server-computed) — drives the skull markers. */
   gank: boolean;
 }

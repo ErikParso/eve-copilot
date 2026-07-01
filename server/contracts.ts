@@ -2,7 +2,7 @@
 // local engine + danger), and caches the result in memory. Refreshed on a timer
 // so all clients share one crawl. Attractivity scoring stays on the client.
 import { esiGet, esiGetPaged, mapWithConcurrency, EsiError } from './esi.js';
-import { getShipKills } from './kills.js';
+import { getGateKills } from './gateKills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
 import type { ContractOpportunity, EnrichedContract, PublicContract } from './types.js';
@@ -221,7 +221,7 @@ export async function getEnrichedContracts(
 ): Promise<ContractsResponse> {
   if (process.env.OFFLINE === 'true') {
     if (raw && raw.contracts.length > 0) {
-      const kills = await getShipKills();
+      const kills = await getGateKills();
       const contracts: EnrichedContract[] = [];
       for (const o of getOpportunities()) {
         const enriched = resolveContract(o, type, origin, kills);
@@ -234,7 +234,7 @@ export async function getEnrichedContracts(
   if (!raw) await refresh();
   if (!raw) return { contracts: [], lastModifiedAt: null, total: 0 };
 
-  const kills = await getShipKills();
+  const kills = await getGateKills();
   const contracts: EnrichedContract[] = [];
   for (const o of getOpportunities()) {
     const enriched = resolveContract(o, type, origin, kills);
