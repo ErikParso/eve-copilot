@@ -590,19 +590,27 @@ async function runTests() {
   await sleep(500);
 
   // --- Test 12: Attractivity Weights Adaptation ---
+  // Weights now travel in the POST body (numbers object), not query params, so
+  // assert against the request body rather than the URL.
   console.log('\n--- Test 12: Attractivity Weights Adaptation ---');
-  const weightsRequestPromise = page.waitForResponse(response =>
-    response.url().includes('/api/hauling') && response.status() === 200 && response.url().includes('wIncome=8') && response.url().includes('wDanger=2')
-  );
+  const haulingBodyWeights = (response) => {
+    if (!response.url().includes('/api/hauling') || response.status() !== 200) return null;
+    try { return JSON.parse(response.request().postData() || '{}').weights ?? null; } catch { return null; }
+  };
+  const weightsRequestPromise = page.waitForResponse(response => {
+    const w = haulingBodyWeights(response);
+    return !!w && w.income === 8 && w.danger === 2;
+  });
   await page.locator('div.MuiChip-root:has-text("Max ISK / hour")').click();
   await weightsRequestPromise;
   await sleep(500);
   console.log('PASSED: Verified attractivity weights preset change propagated to API.');
 
   // Restore to Balanced
-  const restoreWeightsPromise = page.waitForResponse(response =>
-    response.url().includes('/api/hauling') && response.status() === 200 && response.url().includes('wIncome=5') && response.url().includes('wDanger=5')
-  );
+  const restoreWeightsPromise = page.waitForResponse(response => {
+    const w = haulingBodyWeights(response);
+    return !!w && w.income === 5 && w.danger === 5;
+  });
   await page.locator('div.MuiChip-root:has-text("Balanced")').click();
   await restoreWeightsPromise;
   await sleep(500);
