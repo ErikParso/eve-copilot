@@ -12,7 +12,7 @@ import { scoreAttractivity, type AttractivityWeights } from './arbitrageScore.js
 import { getEnrichedContracts } from './contracts.js';
 import { buildArbitrageCandidates, materializeArbitrageItem } from './arbitrage.js';
 import { buildPackageCandidates, materializePackageItem } from './packages.js';
-import type { EnrichedContract, ScaledArbitrageItem, PackageItem, RouteSystem } from './types.js';
+import type { EnrichedContract, ScaledArbitrageItem, PackageItem, RouteSystem, GateKillData } from './types.js';
 
 /** The kinds of opportunity the hauling menu can return. */
 export type HaulingKind = 'courier' | 'arbitrage' | 'package';
@@ -49,7 +49,7 @@ export interface HaulingResponse {
 /** jumps + danger (index + steps) over a contract's routes. */
 function contractMetrics(
   c: EnrichedContract,
-  kills: Map<number, number>,
+  kills: GateKillData,
 ): { totalJumps: number; danger: number; dangerSteps: string[] } {
   const ids = (r: RouteSystem[]) => r.map((s) => s.systemId);
   const deliveryIds = ids(c.deliveryRoute);

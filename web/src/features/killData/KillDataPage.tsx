@@ -6,29 +6,35 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Divider,
   Stack,
   Typography,
   Skeleton,
 } from '@mui/material';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
-import ArrowRightAltIcon from '@mui/icons-material/ArrowRightAlt';
 import { securityColor, type SecurityBand } from '@/data/sde';
 import { formatNumber } from '@/utils/format';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
+// Fixed widths (px) for the two right-aligned numeric columns, so recent (1h) and
+// 24h-average line up across the header and every gate row.
+const COL_1H = 34;
+const COL_24H = 50;
 const POLL_MS = 5000;
 
 interface GateKillEntry {
   destSystemId: number;
   destName: string;
-  kills: number;
+  recentKills: number;
+  baselineRate: number;
 }
 interface SystemGateKills {
   systemId: number;
   name: string;
   security: number;
   securityBand: SecurityBand;
-  totalKills: number;
+  recentKills: number;
+  baselineRate: number;
   gates: GateKillEntry[];
 }
 interface GateKillReport {
@@ -88,9 +94,9 @@ export function KillDataPage() {
           Kill Data
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Ship kills at stargates over a rolling 60-minute window, fed live from zKillboard. Only kills that
-          happened at a gate count — station, plex and belt kills are excluded. Systems with recent gate kills
-          are listed below, most-active first.
+          Ship kills at stargates, fed live from zKillboard. Only kills that happened at a gate count — station,
+          plex and belt kills are excluded. Each gate shows kills in the last 60 minutes and its 24-hour average
+          per hour. Systems are listed most-active first.
         </Typography>
       </Box>
 
@@ -116,8 +122,8 @@ export function KillDataPage() {
                 color={data.warmingUp ? 'primary' : 'success'}
                 variant="outlined"
               />
-              <Chip label={`${formatNumber(data.totalGateKills, 0)} gate kills`} variant="outlined" />
-              <Chip label={`${formatNumber(systems.length, 0)} systems`} variant="outlined" />
+              <Chip label={`${formatNumber(data.totalGateKills, 0)} gate kills last hour`} variant="outlined" />
+              <Chip label={`${formatNumber(systems.length, 0)} systems (24h)`} variant="outlined" />
             </>
           ) : (
             <>
@@ -132,50 +138,66 @@ export function KillDataPage() {
         <Alert severity="info">
           {data.warmingUp
             ? 'No stargate kills recorded yet — the window is still warming up. Check back as data collects.'
-            : 'No stargate kills anywhere in New Eden in the last 60 minutes. Fly safe.'}
+            : 'No stargate kills anywhere in New Eden in the last 24 hours. Fly safe.'}
         </Alert>
       )}
 
       {!failed && (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {data
             ? systems.map((s) => (
                 <Card
                   key={s.systemId}
                   elevation={0}
                   variant="outlined"
-                  sx={{ borderRadius: 2, flex: { xs: '1 1 100%', sm: '1 1 340px' }, minWidth: 0 }}
+                  sx={{ borderRadius: 2, flex: { xs: '1 1 100%', sm: '1 1 300px' }, minWidth: 0 }}
                 >
-                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                      <FiberManualRecordIcon sx={{ fontSize: 12, color: securityColor(s.security) }} />
-                      <Typography variant="subtitle1" sx={{ fontWeight: 700, minWidth: 0 }}>
+                  <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                    {/* Header: system name + sec */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <FiberManualRecordIcon sx={{ fontSize: 11, color: securityColor(s.security) }} />
+                      <Typography
+                        variant="subtitle2"
+                        sx={{ fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
                         {s.name}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         {formatNumber(s.security, 1)}
                       </Typography>
-                      <Box sx={{ flexGrow: 1 }} />
-                      <Chip
-                        label={`${formatNumber(s.totalKills, 0)} kills`}
-                        size="small"
-                        color="error"
-                        variant="outlined"
-                      />
                     </Box>
-                    <Stack spacing={0.5}>
+
+                    {/* Column labels */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                      <Typography variant="caption" color="text.disabled" sx={{ flexGrow: 1 }}>
+                        gate to
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled" sx={{ minWidth: COL_1H, textAlign: 'right' }}>
+                        1h
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled" sx={{ minWidth: COL_24H, textAlign: 'right' }}>
+                        24h/h
+                      </Typography>
+                    </Box>
+                    <Divider sx={{ mt: 0.25, mb: 0.5 }} />
+
+                    <Stack spacing={0.25}>
                       {s.gates.map((g) => (
-                        <Box
-                          key={g.destSystemId}
-                          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pl: 0.5 }}
-                        >
-                          <ArrowRightAltIcon sx={{ fontSize: 16, color: 'text.disabled' }} />
-                          <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>
-                            gate to {g.destName}
+                        <Box key={g.destSystemId} sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Typography
+                            variant="body2"
+                            sx={{ flexGrow: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            {g.destName}
                           </Typography>
-                          <Box sx={{ flexGrow: 1 }} />
-                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            {formatNumber(g.kills, 0)}
+                          <Typography
+                            variant="body2"
+                            sx={{ fontWeight: 600, minWidth: COL_1H, textAlign: 'right', color: g.recentKills > 0 ? 'error.main' : 'text.disabled' }}
+                          >
+                            {formatNumber(g.recentKills, 0)}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ minWidth: COL_24H, textAlign: 'right' }}>
+                            {formatNumber(g.baselineRate, 1)}
                           </Typography>
                         </Box>
                       ))}
@@ -183,12 +205,12 @@ export function KillDataPage() {
                   </CardContent>
                 </Card>
               ))
-            : Array.from({ length: 4 }).map((_, idx) => (
+            : Array.from({ length: 6 }).map((_, idx) => (
                 <Skeleton
                   key={idx}
                   variant="rectangular"
-                  height={110}
-                  sx={{ borderRadius: 2, flex: { xs: '1 1 100%', sm: '1 1 340px' } }}
+                  height={96}
+                  sx={{ borderRadius: 2, flex: { xs: '1 1 100%', sm: '1 1 300px' } }}
                 />
               ))}
         </Box>

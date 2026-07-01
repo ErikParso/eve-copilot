@@ -23,7 +23,7 @@ import { getSnapshot, regionPriorityRank, type TypeBook } from './market.js';
 import { poolBidsForDrop, DEFAULT_SALES_TAX, MIN_PROFIT, type CandidateParams } from './arbitrage.js';
 import { scoreAttractivity, type AttractivityWeights } from './arbitrageScore.js';
 import { getMarketPrice } from './prices.js';
-import type { ContractEndpoint, PublicContract } from './types.js';
+import type { ContractEndpoint, PublicContract, GateKillData } from './types.js';
 import type {
   PackageLine,
   PackageLineResult,
@@ -600,7 +600,7 @@ export interface PackageCandidate {
  * user's tax and routed (jumps + danger from cached paths). No RouteSystem[]
  * built here — that's only for the shipped top-N (see materializePackageItem).
  */
-export function buildPackageCandidates(params: CandidateParams, kills: Map<number, number>): PackageCandidate[] {
+export function buildPackageCandidates(params: CandidateParams, kills: GateKillData): PackageCandidate[] {
   if (!getSnapshot()) return [];
   const tax = params.taxPct / 100;
   const out: PackageCandidate[] = [];
@@ -651,7 +651,7 @@ export function buildPackageCandidates(params: CandidateParams, kills: Map<numbe
 }
 
 /** Materialise a candidate's full RouteSystem[] legs into a shippable item. */
-export function materializePackageItem(c: PackageCandidate, kills: Map<number, number>): PackageItem {
+export function materializePackageItem(c: PackageCandidate, kills: GateKillData): PackageItem {
   const approachRoute: RouteSystem[] | null = c.approachIds ? toRouteSystems(c.approachIds, kills) : null;
   return {
     ...c.opp,
@@ -685,7 +685,7 @@ const formatIskMillions = (value: number): string => `${formatNumber(value / 1_0
  */
 export function resolvePinnedPackagesStatus(
   reqs: PinnedPackageStatusRequest[],
-  opts: { taxFraction?: number; capacity?: number; origin: number | null; routeType: 'safest' | 'shortest'; kills: Map<number, number> },
+  opts: { taxFraction?: number; capacity?: number; origin: number | null; routeType: 'safest' | 'shortest'; kills: GateKillData },
 ): PinnedPackageStatusResponse[] {
   const snap = getSnapshot();
   if (!snap) return [];
@@ -880,7 +880,7 @@ function shipEndpoint(systemId: number): ContractEndpoint {
  * station that liquidates the most value, route it from the current location,
  * score danger, and rank by the same attractivity weights as the hauling list.
  */
-export function resolvePackageSellDestinations(params: PackageSellDestinationParams, kills: Map<number, number>): PackageSellDestinationItem[] {
+export function resolvePackageSellDestinations(params: PackageSellDestinationParams, kills: GateKillData): PackageSellDestinationItem[] {
   const snap = getSnapshot();
   if (!snap) return [];
   const tax = params.taxPct / 100;

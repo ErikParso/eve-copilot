@@ -13,10 +13,15 @@
 // snapshot; danger/enrich resolve each route system's inbound/outbound gate ids
 // against it.
 import { isStargate, getGateConnection, getSystem, securityBand, type SecurityBand } from './sde.js';
+import type { GateKillData } from './types.js';
 
-const WINDOW_MS = 60 * 60 * 1000;
+// Two horizons off the same per-gate timestamp list: a reactive 60-min count
+// ("camp right now") and a 24-hour average kills/hour ("habitual chokepoint").
+const RECENT_WINDOW_MS = 60 * 60 * 1000;
+const LONG_WINDOW_MS = 24 * 60 * 60 * 1000;
 // Server start ≈ feed start: the in-memory window is empty on boot and fills over
-// the first hour. Used to report warm-up progress ("collecting for last N min").
+// the first hour (recent) / 24h (baseline). Used for warm-up progress + to keep
+// the baseline average from being inflated by a near-empty early window.
 const startedAt = Date.now();
 const UA = 'eve-multitool/1.0 (parsoerik@gmail.com)';
 // R2Z2 base URL. Overridable if the host moves. Endpoints:
@@ -48,9 +53,9 @@ function record(gateId: number, tsMs: number): void {
   arr.push(tsMs);
 }
 
-/** Drop timestamps older than the window; forget gates that fall empty. */
+/** Drop timestamps older than the long (24h) window; forget gates that fall empty. */
 function prune(now: number): void {
-  const cutoff = now - WINDOW_MS;
+  const cutoff = now - LONG_WINDOW_MS;
   for (const [gate, arr] of hits) {
     let i = 0;
     while (i < arr.length && arr[i] < cutoff) i++;
@@ -59,65 +64,105 @@ function prune(now: number): void {
   }
 }
 
-/** Current snapshot: stargate itemId -> kills in the last 60 minutes. */
-export async function getGateKills(): Promise<Map<number, number>> {
-  const now = Date.now();
-  prune(now);
-  const out = new Map<number, number>();
-  for (const [gate, arr] of hits) out.set(gate, arr.length);
-  if (testOverride) for (const [k, v] of testOverride) out.set(k, v);
-  return out;
+/** Hours to divide the 24h count by for the baseline average, clamped to [1,24]
+ *  so a near-empty early window doesn't inflate the per-hour rate during warm-up. */
+function baselineHours(now: number): number {
+  return Math.min(24, Math.max(1, (now - startedAt) / 3_600_000));
 }
 
-/** One outbound gate from a system, with recent kill count. */
+/** Recent count (last 60 min) for one gate's ascending timestamp list. */
+function recentCount(arr: number[], now: number): number {
+  const cutoff = now - RECENT_WINDOW_MS;
+  let n = 0;
+  for (let i = arr.length - 1; i >= 0 && arr[i] >= cutoff; i--) n++;
+  return n;
+}
+
+/**
+ * Current snapshot: per stargate itemId, kills in the last 60 min (`recent`) and
+ * the average kills/hour over the last 24h (`baseline`), both derived from the
+ * one pruned timestamp list.
+ */
+export async function getGateKills(): Promise<GateKillData> {
+  const now = Date.now();
+  prune(now);
+  const denomHours = baselineHours(now);
+  const recent = new Map<number, number>();
+  const baseline = new Map<number, number>();
+  for (const [gate, arr] of hits) {
+    const rc = recentCount(arr, now);
+    if (rc > 0) recent.set(gate, rc);
+    baseline.set(gate, arr.length / denomHours);
+  }
+  if (testOverride) for (const [k, v] of testOverride) recent.set(k, v);
+  return { recent, baseline };
+}
+
+/** Cap on how many systems the Kill Data page returns (busiest first). */
+const REPORT_SYSTEM_CAP = 200;
+
+/** One outbound gate from a system: recent (60m) kills and 24h average kills/h. */
 export interface GateKillEntry {
   destSystemId: number;
   destName: string;
-  kills: number;
+  recentKills: number;
+  baselineRate: number;
 }
-/** A system with recent gate kills, and the per-gate breakdown. */
+/** A system with gate kills, and the per-gate breakdown. */
 export interface SystemGateKills {
   systemId: number;
   name: string;
   security: number;
   securityBand: SecurityBand;
-  totalKills: number;
+  /** Σ recent (60m) kills across the system's gates. */
+  recentKills: number;
+  /** Σ 24h average kills/h across the system's gates. */
+  baselineRate: number;
   gates: GateKillEntry[];
 }
-/** The "Kill Data" report: systems with gate kills (desc), plus warm-up status. */
+/** The "Kill Data" report: systems with gate activity (busiest first) + warm-up status. */
 export interface GateKillReport {
-  /** Window the data covers: 60 once warm, else minutes elapsed since boot. */
+  /** Recent window the headline covers: 60 once warm, else minutes elapsed since boot. */
   windowMinutes: number;
-  /** True while the window is still filling (elapsed < 60 min). */
+  /** True while the recent window is still filling (elapsed < 60 min). */
   warmingUp: boolean;
   /** Whole minutes since the feed started collecting. */
   elapsedMinutes: number;
-  /** Σ kills across every gate in the window. */
+  /** Σ recent (60m) kills across every gate. */
   totalGateKills: number;
   systems: SystemGateKills[];
 }
 
 /**
- * Group the current window's gate kills by system for the Kill Data page: only
- * systems with kills, each with its per-gate ("to destination") breakdown, both
- * the systems and their gates sorted by kill count descending.
+ * Group the 24h window's gate kills by system for the Kill Data page: every
+ * system with gate activity, each with its per-gate ("to destination") breakdown
+ * of recent (60m) kills and 24h average kills/h. Systems and gates are sorted by
+ * recent kills first, then baseline. Capped to the busiest REPORT_SYSTEM_CAP.
  */
 export function getGateKillReport(): GateKillReport {
   const now = Date.now();
   prune(now);
-
-  // gateId -> count (live window + any test override), same basis as getGateKills.
-  const counts = new Map<number, number>();
-  for (const [gate, arr] of hits) counts.set(gate, arr.length);
-  if (testOverride) for (const [gate, c] of testOverride) counts.set(gate, c);
+  const recent = new Map<number, number>();
+  const baseline = new Map<number, number>();
+  const denomHours = baselineHours(now);
+  for (const [gate, arr] of hits) {
+    const rc = recentCount(arr, now);
+    if (rc > 0) recent.set(gate, rc);
+    baseline.set(gate, arr.length / denomHours);
+  }
+  if (testOverride) for (const [gate, c] of testOverride) recent.set(gate, c);
 
   const bySystem = new Map<number, SystemGateKills>();
   let totalGateKills = 0;
-  for (const [gateId, kills] of counts) {
-    if (kills <= 0) continue;
+  // Union of gates seen recently or over 24h (recent may include test overrides).
+  const gateIds = new Set<number>([...recent.keys(), ...baseline.keys()]);
+  for (const gateId of gateIds) {
     const conn = getGateConnection(gateId);
     if (!conn) continue;
-    totalGateKills += kills;
+    const recentKills = recent.get(gateId) ?? 0;
+    const baselineRate = baseline.get(gateId) ?? 0;
+    if (recentKills <= 0 && baselineRate <= 0) continue;
+    totalGateKills += recentKills;
     let entry = bySystem.get(conn.sys);
     if (!entry) {
       const sys = getSystem(conn.sys);
@@ -127,24 +172,29 @@ export function getGateKillReport(): GateKillReport {
         name: sys?.name ?? `System ${conn.sys}`,
         security,
         securityBand: securityBand(security),
-        totalKills: 0,
+        recentKills: 0,
+        baselineRate: 0,
         gates: [],
       };
       bySystem.set(conn.sys, entry);
     }
-    entry.totalKills += kills;
+    entry.recentKills += recentKills;
+    entry.baselineRate += baselineRate;
     entry.gates.push({
       destSystemId: conn.dest,
       destName: getSystem(conn.dest)?.name ?? `System ${conn.dest}`,
-      kills,
+      recentKills,
+      baselineRate,
     });
   }
 
-  const systems = [...bySystem.values()].sort((a, b) => b.totalKills - a.totalKills);
-  for (const s of systems) s.gates.sort((a, b) => b.kills - a.kills);
+  const byActivity = (a: { recentKills: number; baselineRate: number }, b: typeof a) =>
+    b.recentKills - a.recentKills || b.baselineRate - a.baselineRate;
+  const systems = [...bySystem.values()].sort(byActivity).slice(0, REPORT_SYSTEM_CAP);
+  for (const s of systems) s.gates.sort(byActivity);
 
   const elapsedMs = now - startedAt;
-  const warmingUp = elapsedMs < WINDOW_MS;
+  const warmingUp = elapsedMs < RECENT_WINDOW_MS;
   const elapsedMinutes = Math.floor(elapsedMs / 60000);
   return {
     windowMinutes: warmingUp ? elapsedMinutes : 60,
@@ -194,7 +244,7 @@ function maybeHeartbeat(now: number): void {
   lastHeartbeatAt = now;
   prune(now);
   console.log(
-    `${LOG} heartbeat: ${hits.size} gate(s) active in the 60m window, ${recordedTotal} kill(s) recorded since boot.`,
+    `${LOG} heartbeat: ${hits.size} gate(s) active in the 24h window, ${recordedTotal} kill(s) recorded since boot.`,
   );
 }
 
@@ -290,7 +340,7 @@ export function startGateKillFeed(): void {
     return;
   }
   console.log(
-    `${LOG} starting R2Z2 feed at ${R2Z2_BASE} (${WINDOW_MS / 60000}m rolling window; warms up over the first hour).`,
+    `${LOG} starting R2Z2 feed at ${R2Z2_BASE} (60m recent + 24h baseline windows; warms up over the first hour/day).`,
   );
   pollLoop().catch((err) => {
     // The inner loop swallows all per-request failures, so reaching here is

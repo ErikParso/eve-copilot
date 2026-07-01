@@ -3,7 +3,7 @@
 // courier-contract and arbitrage pipelines.
 import { getStation, getSystem, securityBand } from './sde.js';
 import { isGankRisk, gateKillsForSystem, systemDanger } from './danger.js';
-import type { ContractEndpoint, RouteSystem } from './types.js';
+import type { ContractEndpoint, RouteSystem, GateKillData } from './types.js';
 
 /**
  * Resolve a market/contract location id to an endpoint. NPC stations resolve
@@ -31,29 +31,32 @@ export function resolveEndpoint(locationId: number, systemIdHint?: number): Cont
  * those neighbours' names for the "N kills at gate to X" tooltip. `gank` (skull)
  * fires when the two gate counts sum to the skull threshold or more.
  */
-export function toRouteSystems(systemIds: number[], gateKills: Map<number, number>): RouteSystem[] {
+export function toRouteSystems(systemIds: number[], data: GateKillData): RouteSystem[] {
   return systemIds.map((id, i) => {
     const system = getSystem(id);
     const security = system?.security ?? 0;
     const band = securityBand(security);
     const prev = i > 0 ? systemIds[i - 1] : undefined;
     const next = i < systemIds.length - 1 ? systemIds[i + 1] : undefined;
-    const { toPrev, toNext } = gateKillsForSystem(systemIds, i, gateKills);
+    const { recentPrev, recentNext, basePrev, baseNext } = gateKillsForSystem(systemIds, i, data);
     const nameOf = (sid: number | undefined) =>
       sid !== undefined ? (getSystem(sid)?.name ?? `System ${sid}`) : null;
-    const { index: danger, steps: dangerSteps } = systemDanger(security, toPrev, toNext);
+    const { index: danger, steps: dangerSteps } = systemDanger(security, recentPrev, recentNext, basePrev, baseNext);
     return {
       systemId: id,
       name: system?.name ?? `System ${id}`,
       security,
       securityBand: band,
-      gateKillsToPrev: toPrev,
-      gateKillsToNext: toNext,
+      gateKillsToPrev: recentPrev,
+      gateKillsToNext: recentNext,
+      baselineToPrev: basePrev,
+      baselineToNext: baseNext,
       prevName: nameOf(prev),
       nextName: nameOf(next),
       danger,
       dangerSteps,
-      gank: isGankRisk(toPrev + toNext),
+      // Skull is RECENT-only ("camp right now") — the 24h baseline never trips it.
+      gank: isGankRisk(recentPrev + recentNext),
     };
   });
 }

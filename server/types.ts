@@ -1,5 +1,15 @@
 import type { SecurityBand } from './sde.js';
 
+/**
+ * Live gate-kill signals threaded into the danger model, both keyed by stargate
+ * itemId: `recent` = kills in the last 60 min (reactive "camp right now"), and
+ * `baseline` = average kills/hour over the last 24h (habitual chokepoint danger).
+ */
+export interface GateKillData {
+  recent: Map<number, number>;
+  baseline: Map<number, number>;
+}
+
 /** Raw public contract fields from ESI we consume. */
 export interface PublicContract {
   contract_id: number;
@@ -24,6 +34,10 @@ export interface RouteSystem {
   gateKillsToPrev: number;
   /** Kills (last 60m) on the gate this system uses toward the next route system; 0 at route end. */
   gateKillsToNext: number;
+  /** Avg kills/hour over 24h on the gate toward the previous system; 0 at route start. */
+  baselineToPrev: number;
+  /** Avg kills/hour over 24h on the gate toward the next system; 0 at route end. */
+  baselineToNext: number;
   /** Previous route system's name (for the "gate to X" label); null at the start. */
   prevName: string | null;
   /** Next route system's name (for the "gate to X" label); null at the end. */

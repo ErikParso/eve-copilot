@@ -19,7 +19,7 @@ import { getType, getRegion, getStation, getSystem, securityBand } from './sde.j
 import { getMarketPrice } from './prices.js';
 import { dangerForSystems } from './danger.js';
 import { scaleArbitrage, repriceForTax, scoreAttractivity, type Scaled, type AttractivityWeights } from './arbitrageScore.js';
-import type { ContractEndpoint } from './types.js';
+import type { ContractEndpoint, GateKillData } from './types.js';
 import {
   getSnapshot,
   RANGE_REGION,
@@ -343,7 +343,7 @@ export interface ArbitrageCandidate {
  * that doesn't fit the hold/wallet or isn't reachable. No RouteSystem[] built
  * here — that's only for the shipped top-N (see materializeArbitrageItem).
  */
-export function buildArbitrageCandidates(params: CandidateParams, kills: Map<number, number>): ArbitrageCandidate[] {
+export function buildArbitrageCandidates(params: CandidateParams, kills: GateKillData): ArbitrageCandidate[] {
   if (!getSnapshot()) return [];
   const taxFraction = params.taxPct / 100;
   const out: ArbitrageCandidate[] = [];
@@ -374,7 +374,7 @@ export function buildArbitrageCandidates(params: CandidateParams, kills: Map<num
 }
 
 /** Materialise a candidate's full RouteSystem[] legs into a shippable item. */
-export function materializeArbitrageItem(c: ArbitrageCandidate, kills: Map<number, number>): ScaledArbitrageItem {
+export function materializeArbitrageItem(c: ArbitrageCandidate, kills: GateKillData): ScaledArbitrageItem {
   return {
     ...c.opp,
     approachRoute: c.approachIds ? toRouteSystems(c.approachIds, kills) : null,
@@ -406,7 +406,7 @@ export function resolvePinnedHaulsStatus(
     taxFraction?: number;
     origin: number | null;
     routeType: 'safest' | 'shortest';
-    kills: Map<number, number>;
+    kills: GateKillData;
   },
 ): PinnedHaulStatusResponse[] {
   const snap = getSnapshot();
@@ -723,7 +723,7 @@ function shipEndpoint(systemId: number): ContractEndpoint {
  * available" — loss-making destinations are included (they just rank low under an
  * income weight); the client colours non-positive income red.
  */
-export function resolveSellDestinations(params: SellDestinationParams, kills: Map<number, number>): SellDestinationItem[] {
+export function resolveSellDestinations(params: SellDestinationParams, kills: GateKillData): SellDestinationItem[] {
   const snap = getSnapshot();
   if (!snap) return [];
   const book = snap.byType.get(params.typeId);

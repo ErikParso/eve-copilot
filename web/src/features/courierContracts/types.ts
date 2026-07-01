@@ -31,6 +31,10 @@ export interface RouteSystem {
   gateKillsToPrev: number;
   /** Kills (last 60m) at the gate to the next route system (where you jump out); 0 at route end. */
   gateKillsToNext: number;
+  /** 24h average kills/h at the gate to the previous route system; 0 at route start. */
+  baselineToPrev: number;
+  /** 24h average kills/h at the gate to the next route system; 0 at route end. */
+  baselineToNext: number;
   /** Previous route system's name, for the "N kills at gate to X" tooltip; null at start. */
   prevName: string | null;
   /** Next route system's name, for the "N kills at gate to X" tooltip; null at end. */

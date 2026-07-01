@@ -29,6 +29,9 @@ const MARKER_LABEL: Record<RouteMarker, string> = {
 };
 
 const killLabel = (n: number) => `${formatNumber(n, 0)} ${n === 1 ? 'kill' : 'kills'}`;
+/** "3 kills at gate to Sivala (24h avg 1.3/h)" — recent count plus habitual rate. */
+const gateLine = (recent: number, baseline: number, dest: string) =>
+  `${killLabel(recent)} at gate to ${dest} (24h avg ${formatNumber(baseline, 1)}/h)`;
 
 /**
  * Rich per-square tooltip: basic system info, this system's own danger index,
@@ -38,10 +41,10 @@ function SystemTooltip({ system, marker }: { system: RouteSystem; marker?: Route
   const prefix = marker ? MARKER_LABEL[marker] : '';
   const gateKills: string[] = [];
   if (system.nextName) {
-    gateKills.push(`${killLabel(system.gateKillsToNext)} at gate to ${system.nextName}`);
+    gateKills.push(gateLine(system.gateKillsToNext, system.baselineToNext, system.nextName));
   }
   if (system.prevName) {
-    gateKills.push(`${killLabel(system.gateKillsToPrev)} at gate to ${system.prevName}`);
+    gateKills.push(gateLine(system.gateKillsToPrev, system.baselineToPrev, system.prevName));
   }
 
   return (

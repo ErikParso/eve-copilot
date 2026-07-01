@@ -5,7 +5,7 @@ import { esiGet, esiGetPaged, mapWithConcurrency, EsiError } from './esi.js';
 import { getGateKills } from './gateKills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import type { ContractOpportunity, EnrichedContract, PublicContract } from './types.js';
+import type { ContractOpportunity, EnrichedContract, PublicContract, GateKillData } from './types.js';
 
 const REFRESH_MS = 10 * 60 * 1000;
 
@@ -111,7 +111,7 @@ function resolveContract(
   o: ContractOpportunity,
   type: RouteType,
   origin: number | null,
-  kills: Map<number, number>,
+  kills: GateKillData,
 ): EnrichedContract | null {
   if (o.pickup.systemId === null || o.dropoff.systemId === null) return null;
 
