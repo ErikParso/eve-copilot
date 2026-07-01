@@ -11,7 +11,7 @@ interface HaulingBubbleChartProps {
 interface ChartItem {
   key: string;
   name: string;
-  type: 'Courier' | 'Arbitrage';
+  type: 'Courier' | 'Arbitrage' | 'Package';
   jumps: number;
   profit: number;
   volume: number;
@@ -68,6 +68,31 @@ export function HaulingBubbleChart({ rows, onBubbleClick }: HaulingBubbleChartPr
           jumps,
           profit: card.row.reward,
           volume: card.row.volume,
+          attractivity: 0,
+          isPinned: true,
+        });
+      } else if (card.kind === 'package') {
+        const jumps = card.row.totalJumps;
+        if (jumps === null || jumps === undefined) continue;
+        items.push({
+          key: card.key,
+          name: `Package to ${card.row.dest.systemName ?? 'Unknown'}`,
+          type: 'Package',
+          jumps,
+          profit: card.row.profit,
+          volume: card.row.totalVolume,
+          attractivity: card.row.attractivity,
+        });
+      } else if (card.kind === 'pinned-package') {
+        const jumps = card.row.totalJumps;
+        if (jumps === null || jumps === undefined) continue;
+        items.push({
+          key: card.key,
+          name: `Package to ${card.row.dest.systemName ?? 'Unknown'}`,
+          type: 'Package',
+          jumps,
+          profit: card.row.profit,
+          volume: card.row.totalVolume,
           attractivity: 0,
           isPinned: true,
         });
