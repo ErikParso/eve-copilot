@@ -112,15 +112,12 @@ export interface AttractivityWeights {
   income: number;
   totalJumps: number;
   danger: number;
-  valueAtRisk: number;
 }
 
 interface Scorable {
   income: number;
   totalJumps: number | null;
   danger: number | null;
-  /** ISK you'd lose if this haul dies: courier collateral / arbitrage buyCost / package price. */
-  valueAtRisk: number | null;
 }
 
 interface FactorDef {
@@ -139,7 +136,6 @@ const FACTORS: FactorDef[] = [
   { id: 'income', higher: true, log: true, value: (s) => s.income },
   { id: 'totalJumps', higher: false, log: false, value: (s) => s.totalJumps },
   { id: 'danger', higher: false, log: false, value: (s) => s.danger, absolute: true },
-  { id: 'valueAtRisk', higher: false, log: true, value: (s) => s.valueAtRisk },
 ];
 
 /** Attractivity 0–100 for each item, min-max normalised across the set. */

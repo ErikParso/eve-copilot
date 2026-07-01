@@ -9,8 +9,7 @@
 //
 // Both card types share ONE weights object and ONE factor registry. The factors
 // are exactly the ones common to both: each feature adapts its row to the
-// neutral `Scorable` shape below, so income↔profit, collateral↔investment, etc.
-// score identically.
+// neutral `Scorable` shape below, so income↔profit etc. score identically.
 import { formatIsk, formatNumber } from '@/utils/format';
 
 export type FactorDirection = 'higher' | 'lower';
@@ -22,7 +21,7 @@ export type FactorDirection = 'higher' | 'lower';
  */
 export type FactorScale = 'linear' | 'log';
 
-export type FactorId = 'income' | 'totalJumps' | 'danger' | 'valueAtRisk';
+export type FactorId = 'income' | 'totalJumps' | 'danger';
 
 /**
  * Neutral metrics a result exposes for scoring — only what courier contracts and
@@ -35,8 +34,6 @@ export interface Scorable {
   totalJumps: number | null;
   /** Route danger index 0–100 (chance of getting caught). */
   danger: number | null;
-  /** ISK at risk if the haul dies: courier collateral / arbitrage buyCost / package price. */
-  valueAtRisk: number | null;
 }
 
 export interface FactorDef {
@@ -91,15 +88,6 @@ export const FACTORS: FactorDef[] = [
     value: (s) => s.danger,
     format: outOf100,
   },
-  {
-    id: 'valueAtRisk',
-    label: 'At risk',
-    direction: 'lower',
-    scale: 'log',
-    description: 'ISK you would lose if the haul is destroyed — courier collateral, arbitrage capital, or package price. Lower risks less.',
-    value: (s) => s.valueAtRisk,
-    format: formatIsk,
-  },
 ];
 
 const FACTOR_BY_ID = new Map(FACTORS.map((f) => [f.id, f]));
@@ -122,26 +110,26 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
   {
     id: 'balanced',
     label: 'Balanced',
-    description: 'A sensible all-round mix of profit, effort, safety and exposure.',
-    weights: makeWeights({ income: 5, totalJumps: 5, danger: 5, valueAtRisk: 5 }),
+    description: 'A sensible all-round mix of profit, effort and safety.',
+    weights: makeWeights({ income: 5, totalJumps: 5, danger: 5 }),
   },
   {
     id: 'maxIskPerHour',
     label: 'Max ISK / hour',
     description: 'Chase the biggest payoff for the flying time — high income with as few jumps as possible.',
-    weights: makeWeights({ income: 8, totalJumps: 8, danger: 2, valueAtRisk: 2 }),
+    weights: makeWeights({ income: 8, totalJumps: 8, danger: 2 }),
   },
   {
     id: 'safe',
     label: 'Safe & steady',
-    description: 'Minimise risk: avoid dangerous routes and keep little at stake, with a modest pull toward income.',
-    weights: makeWeights({ danger: 10, valueAtRisk: 8, income: 3, totalJumps: 3 }),
+    description: 'Minimise risk: avoid dangerous routes, with a modest pull toward income.',
+    weights: makeWeights({ danger: 10, income: 3, totalJumps: 3 }),
   },
   {
     id: 'maxIncome',
     label: 'Max income',
-    description: 'Chase the biggest payouts, with mild caution on effort, danger and exposure.',
-    weights: makeWeights({ income: 10, totalJumps: 3, danger: 3, valueAtRisk: 1 }),
+    description: 'Chase the biggest payouts, with mild caution on effort and danger.',
+    weights: makeWeights({ income: 10, totalJumps: 3, danger: 3 }),
   },
 ];
 

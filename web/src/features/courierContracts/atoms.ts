@@ -28,8 +28,8 @@ export const haulingViewAtom = atomWithStorage<HaulingView>(
 
 /** User-chosen factor weights (0–10 each), persisted to localStorage. */
 export const attractivityWeightsAtom = atomWithStorage<AttractivityWeights>(
-  // v4: added the value-at-risk factor, so reset old (3-factor) saves.
-  'eve-multitool.attractivityWeights.v4',
+  // v5: removed the value-at-risk factor, so reset old (4-factor) saves.
+  'eve-multitool.attractivityWeights.v5',
   DEFAULT_WEIGHTS,
   undefined,
   { getOnInit: true },

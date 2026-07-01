@@ -9,15 +9,14 @@ import { z } from 'zod';
 /** Non-negative attractivity weight; missing/invalid → fallback 5. */
 const weight = z.coerce.number().min(0).catch(5);
 
-/** { income, totalJumps, danger, valueAtRisk }; whole object optional. */
+/** { income, totalJumps, danger }; whole object optional. */
 export const attractivityWeightsSchema = z
   .object({
     income: weight,
     totalJumps: weight,
     danger: weight,
-    valueAtRisk: weight,
   })
-  .default(() => ({ income: 5, totalJumps: 5, danger: 5, valueAtRisk: 5 }));
+  .default(() => ({ income: 5, totalJumps: 5, danger: 5 }));
 
 /** safest | shortest; anything else (or absent) → safest. */
 const routeType = z.enum(['safest', 'shortest']).catch('safest');
