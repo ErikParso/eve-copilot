@@ -10,8 +10,13 @@ import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
-import type { PinnedHaulStatusRequest, PinnedPackageStatusRequest, PackageStatusLine } from './types.js';
-import { sellDestinationsSchema, attractivityWeightsSchema } from './schemas.js';
+import {
+  sellDestinationsSchema,
+  attractivityWeightsSchema,
+  pinnedHaulsRequestSchema,
+  pinnedPackagesRequestSchema,
+  packageStatusLinesSchema,
+} from './schemas.js';
 
 // Last-resort backstop: a stray rejected promise or thrown error in any
 // background crawl must never take the whole server down (a transient ESI 504
@@ -53,111 +58,6 @@ function parseHaulingKinds(value: unknown): HaulingKind[] {
     .filter((s): s is HaulingKind => (valid as string[]).includes(s));
 }
 
-
-function parseNumberArray(value: unknown): number[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const out = value.map(Number).filter(Number.isFinite);
-  return out.length ? out : undefined;
-}
-
-function parsePinnedHaulsRequest(value: unknown): PinnedHaulStatusRequest[] {
-  if (!Array.isArray(value)) return [];
-  const out: PinnedHaulStatusRequest[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const e = entry as Record<string, unknown>;
-    const id = e.id;
-    const typeId = Number(e.typeId);
-    const source = Number(e.source);
-    const dest = Number(e.dest);
-    const quantity = Number(e.quantity);
-    const status = e.status;
-    const boughtPrice = e.boughtPrice !== undefined ? Number(e.boughtPrice) : undefined;
-    const unitVolume = e.unitVolume !== undefined ? Number(e.unitVolume) : undefined;
-    const originalProfit = e.originalProfit !== undefined ? Number(e.originalProfit) : undefined;
-    const originalQuantity = e.originalQuantity !== undefined ? Number(e.originalQuantity) : undefined;
-    const originalBuyPrice = e.originalBuyPrice !== undefined ? Number(e.originalBuyPrice) : undefined;
-
-    if (typeof id !== 'string') continue;
-    if (![typeId, source, dest, quantity].every(Number.isFinite)) continue;
-    if (status !== 'planning' && status !== 'transit') continue;
-    if (boughtPrice !== undefined && !Number.isFinite(boughtPrice)) continue;
-
-    out.push({
-      id,
-      typeId,
-      source,
-      dest,
-      quantity,
-      status: status as 'planning' | 'transit',
-      boughtPrice,
-      unitVolume: unitVolume !== undefined && Number.isFinite(unitVolume) ? unitVolume : undefined,
-      originalProfit: originalProfit !== undefined && Number.isFinite(originalProfit) ? originalProfit : undefined,
-      originalQuantity: originalQuantity !== undefined && Number.isFinite(originalQuantity) ? originalQuantity : undefined,
-      originalBuyPrice: originalBuyPrice !== undefined && Number.isFinite(originalBuyPrice) ? originalBuyPrice : undefined,
-      // Echoed back from the previous response so the server can flag `stale`
-      // (the specific orders backing the haul changed). Without these the stale
-      // check is inert.
-      knownSourceOrderIds: parseNumberArray(e.knownSourceOrderIds),
-      knownDestOrderIds: parseNumberArray(e.knownDestOrderIds),
-    });
-  }
-  return out;
-}
-
-/** Body numbers arrive as JSON numbers (not strings), so parseOptionalNumber —
- *  which only accepts strings — would wrongly null them. */
-function numberOrNull(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function parsePackageStatusLines(value: unknown): PackageStatusLine[] {
-  if (!Array.isArray(value)) return [];
-  const out: PackageStatusLine[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const e = entry as Record<string, unknown>;
-    const typeId = Number(e.typeId);
-    const quantity = Number(e.quantity);
-    if (!Number.isFinite(typeId) || !Number.isFinite(quantity)) continue;
-    const hauledQuantity = e.hauledQuantity !== undefined && Number.isFinite(Number(e.hauledQuantity)) ? Number(e.hauledQuantity) : undefined;
-    out.push({ typeId, quantity, isBlueprintCopy: e.isBlueprintCopy === true, hauledQuantity });
-  }
-  return out;
-}
-
-function parsePinnedPackagesRequest(value: unknown): PinnedPackageStatusRequest[] {
-  if (!Array.isArray(value)) return [];
-  const out: PinnedPackageStatusRequest[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const e = entry as Record<string, unknown>;
-    const id = e.id;
-    const contractId = Number(e.contractId);
-    const price = Number(e.price);
-    const dest = Number(e.dest);
-    const status = e.status;
-    if (typeof id !== 'string') continue;
-    if (![contractId, price, dest].every(Number.isFinite)) continue;
-    if (status !== 'planning' && status !== 'transit') continue;
-    const lines = parsePackageStatusLines(e.lines);
-    if (lines.length === 0) continue;
-    out.push({
-      id,
-      contractId,
-      status: status as 'planning' | 'transit',
-      price,
-      lines,
-      sourceSystem: numberOrNull(e.sourceSystem),
-      dest,
-      destSystem: numberOrNull(e.destSystem),
-      originalProfit: e.originalProfit !== undefined && Number.isFinite(Number(e.originalProfit)) ? Number(e.originalProfit) : undefined,
-    });
-  }
-  return out;
-}
 
 async function main() {
   console.log('Loading SDE (stations, systems, jump graph)…');
@@ -450,7 +350,7 @@ async function main() {
       const origin = parseOptionalNumber(req.query.origin);
       const routeType = parseRouteType(req.query.routeType);
       const kills = await getGateKills();
-      const pinnedStatuses = resolvePinnedHaulsStatus(parsePinnedHaulsRequest(req.body?.hauls), {
+      const pinnedStatuses = resolvePinnedHaulsStatus(pinnedHaulsRequestSchema.parse(req.body?.hauls), {
         capacity,
         balance,
         taxFraction: taxPct / 100,
@@ -459,7 +359,7 @@ async function main() {
         kills,
       });
       // Pinned packages revalidated against the SAME snapshot as the opportunities.
-      const pinnedPackageStatuses = resolvePinnedPackagesStatus(parsePinnedPackagesRequest(req.body?.packages), {
+      const pinnedPackageStatuses = resolvePinnedPackagesStatus(pinnedPackagesRequestSchema.parse(req.body?.packages), {
         taxFraction: taxPct / 100,
         capacity,
         origin,
@@ -499,7 +399,7 @@ async function main() {
       const b = (req.body ?? {}) as Record<string, unknown>;
       const origin = Number(b.origin);
       const price = Number(b.price);
-      const lines = parsePackageStatusLines(b.lines);
+      const lines = packageStatusLinesSchema.parse(b.lines);
       if (!Number.isFinite(origin) || !Number.isFinite(price) || lines.length === 0) {
         return res.status(400).json({ error: 'origin, price and lines are required' });
       }
