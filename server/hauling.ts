@@ -88,9 +88,9 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
   // One joint normalisation across all three kinds (a courier 90, an arbitrage 90
   // and a package 90 are comparable).
   const scorables = [
-    ...courier.map((c, i) => ({ income: c.reward, totalJumps: courierMetrics[i].totalJumps, danger: courierMetrics[i].danger })),
-    ...arb.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger })),
-    ...pkg.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger })),
+    ...courier.map((c, i) => ({ income: c.reward, totalJumps: courierMetrics[i].totalJumps, danger: courierMetrics[i].danger, valueAtRisk: c.collateral })),
+    ...arb.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger, valueAtRisk: c.opp.buyCost })),
+    ...pkg.map((c) => ({ income: c.opp.profit, totalJumps: c.totalJumps, danger: c.danger, valueAtRisk: c.opp.price })),
   ];
   const scores = scoreAttractivity(scorables, params.weights);
 

@@ -258,6 +258,7 @@ export function useHaulingSearchController(): void {
       params.set('wIncome', String(weights.income));
       params.set('wJumps', String(weights.totalJumps));
       params.set('wDanger', String(weights.danger));
+      params.set('wValueAtRisk', String(weights.valueAtRisk));
       // Opportunity-type filter; empty = no filter (server returns all kinds).
       if (prefsNow.contractTypes.length) params.set('types', prefsNow.contractTypes.join(','));
 

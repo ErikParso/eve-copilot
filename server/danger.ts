@@ -1,63 +1,71 @@
 // Route danger model — the single source of truth (the FE renders the index,
 // steps and per-system skull flags shipped from here; it computes none of this).
 //
-// Risk is driven by kills AT the specific stargates a route uses, not system-wide
-// kill totals (which lump in station games, mission runners and structure bashes
-// that never threaten a hauler in transit). For each system on the route we read
-// the kills on the two gates it actually uses — the gate to the previous system
-// (where you land) and the gate to the next system (where you warp off and jump).
-// Both are distinct stargates, so summing them across the route counts each gate
-// once. Per-system risk = a small security-baseline term + a much larger term for
-// those gate kills. The route index blends the worst system with the average.
-import { getSystem, securityBand, connectionGate, type SecurityBand } from './sde.js';
+// Danger is a PROBABILITY. Each gate a route uses gets pᵢ = the modelled chance of
+// getting caught/killed there: an unobserved-camp FLOOR (by security) lifted toward
+// a camp ceiling by the HAZARD from recent (60m) + habitual (24h) gate kills. The
+// route danger is the chance of trouble on at least one gate — 1 − Π(1−pᵢ) — so
+// every gate can only add risk (a longer route is never rated safer through the
+// same camp) and the worst gate dominates on its own.
+//
+// Kills are read AT the specific stargates a route uses (station/mission/structure
+// kills never threaten a hauler in transit). For each system we sum the two gates
+// it actually uses: the gate to the previous system (where you land) and to the
+// next (where you warp off and jump) — distinct stargates, so no double count.
+import { getSystem, securityBand, connectionGate } from './sde.js';
 import type { GateKillData } from './types.js';
 
-// Danger contribution from security ALONE (0..1), by 0.1 security tier. Higher sec
-// → safer → lower value; null-sec (≤0.0) is 4× the top of low-sec (0.25). Indexed
-// by round(security*10); security ≤ 0 short-circuits to the null value.
-const SEC_INVERTED = [
-  1.0, // 0.0  (null — handled by the ≤0 guard, listed for completeness)
-  0.25, // 0.1
-  0.24, // 0.2
-  0.2, // 0.3
-  0.16, // 0.4
-  0.1, // 0.5
-  0.06, // 0.6
-  0.04, // 0.7
-  0.02, // 0.8
-  0.01, // 0.9
-  0.0, // 1.0
+// Empty-gate death probability by 0.1 security tier — the "an unobserved camp could
+// be here" floor (absence of kills ≠ safety). Ramps high→null; 0.5 is 5× a 0.9 gate
+// (lowest high-sec is where freighter ganks concentrate). Indexed by round(sec*10);
+// null (≤0) is flat. These COMPOUND across a route, so they're deliberately small.
+const P_FLOOR_NULL = 0.04;
+const P_FLOOR = [
+  P_FLOOR_NULL, // 0.0 (placeholder — ≤0 guarded to null)
+  0.03, // 0.1
+  0.02, // 0.2
+  0.015, // 0.3
+  0.01, // 0.4
+  0.005, // 0.5
+  0.003, // 0.6
+  0.002, // 0.7
+  0.002, // 0.8
+  0.001, // 0.9
+  0.001, // 1.0
 ];
-function securityInverted(security: number): number {
-  if (security <= 0) return 1.0;
-  const tier = Math.min(10, Math.max(1, Math.round(security * 10)));
-  return SEC_INVERTED[tier];
+function pFloor(security: number): number {
+  if (security <= 0) return P_FLOOR_NULL;
+  return P_FLOOR[Math.min(10, Math.max(1, Math.round(security * 10)))];
 }
 
-// Per-system risk = three weighted, independently-saturating terms that sum to
-// the danger (weights sum to 1, so a fully-saturated null-sec gate = exactly 100):
-//   security (small floor) + recent 60-min kills (dominant) + 24h baseline (medium).
-const W_SEC = 0.15; // small — security is a floor/tiebreaker
-const W_RECENT = 0.6; // dominant — a live camp right now is what kills you on this jump
-const W_BASE = 0.25; // medium — habitual chokepoint danger (24h average)
-const KILL_SCALE = 3; // saturating scale: x=1→0.28, 2→0.49, 3→0.63, 5→0.81
-const WORST_WEIGHT = 0.6;
-const AVG_WEIGHT = 0.4;
-/** A system is a gank/camp hotspot (skull) at this many RECENT (60m) gate kills or more. */
+const P_MAX = 0.85; // ceiling for a fully-saturated camp (never 1 — camps are survivable)
+const S_RECENT = 2.5; // recent-kill saturation: 1→0.33, 3→0.70, 5→0.86
+const S_BASELINE = 3; // 24h-average saturation (gentler than recent): 1/h→0.28, 3/h→0.63
+
+/** A system is flagged with a skull at this many RECENT (60m) gate kills or more. */
 export const SKULL_MIN_GATE_KILLS = 1;
 
 const f2 = (n: number): string => n.toFixed(2);
+const f3 = (n: number): string => n.toFixed(3);
 
-/** Saturating 0..1 score for a gate-kill count or rate. */
-function killScore(x: number): number {
-  return 1 - Math.exp(-x / KILL_SCALE);
+/** Saturating 0..1 signal for a kill count/rate. */
+const sat = (x: number, scale: number): number => 1 - Math.exp(-x / scale);
+
+/**
+ * Per-gate probability (0..1) of getting caught/killed: the security floor lifted
+ * toward P_MAX by the hazard from recent + 24h kills (a probabilistic OR — either
+ * "camped now" or "habitually camped" raises it, both together most).
+ */
+export function gateProbability(security: number, recent: number, baseline: number): number {
+  const floor = pFloor(security);
+  const hazard = 1 - (1 - sat(recent, S_RECENT)) * (1 - sat(baseline, S_BASELINE));
+  return floor + (P_MAX - floor) * hazard;
 }
 
-/** Risk (0..1) for one system: security floor + recent gate kills + 24h baseline. */
-export function systemRisk(security: number, recentKills: number, baselineRate: number): number {
-  const risk =
-    W_SEC * securityInverted(security) + W_RECENT * killScore(recentKills) + W_BASE * killScore(baselineRate);
-  return Math.min(1, risk);
+/** Whether a system should be flagged with a skull — RECENT (60m) kills only, so
+ *  the skull means "camp right now", not "historically dangerous". */
+export function isGankRisk(recentGateKills: number): boolean {
+  return recentGateKills >= SKULL_MIN_GATE_KILLS;
 }
 
 export interface SystemDanger {
@@ -66,9 +74,8 @@ export interface SystemDanger {
 }
 
 /**
- * One system's danger index (0–100) plus its exact-number breakdown, from the two
- * gates it uses on the route (toward the previous & next system) — recent (60m)
- * kills and the 24h average kills/h, each summed across the two gates. This is the
+ * One system's danger (0–100 = % chance of getting caught at its gates) plus the
+ * exact-number breakdown, from the two gates it uses on the route. This is the
  * per-square tooltip's "how it's calculated" content.
  */
 export function systemDanger(
@@ -79,29 +86,22 @@ export function systemDanger(
   baseNext: number,
 ): SystemDanger {
   const band = securityBand(security);
-  const si = securityInverted(security);
   const recent = recentPrev + recentNext;
   const base = basePrev + baseNext;
-  const ksR = killScore(recent);
-  const ksB = killScore(base);
-  const secTerm = W_SEC * si;
-  const recentTerm = W_RECENT * ksR;
-  const baseTerm = W_BASE * ksB;
-  const risk = Math.min(1, secTerm + recentTerm + baseTerm);
-  const index = Math.round(risk * 100);
+  const floor = pFloor(security);
+  const ksR = sat(recent, S_RECENT);
+  const ksB = sat(base, S_BASELINE);
+  const hazard = 1 - (1 - ksR) * (1 - ksB);
+  const p = floor + (P_MAX - floor) * hazard;
+  const index = Math.round(p * 100);
   const steps = [
-    `Security ${security.toFixed(2)} (${band}): ${f2(si)} × ${W_SEC} = ${f2(secTerm)}`,
-    `Kills last hour ${recent}: 1−e^(−${recent}/${KILL_SCALE}) = ${f2(ksR)} × ${W_RECENT} = ${f2(recentTerm)}`,
-    `Avg kills/h 24h ${f2(base)}: 1−e^(−${f2(base)}/${KILL_SCALE}) = ${f2(ksB)} × ${W_BASE} = ${f2(baseTerm)}`,
-    `Danger = ${f2(secTerm)} + ${f2(recentTerm)} + ${f2(baseTerm)} = ${f2(risk)} → ${index}`,
+    `Recent kills 60m ${recent}: 1−e^(−${recent}/${S_RECENT}) = ${f2(ksR)}`,
+    `24h avg ${f2(base)}/h: 1−e^(−${f2(base)}/${S_BASELINE}) = ${f2(ksB)}`,
+    `Hazard = 1−(1−${f2(ksR)})(1−${f2(ksB)}) = ${f2(hazard)}`,
+    `Floor (${band}-sec) ${f3(floor)} + (${P_MAX}−${f3(floor)})×${f2(hazard)} = ${f2(p)}`,
+    `→ ${index}% chance of getting caught here`,
   ];
   return { index, steps };
-}
-
-/** Whether a system should be flagged with a skull — RECENT (60m) gate kills only,
- *  so the skull means "camp right now", not "historically dangerous". */
-export function isGankRisk(recentGateKills: number): boolean {
-  return recentGateKills >= SKULL_MIN_GATE_KILLS;
 }
 
 export interface RouteGateKills {
@@ -138,9 +138,12 @@ export interface DangerResult {
   steps: string[];
 }
 
+/** How many worst gates the route tooltip lists individually before folding the rest. */
+const MAX_LISTED_GATES = 5;
+
 /**
- * Route danger index (0–100) + its explanation, over an ORDERED list of system
- * ids using the gate-kill data (recent 60m counts + 24h baseline rates). Unknown
+ * Route danger (0–100 = % chance of getting caught on ≥1 gate) + its explanation,
+ * over an ORDERED list of system ids. Chain-survival: danger = 1 − Π(1−pᵢ). Unknown
  * systems are treated as null-sec (conservative). Empty route → 0.
  */
 export function dangerForSystems(systemIds: number[], data: GateKillData): DangerResult {
@@ -148,39 +151,32 @@ export function dangerForSystems(systemIds: number[], data: GateKillData): Dange
     return { index: 0, steps: ['No route systems to assess → danger 0.'] };
   }
 
-  let worst = -1;
-  let worstName = '';
-  let worstBand: SecurityBand = 'null';
-  let worstRecent = 0;
-  let worstBase = 0;
-  let sum = 0;
+  const perGate: { name: string; p: number }[] = [];
+  let survival = 1;
   for (let i = 0; i < systemIds.length; i++) {
     const id = systemIds[i];
     const sys = getSystem(id);
     const security = sys?.security ?? 0;
-    const band: SecurityBand = securityBand(security);
     const { recentPrev, recentNext, basePrev, baseNext } = gateKillsForSystem(systemIds, i, data);
-    const recent = recentPrev + recentNext;
-    const base = basePrev + baseNext;
-    const r = systemRisk(security, recent, base);
-    if (r > worst) {
-      worst = r;
-      worstName = sys?.name ?? `System ${id}`;
-      worstBand = band;
-      worstRecent = recent;
-      worstBase = base;
-    }
-    sum += r;
+    const p = gateProbability(security, recentPrev + recentNext, basePrev + baseNext);
+    survival *= 1 - p;
+    perGate.push({ name: sys?.name ?? `System ${id}`, p });
   }
-  const avg = sum / systemIds.length;
-  const blended = WORST_WEIGHT * worst + AVG_WEIGHT * avg;
-  const index = Math.round(blended * 100);
+  const index = Math.round((1 - survival) * 100);
 
-  const steps = [
-    `Worst system: ${worstName} (${worstBand}-sec, ${worstRecent} recent / ${f2(worstBase)}/h avg gate kills) → risk ${f2(worst)}`,
-    `Average system risk = ${f2(avg)}`,
-    `Danger = ${WORST_WEIGHT} × ${f2(worst)} + ${AVG_WEIGHT} × ${f2(avg)} = ${f2(blended)} → ${index}`,
-  ];
+  // List only gates that actually contribute (≥1%), busiest first; summarise the
+  // safe majority as a count so the tooltip isn't a wall of "0%".
+  const pct = (p: number): string => `${Math.round(p * 100)}%`;
+  const notable = perGate.filter((g) => g.p >= 0.01).sort((a, b) => b.p - a.p);
+  const listed = notable.slice(0, MAX_LISTED_GATES);
+  const steps = listed.map((g) => `${g.name}: ${pct(g.p)}`);
+  const others = systemIds.length - listed.length;
+  if (listed.length === 0) {
+    steps.push(`All ${systemIds.length} gate${systemIds.length === 1 ? '' : 's'} near-safe`);
+  } else if (others > 0) {
+    steps.push(`+ ${others} other gate${others === 1 ? '' : 's'}`);
+  }
+  steps.push(`Survival = Π(1−pᵢ) = ${f2(survival)} → ${index}% chance of trouble`);
 
   return { index, steps };
 }

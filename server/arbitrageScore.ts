@@ -112,12 +112,15 @@ export interface AttractivityWeights {
   income: number;
   totalJumps: number;
   danger: number;
+  valueAtRisk: number;
 }
 
 interface Scorable {
   income: number;
   totalJumps: number | null;
   danger: number | null;
+  /** ISK you'd lose if this haul dies: courier collateral / arbitrage buyCost / package price. */
+  valueAtRisk: number | null;
 }
 
 interface FactorDef {
@@ -125,11 +128,18 @@ interface FactorDef {
   higher: boolean;
   log: boolean;
   value: (s: Scorable) => number | null;
+  /**
+   * When true, the factor is on a fixed 0–100 scale (danger) and is normalised
+   * against that scale, NOT min-maxed across the batch — so a genuinely safe route
+   * always scores well regardless of what else is in the results.
+   */
+  absolute?: boolean;
 }
 const FACTORS: FactorDef[] = [
   { id: 'income', higher: true, log: true, value: (s) => s.income },
   { id: 'totalJumps', higher: false, log: false, value: (s) => s.totalJumps },
-  { id: 'danger', higher: false, log: false, value: (s) => s.danger },
+  { id: 'danger', higher: false, log: false, value: (s) => s.danger, absolute: true },
+  { id: 'valueAtRisk', higher: false, log: true, value: (s) => s.valueAtRisk },
 ];
 
 /** Attractivity 0–100 for each item, min-max normalised across the set. */
@@ -154,9 +164,15 @@ export function scoreAttractivity<T extends Scorable>(items: T[], weights: Attra
     });
     const finite = scaled.filter((v) => Number.isFinite(v));
     if (finite.length === 0) continue;
-    const min = Math.min(...finite);
-    const max = Math.max(...finite);
-    active.push({ weight, higher: f.higher, scaled, min, range: max - min });
+    if (f.absolute) {
+      // Absolute 0–100 factor (danger): normalise against the fixed scale, not the
+      // batch — so its meaning (and the danger weight's strength) is batch-independent.
+      active.push({ weight, higher: f.higher, scaled: scaled.map((v) => v / 100), min: 0, range: 1 });
+    } else {
+      const min = Math.min(...finite);
+      const max = Math.max(...finite);
+      active.push({ weight, higher: f.higher, scaled, min, range: max - min });
+    }
   }
 
   const totalWeight = active.reduce((s, a) => s + a.weight, 0);

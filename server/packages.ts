@@ -942,7 +942,7 @@ export function resolvePackageSellDestinations(params: PackageSellDestinationPar
   }
 
   const scores = scoreAttractivity(
-    items.map((it) => ({ income: it.profit, totalJumps: it.deliveryRoute.length - 1, danger: it.danger })),
+    items.map((it) => ({ income: it.profit, totalJumps: it.deliveryRoute.length - 1, danger: it.danger, valueAtRisk: it.price })),
     params.weights,
   );
   items.forEach((it, i) => (it.attractivity = scores[i]));

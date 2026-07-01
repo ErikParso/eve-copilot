@@ -23,7 +23,7 @@ async function test() {
     capacity: Infinity,
     balance: Infinity,
     taxPct: 4.5,
-    weights: { income: 5, totalJumps: 5, danger: 5 },
+    weights: { income: 5, totalJumps: 5, danger: 5, valueAtRisk: 5 },
     kinds: [],
     limit: 50
   });

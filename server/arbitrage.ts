@@ -813,7 +813,7 @@ export function resolveSellDestinations(params: SellDestinationParams, kills: Ga
 
   // Score the routed set together (one normalisation), like the hauling list.
   const scores = scoreAttractivity(
-    items.map((it) => ({ income: it.profit, totalJumps: it.deliveryRoute.length - 1, danger: it.danger })),
+    items.map((it) => ({ income: it.profit, totalJumps: it.deliveryRoute.length - 1, danger: it.danger, valueAtRisk: it.buyCost })),
     params.weights,
   );
   items.forEach((it, i) => (it.attractivity = scores[i]));

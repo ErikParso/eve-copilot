@@ -439,6 +439,7 @@ async function main() {
         income: parseWeight(req.query.wIncome, 5),
         totalJumps: parseWeight(req.query.wJumps, 5),
         danger: parseWeight(req.query.wDanger, 5),
+        valueAtRisk: parseWeight(req.query.wValueAtRisk, 5),
       };
       const capacity = parseCeiling(req.query.capacity);
       const balance = parseCeiling(req.query.balance);
@@ -499,6 +500,7 @@ async function main() {
         income: parseWeight(w.income, 5),
         totalJumps: parseWeight(w.totalJumps, 5),
         danger: parseWeight(w.danger, 5),
+        valueAtRisk: parseWeight(w.valueAtRisk, 5),
       };
       const kills = await getGateKills();
       const items = resolveSellDestinations(
@@ -537,6 +539,7 @@ async function main() {
         income: parseWeight(w.income, 5),
         totalJumps: parseWeight(w.totalJumps, 5),
         danger: parseWeight(w.danger, 5),
+        valueAtRisk: parseWeight(w.valueAtRisk, 5),
       };
       const kills = await getGateKills();
       const items = resolvePackageSellDestinations(

@@ -22,7 +22,7 @@ export type FactorDirection = 'higher' | 'lower';
  */
 export type FactorScale = 'linear' | 'log';
 
-export type FactorId = 'income' | 'totalJumps' | 'danger';
+export type FactorId = 'income' | 'totalJumps' | 'danger' | 'valueAtRisk';
 
 /**
  * Neutral metrics a result exposes for scoring — only what courier contracts and
@@ -33,8 +33,10 @@ export interface Scorable {
   income: number | null;
   /** Total jumps for the whole journey. */
   totalJumps: number | null;
-  /** Route danger index 0–100. */
+  /** Route danger index 0–100 (chance of getting caught). */
   danger: number | null;
+  /** ISK at risk if the haul dies: courier collateral / arbitrage buyCost / package price. */
+  valueAtRisk: number | null;
 }
 
 export interface FactorDef {
@@ -43,6 +45,12 @@ export interface FactorDef {
   direction: FactorDirection;
   /** Normalisation scale (default linear). */
   scale: FactorScale;
+  /**
+   * When true, the factor is scored on its fixed 0–100 scale (danger) rather than
+   * min-maxed across the batch — so a genuinely safe route always scores well.
+   * (The scoring engine that honours this lives on the server; kept here for parity.)
+   */
+  absolute?: boolean;
   /** What it means / why it matters. */
   description: string;
   /** Raw value for a row, or null when not applicable. */
@@ -78,9 +86,19 @@ export const FACTORS: FactorDef[] = [
     label: 'Danger',
     direction: 'lower',
     scale: 'linear',
-    description: 'Route danger (low/null-sec + recent kills). Lower is safer.',
+    absolute: true,
+    description: 'Chance of getting caught on the route (0–100%). Scored on its absolute value — a safe route always scores well. Lower is safer.',
     value: (s) => s.danger,
     format: outOf100,
+  },
+  {
+    id: 'valueAtRisk',
+    label: 'At risk',
+    direction: 'lower',
+    scale: 'log',
+    description: 'ISK you would lose if the haul is destroyed — courier collateral, arbitrage capital, or package price. Lower risks less.',
+    value: (s) => s.valueAtRisk,
+    format: formatIsk,
   },
 ];
 
@@ -104,26 +122,26 @@ export const ATTRACTIVITY_PRESETS: AttractivityPreset[] = [
   {
     id: 'balanced',
     label: 'Balanced',
-    description: 'A sensible all-round mix of profit, effort and safety.',
-    weights: makeWeights({ income: 5, totalJumps: 5, danger: 5 }),
+    description: 'A sensible all-round mix of profit, effort, safety and exposure.',
+    weights: makeWeights({ income: 5, totalJumps: 5, danger: 5, valueAtRisk: 5 }),
   },
   {
     id: 'maxIskPerHour',
     label: 'Max ISK / hour',
     description: 'Chase the biggest payoff for the flying time — high income with as few jumps as possible.',
-    weights: makeWeights({ income: 8, totalJumps: 8, danger: 2 }),
+    weights: makeWeights({ income: 8, totalJumps: 8, danger: 2, valueAtRisk: 2 }),
   },
   {
     id: 'safe',
     label: 'Safe & steady',
-    description: 'Minimise risk: avoid dangerous routes, with a modest pull toward decent income on short routes.',
-    weights: makeWeights({ danger: 10, income: 3, totalJumps: 3 }),
+    description: 'Minimise risk: avoid dangerous routes and keep little at stake, with a modest pull toward income.',
+    weights: makeWeights({ danger: 10, valueAtRisk: 8, income: 3, totalJumps: 3 }),
   },
   {
     id: 'maxIncome',
     label: 'Max income',
-    description: 'Chase the biggest payouts, with mild caution on effort and danger.',
-    weights: makeWeights({ income: 10, totalJumps: 3, danger: 3 }),
+    description: 'Chase the biggest payouts, with mild caution on effort, danger and exposure.',
+    weights: makeWeights({ income: 10, totalJumps: 3, danger: 3, valueAtRisk: 1 }),
   },
 ];
 
