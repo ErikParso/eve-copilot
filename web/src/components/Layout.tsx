@@ -21,6 +21,7 @@ import { AuthControls } from '@/features/auth/AuthControls';
 import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
 import { useCharacterWalletPoller } from '@/features/auth/useCharacterWalletPoller';
 import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
+import { AdSenseScriptLoader } from './AdSenseScriptLoader';
 
 interface NavItem {
   label: string;
@@ -44,6 +45,7 @@ export function Layout() {
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <AdSenseScriptLoader />
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'background.paper', borderBottom: '1px solid', borderColor: 'divider' }}>
         <Toolbar>
           <IconButton
