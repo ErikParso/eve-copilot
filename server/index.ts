@@ -7,11 +7,11 @@ import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './mar
 import { startPricesRefresh } from './prices.js';
 import { resolvePinnedHaulsStatus, resolveSellDestinations, prewarmDeliveryRoutes } from './arbitrage.js';
 import { getEnrichedHauling, type HaulingKind } from './hauling.js';
-import type { AttractivityWeights } from './arbitrageScore.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
 import type { PinnedHaulStatusRequest, PinnedPackageStatusRequest, PackageStatusLine } from './types.js';
+import { sellDestinationsSchema, attractivityWeightsSchema } from './schemas.js';
 
 // Last-resort backstop: a stray rejected promise or thrown error in any
 // background crawl must never take the whole server down (a transient ESI 504
@@ -41,12 +41,6 @@ function parseOptionalNumber(value: unknown): number | null {
 function parseCeiling(value: unknown): number {
   const n = parseOptionalNumber(value);
   return n === null || n < 0 ? Infinity : n;
-}
-
-/** A non-negative attractivity weight, defaulting to `fallback`. */
-function parseWeight(value: unknown, fallback: number): number {
-  const n = parseOptionalNumber(value);
-  return n === null ? fallback : Math.max(0, n);
 }
 
 /** Opportunity-kind filter (comma-separated); empty/absent ⇒ no filter (all kinds). */
@@ -435,12 +429,9 @@ async function main() {
   // until the next reload instead of being re-priced the instant it's added.
   app.post('/api/hauling', async (req, res) => {
     try {
-      const weights: AttractivityWeights = {
-        income: parseWeight(req.query.wIncome, 5),
-        totalJumps: parseWeight(req.query.wJumps, 5),
-        danger: parseWeight(req.query.wDanger, 5),
-        valueAtRisk: parseWeight(req.query.wValueAtRisk, 5),
-      };
+      // Weights arrive in the body as a numbers object (same shape + validation
+      // as the sell-destinations endpoint). The schema defaults each to 5.
+      const weights = attractivityWeightsSchema.parse(req.body?.weights);
       const capacity = parseCeiling(req.query.capacity);
       const balance = parseCeiling(req.query.balance);
       const taxPct = parseOptionalNumber(req.query.taxPct) ?? 4.5;
@@ -486,35 +477,13 @@ async function main() {
   // item, ranked by the same attractivity weights as the hauling list, routed from
   // the caller's current system. On-demand (a transit card's "Sell elsewhere").
   app.post('/api/arbitrage/sell-destinations', async (req, res) => {
+    const parsed = sellDestinationsSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request', issues: parsed.error.issues });
+    }
     try {
-      const b = (req.body ?? {}) as Record<string, unknown>;
-      const typeId = Number(b.typeId);
-      const quantity = Number(b.quantity);
-      const boughtPrice = Number(b.boughtPrice);
-      const origin = Number(b.origin);
-      if (![typeId, quantity, boughtPrice, origin].every(Number.isFinite) || quantity <= 0) {
-        return res.status(400).json({ error: 'typeId, quantity, boughtPrice and origin are required' });
-      }
-      const w = (b.weights ?? {}) as Record<string, unknown>;
-      const weights: AttractivityWeights = {
-        income: parseWeight(w.income, 5),
-        totalJumps: parseWeight(w.totalJumps, 5),
-        danger: parseWeight(w.danger, 5),
-        valueAtRisk: parseWeight(w.valueAtRisk, 5),
-      };
       const kills = await getGateKills();
-      const items = resolveSellDestinations(
-        {
-          typeId,
-          quantity,
-          boughtPrice,
-          origin,
-          routeType: parseRouteType(b.routeType),
-          taxPct: parseOptionalNumber(b.taxPct) ?? 4.5,
-          weights,
-        },
-        kills,
-      );
+      const items = resolveSellDestinations(parsed.data, kills);
       res.json({ items });
     } catch (err) {
       console.error('POST /api/arbitrage/sell-destinations failed', err);
@@ -534,13 +503,7 @@ async function main() {
       if (!Number.isFinite(origin) || !Number.isFinite(price) || lines.length === 0) {
         return res.status(400).json({ error: 'origin, price and lines are required' });
       }
-      const w = (b.weights ?? {}) as Record<string, unknown>;
-      const weights = {
-        income: parseWeight(w.income, 5),
-        totalJumps: parseWeight(w.totalJumps, 5),
-        danger: parseWeight(w.danger, 5),
-        valueAtRisk: parseWeight(w.valueAtRisk, 5),
-      };
+      const weights = attractivityWeightsSchema.parse(b.weights);
       const kills = await getGateKills();
       const items = resolvePackageSellDestinations(
         { lines, price, origin, routeType: parseRouteType(b.routeType), taxPct: parseOptionalNumber(b.taxPct) ?? 4.5, weights },

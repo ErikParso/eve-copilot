@@ -255,10 +255,6 @@ export function useHaulingSearchController(): void {
       if (prefsNow.cargoM3 != null) params.set('capacity', String(prefsNow.cargoM3));
       if (wallet != null) params.set('balance', String(wallet));
       params.set('taxPct', String(prefsNow.salesTaxPct ?? DEFAULT_SALES_TAX_PCT));
-      params.set('wIncome', String(weights.income));
-      params.set('wJumps', String(weights.totalJumps));
-      params.set('wDanger', String(weights.danger));
-      params.set('wValueAtRisk', String(weights.valueAtRisk));
       // Opportunity-type filter; empty = no filter (server returns all kinds).
       if (prefsNow.contractTypes.length) params.set('types', prefsNow.contractTypes.join(','));
 
@@ -313,7 +309,9 @@ export function useHaulingSearchController(): void {
         signal,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hauls: pinnedForCheck, packages: pinnedPackagesForCheck }),
+        // Weights ride in the body as a numbers object — same format as
+        // /api/arbitrage/sell-destinations, so the server validates both alike.
+        body: JSON.stringify({ weights, hauls: pinnedForCheck, packages: pinnedPackagesForCheck }),
       });
       if (!haulRes.ok) throw new Error(`Hauling API returned ${haulRes.status}`);
       const haulData = (await haulRes.json()) as HaulingResponse;
