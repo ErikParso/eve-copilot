@@ -1,11 +1,15 @@
-// Live per-STARGATE ship-kill counts over a rolling 60-minute window, fed by the
-// zKillboard RedisQ firehose. A kill is counted only if it happened AT a stargate
-// (its zkb.locationID resolves to a gate in the SDE) — station, belt, plex and
-// mission kills are dropped, which is the whole point: a hauler is threatened at
-// gates, not by a busy trade hub's station games.
+// Live per-STARGATE ship-kill counts over a rolling 60-minute window, fed by
+// zKillboard's R2Z2 killmail feed. A kill is counted only if it happened AT a
+// stargate (its zkb.locationID resolves to a gate in the SDE) — station, belt,
+// plex and mission kills are dropped, which is the whole point: a hauler is
+// threatened at gates, not by a busy trade hub's station games.
 //
-// No boot backfill: RedisQ streams forward-only, so the window fills over the
-// first hour (warm-up). getGateKills() returns the current gateId -> count
+// R2Z2 is the successor to RedisQ (RedisQ's zkillredisq.stream host is on the
+// `.stream` TLD, which some DNS ad/malware blockers sinkhole to 127.0.0.1). R2Z2
+// lives on zkillboard.com and is a sequence-poll feed: read the current sequence,
+// then fetch ephemeral/{seq}.json, advancing on 200 and waiting on 404 (caught
+// up). We start at the current sequence → forward-only, so the window fills over
+// the first hour (warm-up). getGateKills() returns the current gateId -> count
 // snapshot; danger/enrich resolve each route system's inbound/outbound gate ids
 // against it.
 import { isStargate, getGateConnection, getSystem, securityBand, type SecurityBand } from './sde.js';
@@ -15,11 +19,11 @@ const WINDOW_MS = 60 * 60 * 1000;
 // the first hour. Used to report warm-up progress ("collecting for last N min").
 const startedAt = Date.now();
 const UA = 'eve-multitool/1.0 (parsoerik@gmail.com)';
-// RedisQ long-poll endpoint. Overridable if the hosted instance moves (zKill has
-// relocated it before). A stable queueID resumes the stream across restarts.
-const REDISQ_URL = process.env.REDISQ_URL ?? 'https://redisq.zkillboard.com/listen.php';
-const QUEUE_ID = process.env.REDISQ_QUEUE_ID ?? 'eve-multitool';
-const TTW = 10; // seconds the server holds the long-poll open before returning null
+// R2Z2 base URL. Overridable if the host moves. Endpoints:
+//   /ephemeral/sequence.json  → { sequence } (latest)
+//   /ephemeral/{seq}.json     → one killmail (404 once you've caught up)
+const R2Z2_BASE = process.env.R2Z2_URL ?? 'https://r2z2.zkillboard.com';
+const POLL_MS = 6000; // R2Z2's minimum interval between attempts after a 404
 
 // gateId -> ascending kill timestamps (ms). Pruned to the window on read & insert.
 const hits = new Map<number, number[]>();
@@ -151,9 +155,10 @@ export function getGateKillReport(): GateKillReport {
   };
 }
 
-interface RedisQPackage {
-  killID?: number;
-  killmail?: { killmail_time?: string };
+/** One R2Z2 ephemeral killmail file. The ESI killmail sits under `esi`. */
+interface R2Z2Killmail {
+  killmail_id?: number;
+  esi?: { killmail_time?: string };
   zkb?: { locationID?: number };
 }
 
@@ -161,9 +166,27 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const LOG = '[gate-kills]';
 const HEARTBEAT_MS = 5 * 60 * 1000; // periodic "still alive" summary during quiet spells
+const BACKOFF_BASE_MS = 2000;
+const BACKOFF_MAX_MS = 60000; // cap: a dead endpoint retries once a minute, not every 3s
 let recordedTotal = 0; // gate kills recorded since boot (across the whole feed)
 let consecutiveFailures = 0;
 let lastHeartbeatAt = Date.now();
+
+/** Exponential backoff (2s → 4s → … → 60s cap) so a persistent outage doesn't spam. */
+function backoffMs(failures: number): number {
+  return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** Math.min(Math.max(0, failures - 1), 5));
+}
+
+/** Unwrap fetch's generic "fetch failed" to the underlying cause (ENOTFOUND, ECONNREFUSED, TLS…). */
+function errDetail(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause: unknown = (err as { cause?: unknown }).cause;
+  if (cause instanceof Error) {
+    const code = (cause as { code?: string }).code;
+    return `${err.message}: ${cause.message}${code ? ` (${code})` : ''}`;
+  }
+  return cause ? `${err.message}: ${String(cause)}` : err.message;
+}
 
 /** Log a periodic summary so the feed is visibly alive even with no recent kills. */
 function maybeHeartbeat(now: number): void {
@@ -175,58 +198,99 @@ function maybeHeartbeat(now: number): void {
   );
 }
 
-/** Long-poll RedisQ forever, recording each gate kill into the rolling window. */
+/** Record one killmail if it happened at a stargate. */
+function ingest(km: R2Z2Killmail): void {
+  const loc = km.zkb?.locationID;
+  if (typeof loc !== 'number' || !isStargate(loc)) return;
+  const parsed = km.esi?.killmail_time ? Date.parse(km.esi.killmail_time) : NaN;
+  record(loc, Number.isFinite(parsed) ? parsed : Date.now());
+  recordedTotal++;
+  const conn = getGateConnection(loc);
+  const from = conn ? (getSystem(conn.sys)?.name ?? `System ${conn.sys}`) : `gate ${loc}`;
+  const to = conn ? (getSystem(conn.dest)?.name ?? `System ${conn.dest}`) : '?';
+  const atGate = hits.get(loc)?.length ?? 1;
+  console.log(
+    `${LOG} recorded kill at ${from} → ${to} gate (killID ${km.killmail_id ?? '?'}); ${atGate} at this gate, ${recordedTotal} total since boot.`,
+  );
+}
+
+/** Fetch R2Z2's current sequence number (latest killmail id). */
+async function fetchCurrentSequence(): Promise<number> {
+  const res = await fetch(`${R2Z2_BASE}/ephemeral/sequence.json`, { headers: { 'User-Agent': UA } });
+  if (!res.ok) throw new Error(`sequence.json HTTP ${res.status} ${res.statusText}`);
+  const body = (await res.json()) as { sequence?: number };
+  if (typeof body.sequence !== 'number') throw new Error('sequence.json missing a numeric sequence');
+  return body.sequence;
+}
+
+/** Poll R2Z2 forever from the current sequence, recording gate kills as they arrive. */
 async function pollLoop(): Promise<void> {
-  const url = `${REDISQ_URL}?queueID=${encodeURIComponent(QUEUE_ID)}&ttw=${TTW}`;
+  // Start at the current sequence → forward-only (the window warms over the hour).
+  let seq = -1;
+  while (seq < 0) {
+    try {
+      seq = await fetchCurrentSequence();
+    } catch (err) {
+      consecutiveFailures++;
+      const wait = backoffMs(consecutiveFailures);
+      console.warn(
+        `${LOG} could not read start sequence (failure #${consecutiveFailures}): ${errDetail(err)}; retrying in ${wait / 1000}s.`,
+      );
+      await sleep(wait);
+    }
+  }
+  consecutiveFailures = 0;
+  console.log(`${LOG} streaming from sequence ${seq}.`);
+
   for (;;) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA } });
-      if (!res.ok) {
-        consecutiveFailures++;
-        console.warn(`${LOG} RedisQ HTTP ${res.status} ${res.statusText} (failure #${consecutiveFailures}); retrying in 2s.`);
-        await sleep(2000);
+      const res = await fetch(`${R2Z2_BASE}/ephemeral/${seq}.json`, { headers: { 'User-Agent': UA } });
+      if (res.status === 404) {
+        // Caught up — no killmail at this sequence yet. Wait the min interval, retry same seq.
+        if (consecutiveFailures > 0) {
+          console.log(`${LOG} R2Z2 recovered after ${consecutiveFailures} failure(s).`);
+          consecutiveFailures = 0;
+        }
+        maybeHeartbeat(Date.now());
+        await sleep(POLL_MS);
         continue;
       }
-      const body = (await res.json()) as { package: RedisQPackage | null };
+      if (!res.ok) {
+        consecutiveFailures++;
+        const wait = backoffMs(consecutiveFailures);
+        console.warn(
+          `${LOG} R2Z2 HTTP ${res.status} ${res.statusText} at seq ${seq} (failure #${consecutiveFailures}); retrying in ${wait / 1000}s.`,
+        );
+        await sleep(wait);
+        continue;
+      }
+      const km = (await res.json()) as R2Z2Killmail;
       if (consecutiveFailures > 0) {
-        console.log(`${LOG} RedisQ recovered after ${consecutiveFailures} failure(s).`);
+        console.log(`${LOG} R2Z2 recovered after ${consecutiveFailures} failure(s).`);
         consecutiveFailures = 0;
       }
-      const pkg = body?.package;
-      if (pkg) {
-        const loc = pkg.zkb?.locationID;
-        if (typeof loc === 'number' && isStargate(loc)) {
-          const parsed = pkg.killmail?.killmail_time ? Date.parse(pkg.killmail.killmail_time) : NaN;
-          record(loc, Number.isFinite(parsed) ? parsed : Date.now());
-          recordedTotal++;
-          const conn = getGateConnection(loc);
-          const from = conn ? (getSystem(conn.sys)?.name ?? `System ${conn.sys}`) : `gate ${loc}`;
-          const to = conn ? (getSystem(conn.dest)?.name ?? `System ${conn.dest}`) : '?';
-          const atGate = hits.get(loc)?.length ?? 1;
-          console.log(
-            `${LOG} recorded kill at ${from} → ${to} gate (killID ${pkg.killID ?? '?'}); ${atGate} at this gate, ${recordedTotal} total since boot.`,
-          );
-        }
-      }
-      // package === null → the long-poll timed out with no kill; reconnect at once.
+      ingest(km);
+      seq++; // advance to the next killmail
       maybeHeartbeat(Date.now());
     } catch (err) {
       consecutiveFailures++;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`${LOG} RedisQ poll failed (failure #${consecutiveFailures}): ${msg}; retrying in 3s.`);
-      await sleep(3000);
+      const wait = backoffMs(consecutiveFailures);
+      console.warn(
+        `${LOG} R2Z2 poll failed at seq ${seq} (failure #${consecutiveFailures}): ${errDetail(err)}; retrying in ${wait / 1000}s.`,
+      );
+      await sleep(wait);
     }
   }
 }
 
-/** Start the background RedisQ feed. No-op under OFFLINE (tests use the override). */
+/** Start the background R2Z2 feed. No-op under OFFLINE (tests use the override). */
 export function startGateKillFeed(): void {
   if (process.env.OFFLINE === 'true') {
-    console.log(`${LOG} OFFLINE mode — RedisQ feed disabled (danger uses injected test kills).`);
+    console.log(`${LOG} OFFLINE mode — killmail feed disabled (danger uses injected test kills).`);
     return;
   }
   console.log(
-    `${LOG} starting RedisQ feed at ${REDISQ_URL} (queue "${QUEUE_ID}", ${WINDOW_MS / 60000}m rolling window; warms up over the first hour).`,
+    `${LOG} starting R2Z2 feed at ${R2Z2_BASE} (${WINDOW_MS / 60000}m rolling window; warms up over the first hour).`,
   );
   pollLoop().catch((err) => {
     // The inner loop swallows all per-request failures, so reaching here is
