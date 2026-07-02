@@ -63,7 +63,9 @@ export const pinCourierAtom = atom(null, (get, set, item: CourierRow) => {
 
 export const secureCourierAtom = atom(null, (_get, set, id: number) => {
   set(pinnedCouriersAtom, (prev) =>
-    prev.map((c) => (c.id === id ? { ...c, status: 'secured' } : c))
+    // Accepting clears `unavailable`: the contract is ours now, so its absence from
+    // the public feed is expected (and it's no longer revalidated as planning).
+    prev.map((c) => (c.id === id ? { ...c, status: 'secured', unavailable: false } : c))
   );
 });
 
@@ -227,6 +229,50 @@ export interface PinnedHaulStatus {
   statusMessage: string;
   borderColor: string;
 }
+
+/** Same-cycle revalidation of a pinned courier against the FULL contract feed. */
+export interface PinnedCourierStatus {
+  id: number;
+  /** Still in the public contract feed? (false = taken/cancelled/expired). */
+  exists: boolean;
+  approachRoute: RouteSystem[] | null;
+  deliveryRoute: RouteSystem[] | null;
+  danger: number;
+  dangerSteps: string[];
+}
+
+/**
+ * Fold the server's courier revalidation into the pinned set: mark PLANNING pins
+ * `unavailable` when their contract has left the feed, and refresh route/danger/
+ * jumps while it's live. Secured/executed pins are untouched — a contract you
+ * accepted leaving the public feed is expected, not a "gone" signal.
+ */
+export const updatePinnedCourierStatusesAtom = atom(null, (_get, set, statuses: PinnedCourierStatus[]) => {
+  const map = new Map(statuses.map((s) => [s.id, s]));
+  set(pinnedCouriersAtom, (prev) =>
+    prev.map((c) => {
+      const live = map.get(c.id);
+      if (!live || c.status !== 'planned') return c;
+      if (!live.exists) return { ...c, unavailable: true };
+      if (!live.deliveryRoute) return { ...c, unavailable: false };
+      const jumpsToDropoff = Math.max(0, live.deliveryRoute.length - 1);
+      const jumpsFromCurrent = live.approachRoute ? Math.max(0, live.approachRoute.length - 1) : null;
+      const totalJumps = jumpsFromCurrent !== null ? jumpsFromCurrent + jumpsToDropoff : jumpsToDropoff;
+      return {
+        ...c,
+        unavailable: false,
+        approachRoute: live.approachRoute,
+        deliveryRoute: live.deliveryRoute,
+        danger: live.danger,
+        dangerSteps: live.dangerSteps,
+        jumpsFromCurrent,
+        jumpsToDropoff,
+        totalJumps,
+        incomePerJump: totalJumps === 0 ? c.reward : c.reward / totalJumps,
+      };
+    }),
+  );
+});
 
 export const updatePinnedStatusesAtom = atom(null, (_get, set, statuses: PinnedHaulStatus[]) => {
   const map = new Map(statuses.map((s) => [s.id, s]));

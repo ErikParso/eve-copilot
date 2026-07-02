@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { loadSde } from './sde.js';
-import { startContractsRefresh } from './contracts.js';
+import { startContractsRefresh, resolvePinnedCouriersStatus } from './contracts.js';
 import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDestinations, getPackagesFreshness } from './packages.js';
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
@@ -15,6 +15,7 @@ import {
   attractivityWeightsSchema,
   pinnedHaulsRequestSchema,
   pinnedPackagesRequestSchema,
+  pinnedCouriersRequestSchema,
   packageStatusLinesSchema,
 } from './schemas.js';
 
@@ -367,7 +368,14 @@ async function main() {
         routeType,
         kills,
       });
-      res.json({ ...result, pinnedStatuses, pinnedPackageStatuses });
+      // Pinned couriers revalidated in the SAME cycle, against the FULL contract
+      // feed (not the paged/filtered grid): existence + fresh route/danger.
+      const pinnedCourierStatuses = resolvePinnedCouriersStatus(pinnedCouriersRequestSchema.parse(req.body?.couriers), {
+        origin,
+        routeType,
+        kills,
+      });
+      res.json({ ...result, pinnedStatuses, pinnedPackageStatuses, pinnedCourierStatuses });
     } catch (err) {
       console.error('POST /api/hauling failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });

@@ -112,3 +112,14 @@ const pinnedPackageRequestSchema = z
 
 /** Body `packages` of POST /api/hauling. */
 export const pinnedPackagesRequestSchema = lenientArray(pinnedPackageRequestSchema);
+
+const pinnedCourierRequestSchema = z.object({
+  id: z.coerce.number().finite(),
+  // Only planning/secured pins are revalidated; executed ones are done.
+  status: z.enum(['planned', 'secured']),
+});
+
+/** Body `couriers` of POST /api/hauling — pinned courier ids to revalidate
+ *  against the FULL live contract feed (existence + fresh route/danger). */
+export const pinnedCouriersRequestSchema = lenientArray(pinnedCourierRequestSchema);
+export type PinnedCourierStatusRequest = z.infer<typeof pinnedCourierRequestSchema>;

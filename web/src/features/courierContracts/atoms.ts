@@ -100,27 +100,21 @@ export const haulingPageAtom = atom<number>(1);
  * (they're not ranked against the menu). Empty until we have a successful load.
  */
 export const pinnedRowsAtom = atom<ResultCard[]>((get) => {
-  const data = get(haulingDataAtom);
   // Pins are the user's ACTIVE work and come from client-side storage, so they
   // render regardless of the fetch status — including during a user-invoked
   // reload. They live in their own section above the grid (not among the
   // skeletons), so there's no stale-next-to-skeleton concern that blanks them.
-
   const origin = get(characterStatusAtom)?.systemId ?? null;
   const routeType = get(preferencesAtom).routeType;
   const routesCache = get(pinnedRoutesAtom);
 
   const pinnedCouriers = get(pinnedCouriersAtom);
-  const liveCourierIds = new Set(data.courier.map((c) => c.id));
   const updatedPinnedCouriers = pinnedCouriers.map((c) => {
     const isSecured = c.status === 'secured';
-    // Only judge a planned courier "gone" against a fresh, successful result —
-    // the shipped courier list is stale/empty while loading or before first load.
-    const isUnavailable = data.status === 'success' && c.status === 'planned' && !liveCourierIds.has(c.id);
-    let item = {
-      ...c,
-      unavailable: isUnavailable,
-    };
+    // `unavailable` is now set by the same-cycle server revalidation against the
+    // FULL contract feed (updatePinnedCourierStatusesAtom), not derived from the
+    // paged/filtered opportunity grid — so filters/weights/paging can't false-flag it.
+    let item = { ...c };
     if (isSecured && origin !== null && c.dropoff?.systemId) {
       const cacheKey = `${origin}-${c.dropoff.systemId}-${routeType}`;
       const cached = routesCache[cacheKey];

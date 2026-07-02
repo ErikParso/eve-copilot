@@ -19,8 +19,10 @@ import {
   pinnedCouriersAtom,
   pinnedRoutesAtom,
   updatePinnedStatusesAtom,
+  updatePinnedCourierStatusesAtom,
   haulingRefreshTriggerAtom,
   type PinnedHaulStatus,
+  type PinnedCourierStatus,
 } from '@/features/arbitrage/atoms';
 import {
   pinnedPackagesAtom,
@@ -119,6 +121,8 @@ interface HaulingResponse {
   pinnedStatuses: PinnedHaulStatus[];
   // Same-snapshot revalidation of the pinned packages posted with the request.
   pinnedPackageStatuses: PinnedPackageStatus[];
+  // Same-cycle revalidation of pinned couriers against the FULL contract feed.
+  pinnedCourierStatuses: PinnedCourierStatus[];
 }
 
 /** Add the route-derived fields (jumps, per-jump rate, danger) + listing times. */
@@ -172,6 +176,7 @@ export function useHaulingSearchController(): void {
   const store = useStore();
   const setData = useSetAtom(haulingDataAtom);
   const updatePinnedStatuses = useSetAtom(updatePinnedStatusesAtom);
+  const updatePinnedCourierStatuses = useSetAtom(updatePinnedCourierStatusesAtom);
   const updatePinnedPackageStatuses = useSetAtom(updatePinnedPackageStatusesAtom);
   const refreshTrigger = useAtomValue(haulingRefreshTriggerAtom);
   const packagesRefreshTrigger = useAtomValue(packagesRefreshTriggerAtom);
@@ -315,13 +320,21 @@ export function useHaulingSearchController(): void {
           originalProfit: p.originalProfit,
         }));
 
+      // Pinned couriers revalidated in the SAME cycle against the FULL contract
+      // feed (existence + fresh route). Only PLANNING pins: a secured/accepted
+      // contract leaving the public feed is expected, not a "gone" signal.
+      const pinnedCouriersForCheck = store
+        .get(pinnedCouriersAtom)
+        .filter((c) => c.status === 'planned')
+        .map((c) => ({ id: c.id, status: 'planned' as const }));
+
       const haulRes = await fetch(`${API_BASE}/api/hauling?${params.toString()}`, {
         signal,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // Weights ride in the body as a numbers object — same format as
         // /api/arbitrage/sell-destinations, so the server validates both alike.
-        body: JSON.stringify({ weights, hauls: pinnedForCheck, packages: pinnedPackagesForCheck }),
+        body: JSON.stringify({ weights, hauls: pinnedForCheck, packages: pinnedPackagesForCheck, couriers: pinnedCouriersForCheck }),
       });
       if (!haulRes.ok) throw new Error(`Hauling API returned ${haulRes.status}`);
       const haulData = (await haulRes.json()) as HaulingResponse;
@@ -361,6 +374,9 @@ export function useHaulingSearchController(): void {
       }
       if (haulData.pinnedPackageStatuses?.length) {
         updatePinnedPackageStatuses(haulData.pinnedPackageStatuses);
+      }
+      if (haulData.pinnedCourierStatuses?.length) {
+        updatePinnedCourierStatuses(haulData.pinnedCourierStatuses);
       }
 
       // Fetch dynamic routes for secured pinned courier items (arbitrage routes are resolved on the server)
@@ -429,7 +445,7 @@ export function useHaulingSearchController(): void {
       );
       return null;
     }
-  }, [store, setData, setPage, updatePinnedStatuses, updatePinnedPackageStatuses]);
+  }, [store, setData, setPage, updatePinnedStatuses, updatePinnedCourierStatuses, updatePinnedPackageStatuses]);
 
   // USER-action triggers + the scheduled background refresh. The initial load
   // and every user change show skeletons (isBg=false); the scheduled re-runs are

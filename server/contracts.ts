@@ -5,7 +5,9 @@ import { esiGet, esiGetPaged, mapWithConcurrency, EsiError } from './esi.js';
 import { getGateKills } from './gateKills.js';
 import { getRoute, type RouteType } from './routing.js';
 import { resolveEndpoint, toRouteSystems } from './enrich.js';
-import type { ContractOpportunity, EnrichedContract, PublicContract, GateKillData } from './types.js';
+import { dangerForSystems } from './danger.js';
+import type { ContractOpportunity, EnrichedContract, PublicContract, GateKillData, RouteSystem } from './types.js';
+import type { PinnedCourierStatusRequest } from './schemas.js';
 
 const REFRESH_MS = 10 * 60 * 1000;
 
@@ -241,6 +243,76 @@ export async function getEnrichedContracts(
     if (enriched) contracts.push(enriched);
   }
   return { contracts, lastModifiedAt: raw.lastModifiedAt, total: contracts.length };
+}
+
+/** One pinned courier's revalidation against the live feed. */
+export interface PinnedCourierStatus {
+  id: number;
+  /** Still present in the public contract feed? (false = accepted/cancelled/expired). */
+  exists: boolean;
+  /** Fresh route legs from the current origin (null if unreachable or gone). */
+  approachRoute: RouteSystem[] | null;
+  deliveryRoute: RouteSystem[] | null;
+  /** Fresh route danger (index + breakdown) for the still-live contract. */
+  danger: number;
+  dangerSteps: string[];
+}
+
+/**
+ * Revalidate pinned couriers against the FULL contract feed (not the paged/filtered
+ * opportunity grid): does each contract still exist, and — if so — its fresh route
+ * + danger from the current origin. This is the courier analogue of
+ * resolvePinnedHaulsStatus; availability no longer depends on which opportunities
+ * happened to be shipped, so filters/weights/paging can't false-flag a live pin.
+ */
+export function resolvePinnedCouriersStatus(
+  couriers: PinnedCourierStatusRequest[],
+  opts: { origin: number | null; routeType: RouteType; kills: GateKillData },
+): PinnedCourierStatus[] {
+  if (couriers.length === 0) return [];
+  // Distinguish "feed never loaded" (cold start / crawl failed → `raw` null) from
+  // "feed loaded but this contract is absent" (a real "gone"). Only the former
+  // keeps pins available; an empty-but-loaded feed legitimately means gone.
+  if (raw === null) {
+    return couriers.map((c) => ({ id: c.id, exists: true, approachRoute: null, deliveryRoute: null, danger: 0, dangerSteps: [] }));
+  }
+  // One pass over the (large) opportunity set, keeping only the pinned ids.
+  const wanted = new Set(couriers.map((c) => c.id));
+  const found = new Map<number, ContractOpportunity>();
+  for (const o of getOpportunities()) {
+    if (wanted.has(o.id)) found.set(o.id, o);
+  }
+
+  const gone = (id: number): PinnedCourierStatus => ({
+    id,
+    exists: false,
+    approachRoute: null,
+    deliveryRoute: null,
+    danger: 0,
+    dangerSteps: [],
+  });
+
+  return couriers.map((c) => {
+    const o = found.get(c.id);
+    if (!o) return gone(c.id);
+    const enriched = resolveContract(o, opts.routeType, opts.origin, opts.kills);
+    // Contract still exists but is unreachable from here → keep it available (it's
+    // a routing/origin issue, not a "contract gone"), just without a fresh route.
+    if (!enriched) return { id: c.id, exists: true, approachRoute: null, deliveryRoute: null, danger: 0, dangerSteps: [] };
+
+    const deliveryIds = enriched.deliveryRoute.map((s) => s.systemId);
+    const approachIds = enriched.approachRoute ? enriched.approachRoute.map((s) => s.systemId) : null;
+    const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
+    const { index, steps } = dangerForSystems(dangerRoute, opts.kills);
+    return {
+      id: c.id,
+      exists: true,
+      approachRoute: enriched.approachRoute,
+      deliveryRoute: enriched.deliveryRoute,
+      danger: index,
+      dangerSteps: steps,
+    };
+  });
 }
 
 export function loadContractsSnapshot(data: { couriers: PublicContract[]; sells: PublicContract[]; lastModifiedAt: number | null }): void {
