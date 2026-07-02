@@ -10,7 +10,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { characterStatusAtom, characterWalletAtom } from '@/features/auth/atoms';
 import { preferencesAtom, DEFAULT_SALES_TAX_PCT } from '@/features/preferences/atoms';
 import { deriveJourney, perJump } from './journey';
-import { haulingDataAtom, attractivityWeightsAtom, type CourierBase, type ScoredCourier, type ScoredArbitrage, type ScoredPackage } from './atoms';
+import { haulingDataAtom, haulingPageAtom, attractivityWeightsAtom, type CourierBase, type ScoredCourier, type ScoredArbitrage, type ScoredPackage } from './atoms';
 import type { ContractEndpoint, RouteSystem } from './types';
 import type { ScaledArbitrage, MarketMeta } from '@/features/arbitrage/types';
 import type { PackageItem, PackageRow } from '@/features/packages/types';
@@ -110,6 +110,10 @@ interface HaulingResponse {
   meta: MarketMeta;
   contractsAsOf: number | null;
   total: number;
+  /** 1-based page the server actually shipped (clamped to range). */
+  page: number;
+  /** Items per page the server used. */
+  pageSize: number;
   // Revalidation of the pinned hauls posted with the request, resolved against
   // the same snapshot as `items`.
   pinnedStatuses: PinnedHaulStatus[];
@@ -176,6 +180,7 @@ export function useHaulingSearchController(): void {
   const setStatus = useSetAtom(characterStatusAtom);
   const setRefreshTrigger = useSetAtom(haulingRefreshTriggerAtom);
   const setPrefs = useSetAtom(preferencesAtom);
+  const setPage = useSetAtom(haulingPageAtom);
 
   useEffect(() => {
     (window as any).setTestWalletBalance = (balance: number | null) => {
@@ -222,6 +227,8 @@ export function useHaulingSearchController(): void {
   // Weights ARE a re-fetch trigger now: the server scores/truncates by them, and
   // the FE no longer re-scores the list.
   const weights = useAtomValue(attractivityWeightsAtom);
+  // The opportunity grid is server-paged; changing the page re-fetches that page.
+  const page = useAtomValue(haulingPageAtom);
   const abortRef = useRef<AbortController | null>(null);
   // Skip the very first run of the automatic-trigger effect: the user-action
   // effect already does the initial (skeleton) load on mount.
@@ -251,6 +258,9 @@ export function useHaulingSearchController(): void {
       const wallet = store.get(characterWalletAtom)?.balance;
       const weights = store.get(attractivityWeightsAtom);
       const params = new URLSearchParams({ routeType: rt });
+      // Server-side paging: ask for the current page of the ranked set. The whole
+      // set is still scored/sorted server-side; only this page's routes materialise.
+      params.set('page', String(store.get(haulingPageAtom)));
       if (org !== null) params.set('origin', String(org));
       if (prefsNow.cargoM3 != null) params.set('capacity', String(prefsNow.cargoM3));
       if (wallet != null) params.set('balance', String(wallet));
@@ -337,7 +347,12 @@ export function useHaulingSearchController(): void {
         contractsAsOf: haulData.contractsAsOf,
         market: haulData.meta,
         total: haulData.total,
+        page: haulData.page,
+        pageSize: haulData.pageSize,
       });
+      // The server clamps the page to the available range; mirror that back so a
+      // stale/too-high page (e.g. after the set shrank) snaps the pager into range.
+      if (haulData.page !== store.get(haulingPageAtom)) setPage(haulData.page);
 
       // Fold the same-snapshot pin revalidation into the store. Pins not echoed
       // back (none posted, or already executed) are left untouched.
@@ -410,11 +425,11 @@ export function useHaulingSearchController(): void {
       setData((d) =>
         d.status === 'success'
           ? d
-          : { status: 'error', courier: [], arbitrage: [], packages: [], error: message, contractsAsOf: null, market: null, total: 0 },
+          : { status: 'error', courier: [], arbitrage: [], packages: [], error: message, contractsAsOf: null, market: null, total: 0, page: 1, pageSize: d.pageSize },
       );
       return null;
     }
-  }, [store, setData, updatePinnedStatuses, updatePinnedPackageStatuses]);
+  }, [store, setData, setPage, updatePinnedStatuses, updatePinnedPackageStatuses]);
 
   // USER-action triggers + the scheduled background refresh. The initial load
   // and every user change show skeletons (isBg=false); the scheduled re-runs are
@@ -434,7 +449,20 @@ export function useHaulingSearchController(): void {
       if (timer) clearTimeout(timer);
       abortRef.current?.abort();
     };
-  }, [run, routeType, cargoM3, salesTaxPct, contractTypesKey, weights.income, weights.totalJumps, weights.danger]);
+  }, [run, routeType, cargoM3, salesTaxPct, contractTypesKey, weights.income, weights.totalJumps, weights.danger, page]);
+
+  // Any user action that RE-RANKS the set (weights, route, cargo, tax, filter)
+  // resets to page 1 — "page 5" is meaningless after a re-sort. Skip the mount
+  // run. Automatic re-ranks (origin/wallet) keep the current page and reload it
+  // silently, so a dock/undock doesn't flash skeletons or jump you to the top.
+  const rankResetMountedRef = useRef(false);
+  useEffect(() => {
+    if (!rankResetMountedRef.current) {
+      rankResetMountedRef.current = true;
+      return;
+    }
+    setPage(1);
+  }, [setPage, routeType, cargoM3, salesTaxPct, contractTypesKey, weights.income, weights.totalJumps, weights.danger]);
 
   // AUTOMATIC triggers: current system / wallet changed (from the pollers).
   // Reload silently so the grid + pinned cards update in place without flashing

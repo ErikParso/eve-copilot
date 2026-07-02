@@ -1,4 +1,4 @@
-import { Box, Button } from '@mui/material';
+import { Box } from '@mui/material';
 import Grid from '@mui/material/Unstable_Grid2';
 import { ContractCard } from './ContractCard';
 import { ArbitrageCard } from '@/features/arbitrage/components/ArbitrageCard';
@@ -8,23 +8,19 @@ import type { ResultCard } from '../combined';
 
 /**
  * Nested MUI grid of mixed courier + arbitrage cards (denser now the page is
- * full-width: xs 12 / sm 6 / md 4 / lg 3). Renders the pre-paginated visible rows
- * and shows a "Show More" button if hasMore is true.
+ * full-width: xs 12 / sm 6 / md 4 / lg 3). Renders exactly the rows it's given —
+ * paging is handled by the caller (the server ships one page at a time).
  */
 export function CombinedGrid({
   rows,
   highlightedKey,
   showSkeletons = false,
-  skeletonCount = 8,
-  hasMore = false,
-  onShowMore,
+  skeletonCount = 3,
 }: {
   rows: ResultCard[];
   highlightedKey: string | null;
   showSkeletons?: boolean;
   skeletonCount?: number;
-  hasMore?: boolean;
-  onShowMore?: () => void;
 }) {
   return (
     <Box>
@@ -56,23 +52,6 @@ export function CombinedGrid({
             </Grid>
           ))}
       </Grid>
-
-      {hasMore && onShowMore && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
-          <Button
-            variant="outlined"
-            onClick={onShowMore}
-            sx={{
-              px: 4,
-              py: 1,
-              borderRadius: 2,
-              fontWeight: 600,
-            }}
-          >
-            Show More
-          </Button>
-        </Box>
-      )}
     </Box>
   );
 }
