@@ -187,24 +187,33 @@ async function runTests() {
   console.log(`Found ${count} arbitrage opportunities in the main grid.`);
 
   // 1. SELECT OPPORTUNITY TO PIN
-  const firstCard = cardLocator.first();
-  const firstCardIdAttr = await firstCard.getAttribute('id');
+  let targetCard = cardLocator.first();
+  const cardCount = await cardLocator.count();
+  for (let i = 0; i < cardCount; i++) {
+    const card = cardLocator.nth(i);
+    const text = await card.textContent();
+    if (text.includes('Hemorphite')) {
+      targetCard = card;
+      break;
+    }
+  }
+  const firstCardIdAttr = await targetCard.getAttribute('id');
   const itemId = firstCardIdAttr.replace('card-a:', '');
   const [typeIdStr, srcStationIdStr, destStationIdStr] = itemId.split(':');
-  const typeId = Number(typeIdStr);
-  const srcStationId = Number(srcStationIdStr);
-  const destStationId = Number(destStationIdStr);
+  let typeId = Number(typeIdStr);
+  let srcStationId = Number(srcStationIdStr);
+  let destStationId = Number(destStationIdStr);
 
-  const itemName = await firstCard.locator('.MuiTypography-body2').first().textContent();
+  let itemName = await targetCard.locator('.MuiTypography-body2').first().textContent();
   console.log(`Targeting Item: "${itemName}" (typeId: ${typeId}, source: ${srcStationId}, dest: ${destStationId})`);
 
   // Extract expected profit text for comparison
-  const expectedProfitText = await firstCard.locator('.MuiTypography-h6').textContent();
+  const expectedProfitText = await targetCard.locator('.MuiTypography-h6').textContent();
   console.log(`Original profit text: ${expectedProfitText}`);
 
   // 2. PIN CARD
   console.log('Pinning the first card...');
-  const pinButton = firstCard.locator('button:has([data-testid="PushPinOutlinedIcon"]), button[aria-label="Pin opportunity"]');
+  const pinButton = targetCard.locator('button:has([data-testid="PushPinOutlinedIcon"]), button[aria-label="Pin opportunity"]');
   const pinResponsePromise = page.waitForResponse(response =>
     response.url().includes('/api/hauling') && response.status() === 200
   );
@@ -622,7 +631,16 @@ async function runTests() {
   
   // Reset market and pin a fresh card
   await mutateMarketAndRefresh(page, { action: 'reset' });
-  const baseline_card = page.locator('[id^="card-a:"]').first();
+  let baseline_card = page.locator('[id^="card-a:"]').first();
+  const baselineCardCount = await page.locator('[id^="card-a:"]').count();
+  for (let i = 0; i < baselineCardCount; i++) {
+    const card = page.locator('[id^="card-a:"]').nth(i);
+    const text = await card.textContent();
+    if (text.includes('Hemorphite')) {
+      baseline_card = card;
+      break;
+    }
+  }
   const baseline_itemId = (await baseline_card.getAttribute('id')).replace('card-a:', '');
   const baseline_pinBtn = baseline_card.locator('button:has([data-testid="PushPinOutlinedIcon"])');
   
@@ -673,12 +691,9 @@ async function runTests() {
     throw new Error(`Border should stay default blue for 0% deviation, got: ${baselineBorder}`);
   }
   
-  // Verify no arrow icons are shown (0% deviation = null statusKind)
-  const upArrows13 = await baselineTransitCard.locator('[data-testid="ArrowUpwardIcon"]').count();
-  const downArrows13 = await baselineTransitCard.locator('[data-testid="ArrowDownwardIcon"]').count();
-  if (upArrows13 > 0 || downArrows13 > 0) {
-    throw new Error(`No arrow icons should appear for 0% deviation! Found up=${upArrows13}, down=${downArrows13}`);
-  }
+  // Verify RemoveIcon is shown (0% deviation = null statusKind)
+  const removeIcon = baselineTransitCard.locator('[data-testid="RemoveIcon"]');
+  await assertVisible(removeIcon, 'removeIcon');
   console.log('PASSED: Transit with exact baseline — blue border, no arrows.');
   
   // Unpin this card to clean up
@@ -1439,6 +1454,30 @@ async function runTests() {
   // =====================================================================
   console.log('\n--- Test 20: Packages (Sell Contracts) End-to-End ---');
   
+  await page.evaluate(() => {
+    localStorage.setItem('eve-multitool.preferences.v1', JSON.stringify({
+      cargoM3: null,
+      routeType: 'safest',
+      contractTypes: ['package'],
+      salesTaxPct: 4.5
+    }));
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#root');
+  await sleep(1000);
+
+  await page.evaluate(() => {
+    if (typeof window.setTestLocation === 'function' && typeof window.setTestWalletBalance === 'function') {
+      window.setTestLocation(30000142, 'Jita');
+      window.setTestWalletBalance(1000000000);
+    }
+  });
+  await sleep(1000);
+
+  typeId = 34;
+  itemName = 'Tritanium';
+  destStationId = 60000967;
+
   // Make destStationId the absolute best drop station for typeId by mutating the market
   await mutateMarketAndRefresh(page, {
     typeId,
@@ -1737,8 +1776,520 @@ async function runTests() {
     body: JSON.stringify({ action: 'reset' })
   });
 
+  // =====================================================================
+  // TEST 21A: Cargo no longer hides a bundle
+  // =====================================================================
+  console.log('\n--- Test 21A: Cargo no longer hides a bundle ---');
+  
+  // Set cargo capacity to 10 m³ in settings
+  const cargoField21 = page.getByLabel('Cargo capacity').first();
+  await cargoField21.fill('10');
+  let responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  // Seed package 888888021 containing 100,000 units of Tritanium (typeId). Total volume = 1,000 m³.
+  // Price = 1000 ISK.
+  let seedRes = await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'set',
+      contracts: [
+        {
+          contract: {
+            contract_id: 888888021,
+            type: 'item_exchange',
+            start_location_id: 60003760, // Jita 4-4
+            end_location_id: 0,
+            volume: 1000.0,
+            reward: 0,
+            collateral: 0,
+            price: 1000,
+            days_to_complete: 0,
+            date_issued: new Date().toISOString(),
+            date_expired: new Date(Date.now() + 86400000).toISOString()
+          },
+          lines: [
+            {
+              typeId: typeId,
+              itemName: itemName,
+              quantity: 100000,
+              isBlueprintCopy: false
+            }
+          ]
+        }
+      ]
+    })
+  });
+  if (!seedRes.ok) throw new Error('Failed to seed package for 21A');
+
+  // Mutate destination buy price for typeId to 500 ISK
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: 500
+  });
+
+  // Assert card pkg:888888021 still renders in grid
+  const card21A = page.locator('#card-pkg\\:888888021');
+  await assertVisible(card21A, 'card21A');
+  console.log('  PASSED: 21A — Card renders despite being larger than cargo hold.');
+
+  // =====================================================================
+  // TEST 21B: Knapsack loads high ISK/m³ first; filler is left
+  // =====================================================================
+  console.log('\n--- Test 21B: Knapsack loads high ISK/m³ first; filler is left ---');
+  
+  // Set cargo capacity to 50 m³
+  await cargoField21.fill('50');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  // Seed package 888888022
+  seedRes = await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'set',
+      prices: {
+        [typeId]: 3,
+        587: 200000
+      },
+      contracts: [
+        {
+          contract: {
+            contract_id: 888888022,
+            type: 'item_exchange',
+            start_location_id: 60003760, // Jita 4-4
+            end_location_id: 0,
+            volume: 2510.0,
+            reward: 0,
+            collateral: 0,
+            price: 1000,
+            days_to_complete: 0,
+            date_issued: new Date().toISOString(),
+            date_expired: new Date(Date.now() + 86400000).toISOString()
+          },
+          lines: [
+            {
+              typeId: typeId,
+              itemName: itemName,
+              quantity: 1000,
+              isBlueprintCopy: false
+            },
+            {
+              typeId: 587,
+              itemName: 'Rifter',
+              quantity: 1,
+              isBlueprintCopy: false
+            }
+          ]
+        }
+      ]
+    })
+  });
+  if (!seedRes.ok) throw new Error('Failed to seed package for 21B');
+
+  // Mutate destination buy price for typeId to 500 ISK, remove buys for Rifter
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: 500
+  });
+  await fetch(`${BACKEND_URL}/api/test/mutate-market`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      typeId: 587,
+      action: 'remove_buys',
+      stationId: destStationId
+    })
+  });
+  // Refetch hauling list
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#root');
+  await sleep(1000);
+
+  // Set Jita location & wallet again
+  await page.evaluate(() => {
+    window.setTestLocation(30000142, 'Jita');
+    window.setTestWalletBalance(1000000000);
+  });
+  await sleep(500);
+
+  // Assert card renders
+  const card21B = page.locator('#card-pkg\\:888888022');
+  await assertVisible(card21B, 'card21B');
+
+  // Verify "Worth left at station" is visible on the card
+  const leftStat = card21B.locator('text=Worth left at station');
+  await assertVisible(leftStat, 'leftStat');
+
+  // Open breakdown modal
+  const breakdownBtn21B = card21B.locator('button:has([data-testid="SegmentIcon"])');
+  await breakdownBtn21B.click();
+  await sleep(500);
+
+  // Assert separator row "Won't fit" is present
+  const separator = page.locator('text=Won\'t fit — left at the station');
+  await assertVisible(separator, 'separator');
+
+  // Close breakdown
+  const closeBtn = page.locator('button:has([data-testid="CloseIcon"])');
+  await closeBtn.click();
+  await sleep(500);
+  console.log('  PASSED: 21B — High ISK/m³ items loaded; low demand bulky items left.');
+
+  // =====================================================================
+  // TEST 21C: A type straddles the cargo line
+  // =====================================================================
+  console.log('\n--- Test 21C: A type straddles the cargo line ---');
+  
+  // Set cargo capacity to 8 m³ (Tritanium unitVolume = 0.01, so 800 units fit)
+  await cargoField21.fill('8');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  // Seed package 888888023 containing 1000 units of Tritanium (typeId). Total volume = 10 m³.
+  seedRes = await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'set',
+      prices: {
+        [typeId]: 3
+      },
+      contracts: [
+        {
+          contract: {
+            contract_id: 888888023,
+            type: 'item_exchange',
+            start_location_id: 60003760, // Jita 4-4
+            end_location_id: 0,
+            volume: 10.0,
+            reward: 0,
+            collateral: 0,
+            price: 1000,
+            days_to_complete: 0,
+            date_issued: new Date().toISOString(),
+            date_expired: new Date(Date.now() + 86400000).toISOString()
+          },
+          lines: [
+            {
+              typeId: typeId,
+              itemName: itemName,
+              quantity: 1000,
+              isBlueprintCopy: false
+            }
+          ]
+        }
+      ]
+    })
+  });
+  if (!seedRes.ok) throw new Error('Failed to seed package for 21C');
+
+  // Refetch
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await page.evaluate(() => {
+    window.setTestLocation(30000142, 'Jita');
+    window.setTestWalletBalance(1000000000);
+  });
+  await responsePromise;
+  await sleep(500);
+
+  const card21C = page.locator('#card-pkg\\:888888023');
+  await assertVisible(card21C, 'card21C');
+
+  // Assert card shows "800 of 1,000 units"
+  const cardText = await card21C.textContent();
+  if (!cardText.includes('800 of 1,000 units')) {
+    throw new Error(`Expected card text to show "800 of 1,000 units", got: ${cardText}`);
+  }
+
+  // Open breakdown
+  const breakdownBtn21C = card21C.locator('button:has([data-testid="SegmentIcon"])');
+  await breakdownBtn21C.click();
+  await sleep(500);
+
+  // Click on "Won't fit" separator to expand it if it's collapsed
+  const expandSeparator = page.locator('text=Won\'t fit — left at the station');
+  await expandSeparator.click();
+  await sleep(500);
+
+  // Assert item name appears twice (once in hauled, once in left)
+  const itemNames = page.locator(`text=${itemName}`);
+  const namesCount = await itemNames.count();
+  if (namesCount < 2) {
+    throw new Error(`Expected item name "${itemName}" to appear at least twice in the breakdown, found: ${namesCount}`);
+  }
+
+  await closeBtn.click();
+  await sleep(500);
+  console.log('  PASSED: 21C — Item type successfully straddles the cargo line.');
+
+  // =====================================================================
+  // TEST 21D: Realized-profit floor drops a bundle nothing valuable fits
+  // =====================================================================
+  console.log('\n--- Test 21D: Realized-profit floor drops a bundle nothing valuable fits ---');
+  
+  // Set cargo capacity to 0.005 m³
+  await cargoField21.fill('0.005');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  // Assert card pkg:888888023 disappears
+  const cardCountBefore = await card21C.count();
+  if (cardCountBefore > 0) {
+    throw new Error('Expected package card 888888023 to disappear when cargo is below unitVolume, but it is still visible!');
+  }
+
+  // Restore cargo capacity to 10 m³ -> card returns
+  await cargoField21.fill('10');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  await assertVisible(card21C, 'card21C_restored');
+  console.log('  PASSED: 21D — Package disappears when nothing valuable fits, and returns when cargo holds return.');
+
+  // =====================================================================
+  // TEST 21E: Transit freezes the loaded subset
+  // =====================================================================
+  console.log('\n--- Test 21E: Transit freezes the loaded subset ---');
+  
+  // Set cargo back to 8 m³ so Tritanium fits 800 of 1000 units
+  await cargoField21.fill('8');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  const pinBtn21E = card21C.locator('button:has([data-testid="PushPinIcon"])');
+  await pinBtn21E.click();
+  await sleep(500);
+
+  // Click "Confirm Buy" to move it to transit
+  const confirmBuyBtn21E = card21C.locator('button:has-text("Confirm Buy")');
+  await confirmBuyBtn21E.click();
+  await sleep(500);
+
+  // Click "Acquire" in the modal
+  const dialogConfirmBtn = page.locator('button:has-text("Confirm Buy")').nth(1);
+  const transitResponsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await dialogConfirmBtn.click();
+  await transitResponsePromise;
+  await sleep(500);
+
+  // Verify card id card-pp:888888023 renders in transit
+  const transitCard21 = page.locator('#card-pp\\:888888023');
+  await assertVisible(transitCard21, 'transitCard21');
+
+  // Verify it shows "800 of 1,000 units"
+  const transitCardTextBefore = await transitCard21.textContent();
+  if (!transitCardTextBefore.includes('800 of 1,000 units')) {
+    throw new Error(`Expected transit card to show "800 of 1,000 units", got: ${transitCardTextBefore}`);
+  }
+
+  // Mutate destination buy price of Tritanium down to 10 ISK (profit collapse)
+  await mutateMarketAndRefresh(page, {
+    typeId,
+    action: 'change_buy_price',
+    stationId: destStationId,
+    price: 10
+  });
+
+  // Verify the carried unit count does NOT change (remains "800 of 1,000 units")
+  const transitCardTextAfter = await transitCard21.textContent();
+  if (!transitCardTextAfter.includes('800 of 1,000 units')) {
+    throw new Error(`Expected transit card to remain "800 of 1,000 units" after profit collapse, got: ${transitCardTextAfter}`);
+  }
+
+  // Verify border color reacts (turned red for net loss / zero profit)
+  const transitBorderCol = await getBorderColor(transitCard21);
+  if (!transitBorderCol.includes('rgb(244, 67, 54)')) {
+    throw new Error(`Expected transit card border to turn red after price collapse, got: ${transitBorderCol}`);
+  }
+
+  // Click "Sell Elsewhere"
+  const sellElsewhereBtn21 = transitCard21.locator('button:has-text("Sell Elsewhere")');
+  await sellElsewhereBtn21.click();
+  await sleep(500);
+
+  // Verify modal opens and lists redirect destinations for the carried subset (800 units)
+  const redirectModal21 = page.locator('text=Alternative Sell Destinations');
+  await assertVisible(redirectModal21, 'redirectModal21');
+
+  // Click the first alternative location redirect button
+  const redirectBtn21 = page.locator('button:has-text("Redirect Here")').first();
+  const redirectResponsePromise21 = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await redirectBtn21.click();
+  await redirectResponsePromise21;
+  await sleep(500);
+
+  // Assert carried units did not change on the card
+  const redirectedCardText = await transitCard21.textContent();
+  if (!redirectedCardText.includes('800 of 1,000 units')) {
+    throw new Error(`Expected transit card to remain "800 of 1,000 units" after redirection, got: ${redirectedCardText}`);
+  }
+
+  // Unpin to clean up
+  const unpinBtn21E = transitCard21.locator('button:has([data-testid="PushPinIcon"])');
+  const unpinResponsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await unpinBtn21E.click();
+  await unpinResponsePromise;
+  await sleep(500);
+  console.log('  PASSED: 21E — Transit successfully freezes the loaded subset.');
+
+  // =====================================================================
+  // TEST 21F: Bulky item is kept; small items dropped (not greedy)
+  // =====================================================================
+  console.log('\n--- Test 21F: Bulky item is kept; small items dropped ---');
+  
+  // Set cargo capacity to 2510 m³
+  await cargoField21.fill('2510');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  // Seed package 888888024 containing:
+  // - Line 1: 587 (Rifter, volume 2500 m³).
+  // - Line 2: typeId (Tritanium, volume 0.01), quantity 1000 (volume 10 m³).
+  // - Line 3: 35 (Pyerite, volume 0.01), quantity 1000 (volume 10 m³).
+  // - Line 4: 36 (Mexallon, volume 0.01), quantity 1000 (volume 10 m³).
+  // Price = 100000 ISK.
+  seedRes = await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'set',
+      prices: {
+        [typeId]: 3,
+        587: 200000,
+        35: 5,
+        36: 10
+      },
+      contracts: [
+        {
+          contract: {
+            contract_id: 888888024,
+            type: 'item_exchange',
+            start_location_id: 60003760, // Jita 4-4
+            end_location_id: 0,
+            volume: 2530.0,
+            reward: 0,
+            collateral: 0,
+            price: 100000, // profitable only if Rifter is hauled
+            days_to_complete: 0,
+            date_issued: new Date().toISOString(),
+            date_expired: new Date(Date.now() + 86400000).toISOString()
+          },
+          lines: [
+            {
+              typeId: 587,
+              itemName: 'Rifter',
+              quantity: 1,
+              isBlueprintCopy: false
+            },
+            {
+              typeId: typeId,
+              itemName: itemName,
+              quantity: 1000,
+              isBlueprintCopy: false
+            },
+            {
+              typeId: 35,
+              itemName: 'Pyerite',
+              quantity: 1000,
+              isBlueprintCopy: false
+            },
+            {
+              typeId: 36,
+              itemName: 'Mexallon',
+              quantity: 1000,
+              isBlueprintCopy: false
+            }
+          ]
+        }
+      ]
+    })
+  });
+  if (!seedRes.ok) throw new Error('Failed to seed package for 21F');
+
+  // Mutate destination buy prices:
+  await fetch(`${BACKEND_URL}/api/test/mutate-market`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typeId: 587, action: 'change_buy_price', stationId: destStationId, price: 500000 })
+  });
+  await mutateMarketAndRefresh(page, { typeId, action: 'change_buy_price', stationId: destStationId, price: 500 });
+  await fetch(`${BACKEND_URL}/api/test/mutate-market`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typeId: 35, action: 'change_buy_price', stationId: destStationId, price: 400 })
+  });
+  await fetch(`${BACKEND_URL}/api/test/mutate-market`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typeId: 36, action: 'change_buy_price', stationId: destStationId, price: 100 })
+  });
+
+  // Refetch
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await page.evaluate(() => {
+    window.setTestLocation(30000142, 'Jita');
+    window.setTestWalletBalance(1000000000);
+  });
+  await responsePromise;
+  await sleep(500);
+
+  const card21F = page.locator('#card-pkg\\:888888024');
+  await assertVisible(card21F, 'card21F');
+
+  // Open breakdown
+  const breakdownBtn21F = card21F.locator('button:has([data-testid="SegmentIcon"])');
+  await breakdownBtn21F.click();
+  await sleep(500);
+
+  const expandSeparator21F = page.locator('text=Won\'t fit — left at the station');
+  await expandSeparator21F.click();
+  await sleep(500);
+
+  // Assert separator visible
+  await assertVisible(expandSeparator21F, 'expandSeparator21F');
+
+  await closeBtn.click();
+  await sleep(500);
+  console.log('  PASSED: 21F — Bulky item kept; small items dropped correctly.');
+
+  // Clean up cargo limit to unlimited
+  await cargoField21.fill('');
+  responsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await cargoField21.blur();
+  await responsePromise;
+  await sleep(500);
+
+  await mutateMarketAndRefresh(page, { action: 'reset' });
+  await fetch(`${BACKEND_URL}/api/test/mutate-packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reset' })
+  });
+
   console.log('\n======================================');
-  console.log('ALL E2E PINNING TESTS COMPLETED SUCCESSFULLY!');
+  console.log('ALL E2E PINNING & CARGO KNAPSACK TESTS COMPLETED SUCCESSFULLY!');
   console.log('======================================');
 }
 

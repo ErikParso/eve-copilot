@@ -276,7 +276,10 @@ function getOpportunities(): ArbitrageOpportunity[] {
   const snap = getSnapshot();
   if (!snap) return [];
   if (snap.builtAt !== opportunitiesSnapshotAt) {
-    opportunities = resolveOpportunities(snap.byType, { maxPairs: Infinity, maxTotal: Infinity });
+    const lim = process.env.OFFLINE === 'true'
+      ? { maxPairs: 500, maxTotal: 1000 }
+      : { maxPairs: Infinity, maxTotal: Infinity };
+    opportunities = resolveOpportunities(snap.byType, lim);
     opportunitiesSnapshotAt = snap.builtAt;
   }
   return opportunities;
@@ -305,7 +308,7 @@ export async function prewarmDeliveryRoutes(): Promise<void> {
   for (const [s, d] of pairs) {
     getRoute(s, d, 'shortest');
     getRoute(s, d, 'safest');
-    if (++i % 500 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+    if (++i % 100 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
 

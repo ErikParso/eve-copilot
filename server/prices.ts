@@ -18,6 +18,13 @@ const REFRESH_MS = 60 * 60 * 1000;
 
 let prices = new Map<number, number>();
 
+export function __seedTestPrices(testPrices: Record<number, number>): void {
+  prices = new Map<number, number>();
+  for (const [typeId, price] of Object.entries(testPrices)) {
+    prices.set(Number(typeId), price);
+  }
+}
+
 async function refresh(): Promise<void> {
   if (process.env.OFFLINE === 'true') return;
   try {

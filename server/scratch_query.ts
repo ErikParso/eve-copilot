@@ -20,8 +20,8 @@ async function test() {
   const res = await getEnrichedHauling({
     routeType: 'safest',
     origin: 30000142, // Jita
-    capacity: Infinity,
-    balance: Infinity,
+    capacity: 1000000,
+    balance: 1000000000,
     taxPct: 4.5,
     weights: { income: 5, totalJumps: 5, danger: 5 },
     kinds: [],

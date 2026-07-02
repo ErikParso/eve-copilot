@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { loadSde } from './sde.js';
+import { loadSde, getStation } from './sde.js';
 import { startContractsRefresh } from './contracts.js';
 import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDestinations, getPackagesFreshness } from './packages.js';
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
@@ -163,7 +163,7 @@ async function main() {
         loadSnapshot(JSON.parse(raw));
         
         const { prewarmDeliveryRoutes } = await import('./arbitrage.js');
-        await prewarmDeliveryRoutes();
+        void prewarmDeliveryRoutes();
         
         return res.json({ ok: true });
       }
@@ -191,6 +191,8 @@ async function main() {
           sellSide.orders.forEach(o => {
             o.price = price;
           });
+          sellSide.best = price;
+          newBook.sells.sort((a, b) => a.best - b.best);
         }
       } else if (action === 'reduce_sell_volume') {
         const sellSide = newBook.sells.find(s => s.station === stationId);
@@ -207,7 +209,27 @@ async function main() {
           buySide.orders.forEach(o => {
             o.price = price;
           });
+          buySide.best = price;
+        } else {
+          const station = getStation(stationId);
+          const systemId = station?.systemId ?? 0;
+          newBook.buys.push({
+            station: stationId,
+            system: systemId,
+            best: price,
+            orders: [
+              {
+                id: Math.floor(Math.random() * 100000000),
+                price: price,
+                volume: 100000000,
+                locationId: stationId,
+                systemId: systemId,
+                rangeCode: -1
+              }
+            ]
+          });
         }
+        newBook.buys.sort((a, b) => b.best - a.best);
       } else if (action === 'reduce_buy_volume') {
         const buySide = newBook.buys.find(b => b.station === stationId);
         if (buySide) {
@@ -234,7 +256,7 @@ async function main() {
 
       newByType.set(typeId, newBook);
       loadSnapshot({
-        builtAt: snap.builtAt,
+        builtAt: Date.now(),
         lastModifiedAt: snap.lastModifiedAt,
         orderCount: snap.orderCount,
         regions: snap.regions,
@@ -277,8 +299,11 @@ async function main() {
   // Test packages injection route for E2E browser tests
   app.post('/api/test/mutate-packages', async (req, res) => {
     try {
-      const { action, contracts } = req.body;
+      const { action, contracts, prices: testPrices } = req.body;
       if (action === 'reset') {
+        const { __seedTestPrices } = await import('./prices.js');
+        __seedTestPrices({});
+
         const fs = await import('fs');
         const fileURLToPath = (await import('url')).fileURLToPath;
         const contractsFixturePath = fileURLToPath(new URL('./fixtures/contracts-snapshot.json', import.meta.url));
@@ -298,6 +323,12 @@ async function main() {
       if (action === 'set' && Array.isArray(contracts)) {
         const { __seedTestPackages } = await import('./packages.js');
         __seedTestPackages(contracts);
+
+        if (testPrices && typeof testPrices === 'object') {
+          const { __seedTestPrices } = await import('./prices.js');
+          __seedTestPrices(testPrices as Record<number, number>);
+        }
+
         return res.json({ ok: true });
       }
       return res.status(400).json({ error: 'Invalid action. Use "set" with contracts data or "reset".' });
