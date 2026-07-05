@@ -696,16 +696,18 @@ export function resolvePinnedPackagesStatus(
 
   for (const r of reqs) {
     const drop: Drop = { station: r.dest, system: r.destSystem ?? -1 };
-    // Planning re-knapsacks to the current hold (the load you'd take); transit
-    // re-prices the loaded subset (each line's `hauledQuantity`), leaving the rest
-    // at market value (the choice is frozen — the cargo is already aboard).
+    // Planning AND secured re-knapsack to the current hold (the load you'd take):
+    // a secured package is bought (contract owned, `contractGone` off below), but
+    // the loaded subset isn't chosen until "Cargo loaded", so we keep re-fitting to
+    // the current hold. Transit re-prices the frozen loaded subset (each line's
+    // `hauledQuantity`), leaving the rest at market value (the cargo is aboard).
     let results: PackageLineResult[] = [];
     let sellValue = 0;
     let hauledVolume = 0;
     let leftMarketValue = 0;
     let limited = false;
     if (r.destSystem !== null) {
-      if (r.status === 'planning') {
+      if (r.status !== 'transit') {
         const priced = priceLinesAtDrop(r.lines, drop, snap.byType);
         const fit = scaleBundleToCargo(priced.results, capacity);
         results = fit.contents;
@@ -764,7 +766,9 @@ export function resolvePinnedPackagesStatus(
     if (r.destSystem !== null) {
       let approachIds: number[] | null = null;
       let deliveryIds: number[] | null = null;
-      if (r.status === 'planning') {
+      // Keep the pickup leg until the cargo is loaded: planning AND secured show
+      // origin→pickup→dropoff; only transit (aboard) routes straight to the dest.
+      if (r.status !== 'transit') {
         if (r.sourceSystem !== null) deliveryIds = getRoute(r.sourceSystem, r.destSystem, opts.routeType);
         if (opts.origin !== null && r.sourceSystem !== null) approachIds = getRoute(opts.origin, r.sourceSystem, opts.routeType);
       } else {
@@ -802,7 +806,7 @@ export function resolvePinnedPackagesStatus(
       borderColor = 'error.main';
       const why = buyerGone ? ' (no buyers at the destination)' : '';
       statusMessage =
-        r.status === 'transit'
+        r.status !== 'planning'
           ? `Income is negative: ${formatIskMillions(baseline)} → ${formatIskMillions(profit)}${why}. You can sell at a loss or pick another destination.`
           : `Income dropped to zero: ${formatIskMillions(baseline)} → ${formatIskMillions(profit)}${why}.`;
     } else if (profit > baseline * 1.03) {

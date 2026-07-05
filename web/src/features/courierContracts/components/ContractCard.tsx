@@ -4,8 +4,10 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { pinnedCouriersAtom, pinCourierAtom, unpinCourierAtom, secureCourierAtom, executeCourierAtom } from '@/features/arbitrage/atoms';
+import { pinnedCouriersAtom, pinCourierAtom, unpinCourierAtom, secureCourierAtom, loadCargoCourierAtom, executeCourierAtom } from '@/features/arbitrage/atoms';
+import { StageIndicator, type Stage } from '@/components/StageIndicator';
 import { formatDuration, formatIsk, formatIskMillions, formatVolume } from '@/utils/format';
 import courierBg from '@/assets/card-courier.jpg';
 import type { CourierRow } from '../types';
@@ -61,13 +63,14 @@ export const ContractCard = memo(function ContractCard({
   row,
   isHighlighted,
 }: {
-  row: CourierRow & { status?: 'planned' | 'secured' | 'executed'; unavailable?: boolean };
+  row: CourierRow & { status?: Stage; unavailable?: boolean };
   isHighlighted?: boolean;
 }) {
   const pinnedCouriers = useAtomValue(pinnedCouriersAtom);
   const pinCourier = useSetAtom(pinCourierAtom);
   const unpinCourier = useSetAtom(unpinCourierAtom);
   const secureCourier = useSetAtom(secureCourierAtom);
+  const loadCargoCourier = useSetAtom(loadCargoCourierAtom);
   const executeCourier = useSetAtom(executeCourierAtom);
 
   const isPinned = pinnedCouriers.some((c) => c.id === row.id);
@@ -96,8 +99,8 @@ export const ContractCard = memo(function ContractCard({
 
   const getPinnedBorderColor = () => {
     if (!isPinned) return undefined;
-    // After accepting (secured/executed), the contract is ours — always blue
-    if (row.status === 'secured' || row.status === 'executed') return 'primary.main';
+    // Once accepted (secured/transit/executed), the contract is ours — always blue
+    if (row.status === 'secured' || row.status === 'transit' || row.status === 'executed') return 'primary.main';
     // In planning stage: red if taken by someone else, blue if available
     if (row.unavailable) return 'error.main';
     return 'primary.main'; // Available — neutral blue (no income change to signal)
@@ -197,14 +200,18 @@ export const ContractCard = memo(function ContractCard({
       <CardContent
         sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, flex: 1, minWidth: 0 }}
       >
-        {/* Total income headline (kept clear of the bubble) */}
-        <Box sx={{ pr: 4.5, minWidth: 0 }}>
+        {/* Total income headline (kept clear of the bubble). Stage chip rides on the
+            reward line — no extra row. */}
+        <Box sx={{ minWidth: 0 }}>
           <Typography variant="caption" color="text.secondary">
             Reward
           </Typography>
-          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: 'primary.main' }}>
-            {formatIskMillions(row.reward)}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, pr: isPinned ? 0 : 4.5 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: 'primary.main', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {formatIskMillions(row.reward)}
+            </Typography>
+            {isPinned && row.status && <StageIndicator stage={row.status} />}
+          </Box>
         </Box>
 
         <Divider />
@@ -237,7 +244,7 @@ export const ContractCard = memo(function ContractCard({
           </Typography>
         </Box>
 
-        {row.status === 'secured' ? (
+        {row.status === 'transit' ? (
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ width: 28, flexShrink: 0, mt: 0.25 }}>
               From
@@ -278,6 +285,17 @@ export const ContractCard = memo(function ContractCard({
         {isPinned && (
           <Box sx={{ mt: 'auto', pt: 1.25 }}>
             {row.status === 'secured' ? (
+              <Button
+                variant="contained"
+                color="primary"
+                size="small"
+                fullWidth
+                onClick={() => loadCargoCourier(row.id)}
+                startIcon={<LocalShippingOutlinedIcon />}
+              >
+                Cargo Loaded
+              </Button>
+            ) : row.status === 'transit' ? (
               <Button
                 variant="contained"
                 color="success"

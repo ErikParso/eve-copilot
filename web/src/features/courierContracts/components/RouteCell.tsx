@@ -15,12 +15,14 @@ export function RouteCell({ row, trailing }: { row: CourierRow & { status?: stri
 
   if (!deliveryRoute) return <>—</>;
 
-  const isSecured = row.status === 'secured';
+  // Only `transit` (cargo loaded) drops the pickup leg — the route then starts at
+  // the current location. Planning/secured still show origin→pickup→dropoff.
+  const isInShip = row.status === 'transit';
 
   // Stitch approach + delivery, dropping the duplicated pickup system at the
   // seam. The pickup is the last approach system (or the first delivery one).
   const nodes: RouteNode[] = [];
-  if (approachRoute && !isSecured) {
+  if (approachRoute && !isInShip) {
     approachRoute.forEach((system, i) => {
       // Last approach system is the pickup; the first is the current location
       // (unless they're the same system, in which case pickup wins).
@@ -32,13 +34,13 @@ export function RouteCell({ row, trailing }: { row: CourierRow & { status?: stri
     });
   } else {
     deliveryRoute.forEach((system, i) => {
-      const marker = i === 0 ? (isSecured ? 'current' : 'pickup') : i === deliveryRoute.length - 1 ? 'dropoff' : undefined;
+      const marker = i === 0 ? (isInShip ? 'current' : 'pickup') : i === deliveryRoute.length - 1 ? 'dropoff' : undefined;
       nodes.push({ system, marker });
     });
   }
 
   const label =
-    jumpsFromCurrent !== null && !isSecured
+    jumpsFromCurrent !== null && !isInShip
       ? `${formatNumber(jumpsFromCurrent, 0)} + ${formatNumber(jumpsToDropoff ?? 0, 0)} jumps`
       : `${formatNumber(jumpsToDropoff ?? 0, 0)} jumps`;
 

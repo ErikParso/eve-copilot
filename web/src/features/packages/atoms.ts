@@ -9,7 +9,10 @@ import type { PackageItem, PackageLineResult } from './types';
  * price, so Confirm-Buy is a single click (no quantity/price dialog).
  */
 export interface PinnedPackage extends PackageItem {
-  status: 'planning' | 'transit' | 'executed';
+  // `secured` = contract bought (owned) but not yet picked up: the route still
+  // shows the pickup leg and the load is re-knapsacked to the current hold until
+  // "Cargo loaded" freezes the manifest and advances to transit.
+  status: 'planning' | 'secured' | 'transit' | 'executed';
   /** Profit captured at pin time — the baseline every revalidation compares to. */
   originalProfit?: number;
   /** Planning only: the contract dropped out of the live public set (bought/expired). */
@@ -39,8 +42,17 @@ export const unpinPackageAtom = atom(null, (_get, set, id: string) => {
   set(packagesRefreshTriggerAtom, (n) => n + 1);
 });
 
-/** Confirm the (whole, fixed-price) purchase: planning → transit. No dialog. */
+/** Confirm the (whole, fixed-price) purchase: planning → secured. No dialog. The
+ *  contract is owned but not yet picked up, so the pickup leg stays until loaded. */
 export const confirmBuyPackageAtom = atom(null, (_get, set, id: string) => {
+  set(pinnedPackagesAtom, (prev) => prev.map((p) => (p.id === id ? { ...p, status: 'secured' } : p)));
+  set(packagesRefreshTriggerAtom, (n) => n + 1);
+});
+
+/** Cargo loaded: freeze the current (re-knapsacked) manifest and advance
+ *  secured → transit. The status flip alone freezes it — `updatePinnedPackage
+ *  StatusesAtom` stops re-fitting `contents` once status is transit. */
+export const loadCargoPackageAtom = atom(null, (_get, set, id: string) => {
   set(pinnedPackagesAtom, (prev) => prev.map((p) => (p.id === id ? { ...p, status: 'transit' } : p)));
   set(packagesRefreshTriggerAtom, (n) => n + 1);
 });

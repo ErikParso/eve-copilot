@@ -110,12 +110,14 @@ export const pinnedRowsAtom = atom<ResultCard[]>((get) => {
 
   const pinnedCouriers = get(pinnedCouriersAtom);
   const updatedPinnedCouriers = pinnedCouriers.map((c) => {
-    const isSecured = c.status === 'secured';
+    // Only `transit` (cargo loaded) uses the delivery-only override; secured still
+    // shows the full origin→pickup→dropoff route from the server revalidation.
+    const isTransit = c.status === 'transit';
     // `unavailable` is now set by the same-cycle server revalidation against the
     // FULL contract feed (updatePinnedCourierStatusesAtom), not derived from the
     // paged/filtered opportunity grid — so filters/weights/paging can't false-flag it.
     let item = { ...c };
-    if (isSecured && origin !== null && c.dropoff?.systemId) {
+    if (isTransit && origin !== null && c.dropoff?.systemId) {
       const cacheKey = `${origin}-${c.dropoff.systemId}-${routeType}`;
       const cached = routesCache[cacheKey];
       if (cached) {

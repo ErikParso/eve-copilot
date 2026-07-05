@@ -20,9 +20,11 @@ import type { ArbitrageRow, ArbitrageItem } from '../types';
 import { ArbitrageRouteCell } from './ArbitrageRouteCell';
 import { OpenMarketButton } from './OpenMarketButton';
 import { WaypointButton } from './WaypointButton';
-import { PinnedHaul, pinnedHaulsAtom, pinHaulAtom, unpinHaulAtom, confirmBuyHaulAtom, executeHaulAtom } from '../atoms';
-import MapIcon from '@mui/icons-material/Map';
+import { PinnedHaul, pinnedHaulsAtom, pinHaulAtom, unpinHaulAtom, confirmBuyHaulAtom, loadCargoHaulAtom, executeHaulAtom } from '../atoms';
+import AltRouteIcon from '@mui/icons-material/AltRoute';
+import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
 import { SellDestinationsModal } from './SellDestinationsModal';
+import { StageIndicator } from '@/components/StageIndicator';
 
 // Paying more than this multiple of the item's reference market value at the
 // source is the real exposure: if the destination sale falls through (e.g. a
@@ -148,6 +150,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const pinHaul = useSetAtom(pinHaulAtom);
   const unpinHaul = useSetAtom(unpinHaulAtom);
   const confirmBuy = useSetAtom(confirmBuyHaulAtom);
+  const loadCargo = useSetAtom(loadCargoHaulAtom);
   const executeHaul = useSetAtom(executeHaulAtom);
 
   const pinnedItem = pinnedHauls.find((h) => h.id === row.id);
@@ -239,6 +242,11 @@ export const ArbitrageCard = memo(function ArbitrageCard({
   const isPinnedMode = 'status' in row;
   const haulStatus = isPinnedMode ? (row as PinnedHaul).status : null;
   const isTransit = haulStatus === 'transit';
+  // Source is committed once bought: secured + transit both freeze qty/price.
+  const frozen = haulStatus === 'secured' || haulStatus === 'transit';
+  // Redirect (sell elsewhere) is offered in every live stage — a small icon by the
+  // destination — for real pins only (never the sell-variant candidate cards).
+  const canRedirect = isPinnedMode && !isSell && haulStatus !== 'executed';
   
   // Baseline stats to display
   const dispQty = row.quantity;
@@ -365,7 +373,7 @@ export const ArbitrageCard = memo(function ArbitrageCard({
 
         <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, flex: 1, minWidth: 0 }}>
           {/* Profit headline */}
-          <Box sx={{ pr: 5, minWidth: 0 }}>
+          <Box sx={{ minWidth: 0 }}>
             <Typography variant="caption" color="text.secondary">
               {isSell ? 'Income if sold here' : 'Expected Profit'}
             </Typography>
@@ -374,14 +382,19 @@ export const ArbitrageCard = memo(function ArbitrageCard({
               sx={{
                 fontWeight: 700,
                 lineHeight: 1.2,
+                pr: 5,
                 color: dispProfit <= 0 ? 'error.main' : 'primary.main',
               }}
             >
               {formatIskMillions(dispProfit)}
             </Typography>
-            <Typography variant="caption" color={isSell && dispMarginPct < 0 ? 'error.main' : 'success.main'} sx={{ fontWeight: 600 }}>
-              {formatNumber(dispMarginPct, 1)}% margin
-            </Typography>
+            {/* Stage chip rides on the margin line — no extra row. */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Typography variant="caption" color={isSell && dispMarginPct < 0 ? 'error.main' : 'success.main'} sx={{ fontWeight: 600 }}>
+                {formatNumber(dispMarginPct, 1)}% margin
+              </Typography>
+              {isPinnedMode && haulStatus && <StageIndicator stage={haulStatus} />}
+            </Box>
           </Box>
 
           <Divider />
@@ -448,7 +461,22 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           ) : (
             <Endpoint label="Buy" endpoint={row.source} action={<WaypointButton endpoint={row.source} add={false} />} />
           )}
-          <Endpoint label="Sell" endpoint={row.dest} action={<WaypointButton endpoint={row.dest} add={true} />} />
+          <Endpoint
+            label="Sell"
+            endpoint={row.dest}
+            action={
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                {canRedirect && (
+                  <Tooltip title="Sell elsewhere — pick another destination" arrow>
+                    <IconButton size="small" onClick={() => setSellModalOpen(true)} sx={{ p: 0.25, color: 'text.secondary' }}>
+                      <AltRouteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                <WaypointButton endpoint={row.dest} add={true} />
+              </Box>
+            }
+          />
 
           {'danger' in row && (
             <ArbitrageRouteCell row={row as ArbitrageRow} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
@@ -461,11 +489,11 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           {/* Stats list */}
           <Stack spacing={0.5}>
             <Stat
-              label={isTransit ? "Buy price (Paid)" : "Buy (you pay)"}
+              label={frozen ? "Buy price (Paid)" : "Buy (you pay)"}
               value={`${formatIsk(dispBuyPrice)} / unit`}
               color={overpaying ? 'warning.main' : undefined}
               adornment={
-                overpaying && !isTransit ? (
+                overpaying && !frozen ? (
                   <Tooltip arrow title={overpayWarning}>
                     <WarningAmberIcon sx={{ fontSize: 16, color: 'warning.main', cursor: 'help' }} />
                   </Tooltip>
@@ -483,29 +511,28 @@ export const ArbitrageCard = memo(function ArbitrageCard({
           {/* Action buttons at the bottom of pinned cards */}
           {isPinnedMode && (
             <Box sx={{ mt: 'auto', pt: 1, display: 'flex', gap: 1 }}>
-              {haulStatus === 'transit' ? (
-                <Box sx={{ display: 'flex', gap: 1, width: '100%' }}>
-                  <Button
-                    variant="contained"
-                    color="success"
-                    size="small"
-                    sx={{ flex: 1 }}
-                    startIcon={<CheckCircleOutlineIcon />}
-                    onClick={handleConfirmSell}
-                  >
-                    Confirm Sell
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    size="small"
-                    sx={{ flex: 1 }}
-                    startIcon={<MapIcon />}
-                    onClick={() => setSellModalOpen(true)}
-                  >
-                    Sell Elsewhere
-                  </Button>
-                </Box>
+              {haulStatus === 'secured' ? (
+                <Button
+                  variant="contained"
+                  color="primary"
+                  size="small"
+                  fullWidth
+                  startIcon={<LocalShippingOutlinedIcon />}
+                  onClick={() => loadCargo(row.id)}
+                >
+                  Cargo Loaded
+                </Button>
+              ) : haulStatus === 'transit' ? (
+                <Button
+                  variant="contained"
+                  color="success"
+                  size="small"
+                  fullWidth
+                  startIcon={<CheckCircleOutlineIcon />}
+                  onClick={handleConfirmSell}
+                >
+                  Confirm Sell
+                </Button>
               ) : haulStatus === 'executed' ? (
                 <Button
                   variant="contained"
@@ -548,11 +575,12 @@ export const ArbitrageCard = memo(function ArbitrageCard({
 
       {/* Confirm Buy Dialog */}
       <Dialog open={buyDialogOpen} onClose={() => setBuyDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Confirm Cargo Acquisition</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>Confirm Purchase</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              Enter the exact amount of cargo you successfully purchased to add it to your cargo hold manifest.
+              Enter the exact amount you bought (and what you paid). The haul moves to
+              <b> Secured</b> — head to the pickup and hit “Cargo Loaded” once it's in your ship.
             </Typography>
             <TextField
               label="Quantity Purchased"
@@ -582,11 +610,11 @@ export const ArbitrageCard = memo(function ArbitrageCard({
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setBuyDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleConfirmBuy}>Confirm &amp; Load</Button>
+          <Button variant="contained" onClick={handleConfirmBuy}>Confirm Buy</Button>
         </DialogActions>
       </Dialog>
 
-      {isPinnedMode && haulStatus === 'transit' && (
+      {canRedirect && (
         <SellDestinationsModal
           open={sellModalOpen}
           onClose={() => setSellModalOpen(false)}

@@ -11,8 +11,10 @@ export interface PinnedRoute {
 export const pinnedRoutesAtom = atom<Record<string, PinnedRoute>>({});
 
 export interface PinnedHaul extends ArbitrageItem {
-  // Lifecycle status
-  status: 'planning' | 'transit' | 'executed';
+  // Lifecycle status. `secured` = bought (quantity + price frozen) but still sitting
+  // in the source hangar — behaves economically like transit, but the route still
+  // shows the pickup leg (origin→pickup→dropoff) until the cargo is loaded.
+  status: 'planning' | 'secured' | 'transit' | 'executed';
   
   // Original values captured at the moment of pinning — the fixed baseline every
   // later revalidation is compared against (income up/down/zero vs this). Also the
@@ -43,7 +45,10 @@ export interface PinnedHaul extends ArbitrageItem {
 }
 
 export interface PinnedCourier extends CourierRow {
-  status: 'planned' | 'secured' | 'executed';
+  // Unified lifecycle (shared with hauls/packages). `secured` = contract accepted
+  // (collateral posted) but not yet picked up — route still shows the pickup leg;
+  // `transit` = package loaded, en route to dropoff.
+  status: 'planning' | 'secured' | 'transit' | 'executed';
   unavailable?: boolean;
 }
 
@@ -56,7 +61,7 @@ export const pinCourierAtom = atom(null, (get, set, item: CourierRow) => {
   if (current.some((c) => c.id === item.id)) return;
   const pinned: PinnedCourier = {
     ...item,
-    status: 'planned',
+    status: 'planning',
   };
   set(pinnedCouriersAtom, [...current, pinned]);
 });
@@ -64,8 +69,16 @@ export const pinCourierAtom = atom(null, (get, set, item: CourierRow) => {
 export const secureCourierAtom = atom(null, (_get, set, id: number) => {
   set(pinnedCouriersAtom, (prev) =>
     // Accepting clears `unavailable`: the contract is ours now, so its absence from
-    // the public feed is expected (and it's no longer revalidated as planning).
+    // the public feed is expected (it's now revalidated for a fresh route only).
     prev.map((c) => (c.id === id ? { ...c, status: 'secured', unavailable: false } : c))
+  );
+});
+
+/** Cargo loaded: the accepted contract's package is in the ship — advance
+ *  secured → transit (route drops the pickup leg). */
+export const loadCargoCourierAtom = atom(null, (_get, set, id: number) => {
+  set(pinnedCouriersAtom, (prev) =>
+    prev.map((c) => (c.id === id ? { ...c, status: 'transit' } : c))
   );
 });
 
@@ -84,7 +97,9 @@ export const isCourierPinnedAtom = atom((get) => (id: number) => {
 });
 
 /**
- * Calculates total volume of cargo currently in transit (transit arbitrage + secured courier contracts).
+ * Total volume physically loaded in the ship: only `transit` pins (cargo aboard).
+ * `secured` items are bought/accepted but still in the source hangar, so they
+ * don't occupy the hold yet.
  */
 export const cargoHoldVolumeAtom = atom<number>((get) => {
   const pinnedHauls = get(pinnedHaulsAtom);
@@ -99,7 +114,7 @@ export const cargoHoldVolumeAtom = atom<number>((get) => {
   }, 0);
 
   const courierVol = pinnedCouriers.reduce((sum, c) => {
-    if (c.status === 'secured') {
+    if (c.status === 'transit') {
       return sum + c.volume;
     }
     return sum;
@@ -142,7 +157,9 @@ export const unpinHaulAtom = atom(null, (_get, set, id: string) => {
 });
 
 /**
- * Transition a haul to transit state by confirming buy.
+ * Confirm the buy: freeze the purchased quantity + price and move to `secured`.
+ * The items are bought but still in the source hangar, so the card keeps the
+ * pickup leg; `loadCargoHaulAtom` advances it to transit once loaded.
  */
 export const confirmBuyHaulAtom = atom(null, (_get, set, p: { id: string; qty: number; price: number }) => {
   set(pinnedHaulsAtom, (prev) =>
@@ -150,7 +167,7 @@ export const confirmBuyHaulAtom = atom(null, (_get, set, p: { id: string; qty: n
       h.id === p.id
         ? {
             ...h,
-            status: 'transit',
+            status: 'secured',
             boughtQuantity: p.qty,
             boughtPrice: p.price,
             quantity: p.qty,
@@ -160,6 +177,15 @@ export const confirmBuyHaulAtom = atom(null, (_get, set, p: { id: string; qty: n
           }
         : h
     )
+  );
+  set(haulingRefreshTriggerAtom, (prev) => prev + 1);
+});
+
+/** Cargo loaded: the frozen buy is now in the ship — advance secured → transit
+ *  (route drops the pickup leg). Economics stay frozen across the transition. */
+export const loadCargoHaulAtom = atom(null, (_get, set, id: string) => {
+  set(pinnedHaulsAtom, (prev) =>
+    prev.map((h) => (h.id === id ? { ...h, status: 'transit' } : h))
   );
   set(haulingRefreshTriggerAtom, (prev) => prev + 1);
 });
@@ -242,18 +268,19 @@ export interface PinnedCourierStatus {
 }
 
 /**
- * Fold the server's courier revalidation into the pinned set: mark PLANNING pins
- * `unavailable` when their contract has left the feed, and refresh route/danger/
- * jumps while it's live. Secured/executed pins are untouched — a contract you
- * accepted leaving the public feed is expected, not a "gone" signal.
+ * Fold the server's courier revalidation into the pinned set: refresh route/danger/
+ * jumps for planning, secured AND transit pins (the server re-routes all three from
+ * the current origin). Only PLANNING pins can be flagged `unavailable` — a contract
+ * you've accepted leaving the public feed is expected, not a "gone" signal. Executed
+ * pins are done and never sent.
  */
 export const updatePinnedCourierStatusesAtom = atom(null, (_get, set, statuses: PinnedCourierStatus[]) => {
   const map = new Map(statuses.map((s) => [s.id, s]));
   set(pinnedCouriersAtom, (prev) =>
     prev.map((c) => {
       const live = map.get(c.id);
-      if (!live || c.status !== 'planned') return c;
-      if (!live.exists) return { ...c, unavailable: true };
+      if (!live || c.status === 'executed') return c;
+      if (c.status === 'planning' && !live.exists) return { ...c, unavailable: true };
       if (!live.deliveryRoute) return { ...c, unavailable: false };
       const jumpsToDropoff = Math.max(0, live.deliveryRoute.length - 1);
       const jumpsFromCurrent = live.approachRoute ? Math.max(0, live.approachRoute.length - 1) : null;

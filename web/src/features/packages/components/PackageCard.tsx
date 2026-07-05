@@ -10,7 +10,8 @@ import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { BreakdownModal } from '@/components/BreakdownModal';
-import MapIcon from '@mui/icons-material/Map';
+import AltRouteIcon from '@mui/icons-material/AltRoute';
+import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -30,9 +31,11 @@ import {
 	pinPackageAtom,
 	unpinPackageAtom,
 	confirmBuyPackageAtom,
+	loadCargoPackageAtom,
 	executePackageAtom,
 } from '../atoms';
 import { PackageSellDestinationsModal } from './PackageSellDestinationsModal';
+import { StageIndicator } from '@/components/StageIndicator';
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
 	return (
@@ -86,6 +89,7 @@ export const PackageCard = memo(function PackageCard({
 	const pinPackage = useSetAtom(pinPackageAtom);
 	const unpinPackage = useSetAtom(unpinPackageAtom);
 	const confirmBuy = useSetAtom(confirmBuyPackageAtom);
+	const loadCargo = useSetAtom(loadCargoPackageAtom);
 	const executePackage = useSetAtom(executePackageAtom);
 
 	const isPinned = pinnedPackages.some((p) => p.id === row.id);
@@ -112,6 +116,8 @@ export const PackageCard = memo(function PackageCard({
 	const isPinnedMode = 'status' in row;
 	const pkgStatus = isPinnedMode ? (row as PinnedPackage).status : null;
 	const isTransit = pkgStatus === 'transit';
+	// Redirect (sell elsewhere) offered in every live stage as a small destination icon.
+	const canRedirect = isPinnedMode && !isSell && pkgStatus !== 'executed';
 	const pinnedWithLive = isPinnedMode ? (row as PinnedPackage) : null;
 	const statusKind = pinnedWithLive?.statusKind ?? null;
 	const statusMessage = pinnedWithLive?.statusMessage ?? '';
@@ -212,16 +218,20 @@ export const PackageCard = memo(function PackageCard({
 
 				<CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, flex: 1, minWidth: 0 }}>
 					{/* Profit headline */}
-					<Box sx={{ pr: 5, minWidth: 0 }}>
+					<Box sx={{ minWidth: 0 }}>
 						<Typography variant="caption" color="text.secondary">
 							{isSell ? 'Income if sold here' : 'Expected Profit'}
 						</Typography>
-						<Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, color: profit <= 0 ? 'error.main' : 'primary.main' }}>
+						<Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, pr: 5, color: profit <= 0 ? 'error.main' : 'primary.main' }}>
 							{formatIskMillions(profit)}
 						</Typography>
-						<Typography variant="caption" color={row.marginPct < 0 ? 'error.main' : 'success.main'} sx={{ fontWeight: 600 }}>
-							{formatNumber(row.marginPct, 1)}% margin
-						</Typography>
+						{/* Stage chip rides on the margin line — no extra row. */}
+						<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+							<Typography variant="caption" color={row.marginPct < 0 ? 'error.main' : 'success.main'} sx={{ fontWeight: 600 }}>
+								{formatNumber(row.marginPct, 1)}% margin
+							</Typography>
+							{isPinnedMode && pkgStatus && <StageIndicator stage={pkgStatus} />}
+						</Box>
 					</Box>
 
 					<Divider />
@@ -283,7 +293,22 @@ export const PackageCard = memo(function PackageCard({
 					) : (
 						<Endpoint label="Buy" endpoint={row.source} action={<WaypointButton endpoint={row.source} add={false} />} />
 					)}
-					<Endpoint label="Sell" endpoint={row.dest} action={<WaypointButton endpoint={row.dest} add={true} />} />
+					<Endpoint
+						label="Sell"
+						endpoint={row.dest}
+						action={
+							<Box sx={{ display: 'flex', alignItems: 'center' }}>
+								{canRedirect && (
+									<Tooltip title="Sell elsewhere — pick another destination" arrow>
+										<IconButton size="small" onClick={() => setSellModalOpen(true)} sx={{ p: 0.25, color: 'text.secondary' }}>
+											<AltRouteIcon fontSize="small" />
+										</IconButton>
+									</Tooltip>
+								)}
+								<WaypointButton endpoint={row.dest} add={true} />
+							</Box>
+						}
+					/>
 
 					<PackageRouteCell row={row as PackageRow & { status?: string }} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />
 
@@ -314,15 +339,14 @@ export const PackageCard = memo(function PackageCard({
 					{/* Pinned action buttons */}
 					{isPinnedMode && (
 						<Box sx={{ mt: 'auto', pt: 1, display: 'flex', gap: 1 }}>
-							{pkgStatus === 'transit' ? (
-								<Box sx={{ display: 'flex', gap: 1, width: '100%' }}>
-									<Button variant="contained" color="success" size="small" sx={{ flex: 1 }} startIcon={<CheckCircleOutlineIcon />} onClick={() => executePackage(row.id)}>
-										Confirm Sell
-									</Button>
-									<Button variant="outlined" color="primary" size="small" sx={{ flex: 1 }} startIcon={<MapIcon />} onClick={() => setSellModalOpen(true)}>
-										Sell Elsewhere
-									</Button>
-								</Box>
+							{pkgStatus === 'secured' ? (
+								<Button variant="contained" color="primary" size="small" fullWidth startIcon={<LocalShippingOutlinedIcon />} onClick={() => loadCargo(row.id)}>
+									Cargo Loaded
+								</Button>
+							) : pkgStatus === 'transit' ? (
+								<Button variant="contained" color="success" size="small" fullWidth startIcon={<CheckCircleOutlineIcon />} onClick={() => executePackage(row.id)}>
+									Confirm Sell
+								</Button>
 							) : pkgStatus === 'executed' ? (
 								<Button variant="contained" color="success" size="small" fullWidth disabled startIcon={<CheckCircleOutlineIcon />}>
 									Executed
@@ -346,7 +370,7 @@ export const PackageCard = memo(function PackageCard({
 				</CardContent>
 			</Card>
 
-			{isPinnedMode && pkgStatus === 'transit' && (
+			{canRedirect && (
 				<PackageSellDestinationsModal open={sellModalOpen} onClose={() => setSellModalOpen(false)} pkg={row as PinnedPackage} />
 			)}
 

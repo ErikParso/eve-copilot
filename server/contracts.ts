@@ -270,48 +270,65 @@ export function resolvePinnedCouriersStatus(
   opts: { origin: number | null; routeType: RouteType; kills: GateKillData },
 ): PinnedCourierStatus[] {
   if (couriers.length === 0) return [];
-  // Distinguish "feed never loaded" (cold start / crawl failed → `raw` null) from
-  // "feed loaded but this contract is absent" (a real "gone"). Only the former
-  // keeps pins available; an empty-but-loaded feed legitimately means gone.
-  if (raw === null) {
-    return couriers.map((c) => ({ id: c.id, exists: true, approachRoute: null, deliveryRoute: null, danger: 0, dangerSteps: [] }));
-  }
-  // One pass over the (large) opportunity set, keeping only the pinned ids.
-  const wanted = new Set(couriers.map((c) => c.id));
+  // "feed never loaded" (cold start / crawl failed → `raw` null) vs "feed loaded
+  // but this contract is absent" (a real "gone" for a planning pin). We can only
+  // declare a planning pin gone when the feed is actually loaded.
+  const feedLoaded = raw !== null;
   const found = new Map<number, ContractOpportunity>();
-  for (const o of getOpportunities()) {
-    if (wanted.has(o.id)) found.set(o.id, o);
+  if (feedLoaded) {
+    const wanted = new Set(couriers.map((c) => c.id));
+    for (const o of getOpportunities()) {
+      if (wanted.has(o.id)) found.set(o.id, o);
+    }
   }
 
-  const gone = (id: number): PinnedCourierStatus => ({
-    id,
-    exists: false,
-    approachRoute: null,
-    deliveryRoute: null,
-    danger: 0,
-    dangerSteps: [],
-  });
+  const gone = (id: number): PinnedCourierStatus => ({ id, exists: false, approachRoute: null, deliveryRoute: null, danger: 0, dangerSteps: [] });
+  const noRoute = (id: number): PinnedCourierStatus => ({ id, exists: true, approachRoute: null, deliveryRoute: null, danger: 0, dangerSteps: [] });
+
+  // Resolve the route legs from two system ids. `loaded` (transit) keeps only the
+  // delivery leg (origin→dropoff, cargo aboard); planning/secured keep the pickup
+  // leg too (origin→pickup→dropoff). Returns null when unreachable / endpoints unknown.
+  const resolveLegs = (
+    pickupSys: number | null,
+    dropoffSys: number | null,
+    loaded: boolean,
+  ): Omit<PinnedCourierStatus, 'id'> | null => {
+    if (dropoffSys === null) return null;
+    let deliveryIds: number[] | null;
+    let approachIds: number[] | null = null;
+    if (loaded) {
+      const from = opts.origin ?? pickupSys;
+      if (from === null) return null;
+      deliveryIds = getRoute(from, dropoffSys, opts.routeType);
+    } else {
+      if (pickupSys === null) return null;
+      deliveryIds = getRoute(pickupSys, dropoffSys, opts.routeType);
+      if (opts.origin !== null) {
+        approachIds = getRoute(opts.origin, pickupSys, opts.routeType);
+        if (!approachIds) return null; // can't reach the pickup from here
+      }
+    }
+    if (!deliveryIds) return null;
+    const deliveryRoute = toRouteSystems(deliveryIds, opts.kills);
+    const approachRoute = approachIds ? toRouteSystems(approachIds, opts.kills) : null;
+    const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
+    const { index, steps } = dangerForSystems(dangerRoute, opts.kills);
+    return { exists: true, approachRoute, deliveryRoute, danger: index, dangerSteps: steps };
+  };
 
   return couriers.map((c) => {
     const o = found.get(c.id);
-    if (!o) return gone(c.id);
-    const enriched = resolveContract(o, opts.routeType, opts.origin, opts.kills);
-    // Contract still exists but is unreachable from here → keep it available (it's
-    // a routing/origin issue, not a "contract gone"), just without a fresh route.
-    if (!enriched) return { id: c.id, exists: true, approachRoute: null, deliveryRoute: null, danger: 0, dangerSteps: [] };
+    // Only a PLANNING pin can be "gone": absent from a loaded feed = bought/expired.
+    // A secured/transit contract legitimately left the feed (it's ours now).
+    if (c.status === 'planning' && feedLoaded && !o) return gone(c.id);
 
-    const deliveryIds = enriched.deliveryRoute.map((s) => s.systemId);
-    const approachIds = enriched.approachRoute ? enriched.approachRoute.map((s) => s.systemId) : null;
-    const dangerRoute = approachIds ? [...approachIds, ...deliveryIds.slice(1)] : deliveryIds;
-    const { index, steps } = dangerForSystems(dangerRoute, opts.kills);
-    return {
-      id: c.id,
-      exists: true,
-      approachRoute: enriched.approachRoute,
-      deliveryRoute: enriched.deliveryRoute,
-      danger: index,
-      dangerSteps: steps,
-    };
+    // Endpoints: prefer the live feed entry; fall back to what the client sent (a
+    // secured/transit contract is no longer in the feed to look up).
+    const pickupSys = o ? o.pickup.systemId : (c.pickupSystem ?? null);
+    const dropoffSys = o ? o.dropoff.systemId : (c.dropoffSystem ?? null);
+
+    const res = resolveLegs(pickupSys, dropoffSys, c.status === 'transit');
+    return res ? { id: c.id, ...res } : noRoute(c.id);
   });
 }
 

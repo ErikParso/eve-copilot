@@ -274,11 +274,11 @@ export function useHaulingSearchController(): void {
       if (prefsNow.contractTypes.length) params.set('types', prefsNow.contractTypes.join(','));
 
       // Pinned hauls are revalidated in the SAME request (and thus the same
-      // market snapshot) as the opportunities. Only planning/transit hauls carry
+      // market snapshot) as the opportunities. planning/secured/transit hauls carry
       // live status; echo the orders we last saw so the server can flag `stale`.
       const pinnedForCheck = store
         .get(pinnedHaulsAtom)
-        .filter((h) => h.status === 'planning' || h.status === 'transit')
+        .filter((h) => h.status === 'planning' || h.status === 'secured' || h.status === 'transit')
         .map((h) => ({
           id: h.id,
           typeId: h.typeId,
@@ -300,7 +300,7 @@ export function useHaulingSearchController(): void {
       // the full content + price, so the server needs no cache lookup.
       const pinnedPackagesForCheck = store
         .get(pinnedPackagesAtom)
-        .filter((p) => p.status === 'planning' || p.status === 'transit')
+        .filter((p) => p.status === 'planning' || p.status === 'secured' || p.status === 'transit')
         .map((p) => ({
           id: p.id,
           contractId: p.contractId,
@@ -321,12 +321,18 @@ export function useHaulingSearchController(): void {
         }));
 
       // Pinned couriers revalidated in the SAME cycle against the FULL contract
-      // feed (existence + fresh route). Only PLANNING pins: a secured/accepted
-      // contract leaving the public feed is expected, not a "gone" signal.
+      // feed. planning checks existence + full route; secured/transit only refresh
+      // the route (an accepted contract leaves the feed, so we send its endpoints so
+      // the server can still re-route it). transit routes straight to the dropoff.
       const pinnedCouriersForCheck = store
         .get(pinnedCouriersAtom)
-        .filter((c) => c.status === 'planned')
-        .map((c) => ({ id: c.id, status: 'planned' as const }));
+        .filter((c) => c.status === 'planning' || c.status === 'secured' || c.status === 'transit')
+        .map((c) => ({
+          id: c.id,
+          status: c.status,
+          pickupSystem: c.pickup.systemId,
+          dropoffSystem: c.dropoff.systemId,
+        }));
 
       const haulRes = await fetch(`${API_BASE}/api/hauling?${params.toString()}`, {
         signal,
@@ -379,12 +385,14 @@ export function useHaulingSearchController(): void {
         updatePinnedCourierStatuses(haulData.pinnedCourierStatuses);
       }
 
-      // Fetch dynamic routes for secured pinned courier items (arbitrage routes are resolved on the server)
+      // Client-side origin→dropoff fallback for cards in the loaded (transit) stage,
+      // where the route drops the pickup leg. (Planning/secured routes — incl. the
+      // pickup leg — come from the server revalidation above.)
       const pinnedCouriers = store.get(pinnedCouriersAtom);
-      const securedCouriers = pinnedCouriers.filter((c) => c.status === 'secured');
+      const transitCouriers = pinnedCouriers.filter((c) => c.status === 'transit');
 
       const queries: { id: string; destSys: number }[] = [];
-      securedCouriers.forEach((c) => {
+      transitCouriers.forEach((c) => {
         if (c.dropoff?.systemId) {
           queries.push({ id: `c:${c.id}`, destSys: c.dropoff.systemId });
         }

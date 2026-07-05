@@ -81,7 +81,7 @@ const pinnedHaulRequestSchema = z.object({
   source: z.coerce.number().finite(),
   dest: z.coerce.number().finite(),
   quantity: z.coerce.number().finite(),
-  status: z.enum(['planning', 'transit']),
+  status: z.enum(['planning', 'secured', 'transit']),
   // Present-but-invalid boughtPrice drops the whole entry (no `.catch`).
   boughtPrice: z.coerce.number().finite().optional(),
   unitVolume: optionalNumber,
@@ -99,7 +99,7 @@ const pinnedPackageRequestSchema = z
   .object({
     id: z.string(),
     contractId: z.coerce.number().finite(),
-    status: z.enum(['planning', 'transit']),
+    status: z.enum(['planning', 'secured', 'transit']),
     price: z.coerce.number().finite(),
     lines: packageStatusLinesSchema,
     sourceSystem: numberOrNull,
@@ -115,8 +115,15 @@ export const pinnedPackagesRequestSchema = lenientArray(pinnedPackageRequestSche
 
 const pinnedCourierRequestSchema = z.object({
   id: z.coerce.number().finite(),
-  // Only planning/secured pins are revalidated; executed ones are done.
-  status: z.enum(['planned', 'secured']),
+  // planning/secured/transit are revalidated; executed ones are done. Planning
+  // checks existence (a contract leaving the feed = gone); secured/transit only
+  // refresh the route (an accepted contract legitimately leaves the public feed).
+  status: z.enum(['planning', 'secured', 'transit']),
+  // Route endpoints (system ids). Sent so a secured/transit pin that has left the
+  // public feed can still be re-routed from the current origin (planning re-reads
+  // them from the live feed entry, so they're optional there).
+  pickupSystem: numberOrNull.optional(),
+  dropoffSystem: numberOrNull.optional(),
 });
 
 /** Body `couriers` of POST /api/hauling — pinned courier ids to revalidate
