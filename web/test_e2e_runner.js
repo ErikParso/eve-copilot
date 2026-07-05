@@ -59,8 +59,16 @@ async function mutateMarketAndRefresh(page, body) {
       window.triggerHaulingRefresh();
     }
   });
-  await responsePromise;
-  await sleep(500); // Small pause for state/DOM sync
+  const res = await responsePromise;
+  try {
+    const json = await res.json();
+    console.log(`[mutateMarketAndRefresh] Pinned Package Statuses:`, JSON.stringify(json.pinnedPackageStatuses, null, 2));
+    console.log(`[mutateMarketAndRefresh] Available items total:`, json.total);
+    console.log(`[mutateMarketAndRefresh] Available items:`, JSON.stringify(json.items, null, 2));
+  } catch (err) {
+    console.log(`[mutateMarketAndRefresh] Failed to parse JSON:`, err.message);
+  }
+  await sleep(1000); // Small pause for state/DOM sync
 }
 
 async function cleanup() {
@@ -320,7 +328,7 @@ async function runTests() {
   await dialog.locator('input[type="number"]').nth(0).fill(String(customQty));
   await dialog.locator('input[type="number"]').nth(2).fill(String(customPrice));
   
-  const confirmLoadButton = dialog.locator('button:has-text("Confirm & Load")');
+  const confirmLoadButton = dialog.locator('button:has-text("Confirm Buy")');
   const confirmResponsePromise = page.waitForResponse(response =>
     response.url().includes('/api/hauling') && response.status() === 200
   );
@@ -328,10 +336,21 @@ async function runTests() {
   await confirmResponsePromise;
   await sleep(500); // Wait for state/DOM sync
 
+  // Verify transition to secured and click Cargo Loaded
+  const securedCard = page.locator(`[id="card-p:${itemId}"]`);
+  const cargoLoadedBtn = securedCard.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(cargoLoadedBtn, 'cargoLoadedBtn');
+  const loadCargoResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  await cargoLoadedBtn.click();
+  await loadCargoResponsePromise;
+  await sleep(500);
+
   // Verify transition to transit
   const transitCard = page.locator(`[id="card-p:${itemId}"]`);
   const confirmSellBtn = transitCard.locator('button:has-text("Confirm Sell")');
-  const sellElsewhereBtn = transitCard.locator('button:has-text("Sell Elsewhere")');
+  const sellElsewhereBtn = transitCard.locator('button:has([data-testid="AltRouteIcon"])');
   await assertVisible(confirmSellBtn, 'confirmSellBtn');
   await assertVisible(sellElsewhereBtn, 'sellElsewhereBtn');
   
@@ -668,12 +687,20 @@ async function runTests() {
   await assertVisible(baselineDialog, 'baselineDialog');
   
   // Do NOT change any values — accept the defaults (which are the original baseline values)
-  const baselineConfirmLoad = baselineDialog.locator('button:has-text("Confirm & Load")');
+  const baselineConfirmLoad = baselineDialog.locator('button:has-text("Confirm Buy")');
   const baselineConfirmResponse = page.waitForResponse(response =>
     response.url().includes('/api/hauling') && response.status() === 200
   );
   await baselineConfirmLoad.click();
   await baselineConfirmResponse;
+  await sleep(500);
+
+  // Transition from secured to transit
+  const baselineCargoLoadedBtn = baselinePinnedCard.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(baselineCargoLoadedBtn, 'baselineCargoLoadedBtn');
+  const baselineLoadResponse = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await baselineCargoLoadedBtn.click();
+  await baselineLoadResponse;
   await sleep(500);
   
   // Verify it transitioned to transit
@@ -730,14 +757,22 @@ async function runTests() {
   await redirectConfirmBuy.click();
   const redirectDialog = page.locator('.MuiDialog-root');
   await assertVisible(redirectDialog, 'redirectDialog');
-  const redirectConfirmLoad = redirectDialog.locator('button:has-text("Confirm & Load")');
+  const redirectConfirmLoad = redirectDialog.locator('button:has-text("Confirm Buy")');
   const redirectConfirmResponse = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
   await redirectConfirmLoad.click();
   await redirectConfirmResponse;
   await sleep(500);
+
+  // Transition from secured to transit
+  const redirectCargoLoadedBtn = redirectPinnedCard.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(redirectCargoLoadedBtn, 'redirectCargoLoadedBtn');
+  const redirectLoadResponse = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await redirectCargoLoadedBtn.click();
+  await redirectLoadResponse;
+  await sleep(500);
   
   // Now click "Sell Elsewhere"
-  const redirectSellElsewhere = redirectPinnedCard.locator('button:has-text("Sell Elsewhere")');
+  const redirectSellElsewhere = redirectPinnedCard.locator('button:has([data-testid="AltRouteIcon"])');
   await redirectSellElsewhere.click();
   
   // Wait for the sell destinations modal
@@ -1023,15 +1058,24 @@ async function runTests() {
   await card1ConfirmBuy.click();
   const card1Dialog = page.locator('.MuiDialog-root');
   await assertVisible(card1Dialog, 'card1Dialog');
-  const card1ConfirmLoad = card1Dialog.locator('button:has-text("Confirm & Load")');
+  const card1ConfirmLoad = card1Dialog.locator('button:has-text("Confirm Buy")');
   const card1ConfirmResp = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
   await card1ConfirmLoad.click();
   await card1ConfirmResp;
   await sleep(500);
   
+  // Transition card 1 from secured to transit
+  const card1CargoLoaded = card1.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(card1CargoLoaded, 'card1CargoLoaded');
+  const card1LoadResponse = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await card1CargoLoaded.click();
+  await card1LoadResponse;
+  await sleep(500);
+
   // Verify card 1 is in transit
   const card1Transit = page.locator(`[id="card-p:${pinnedIds[1]}"]`);
-  await assertVisible(card1Transit.locator('button:has-text("Confirm Sell")'), 'card1TransitBtn');
+  const card1ConfirmSell = card1Transit.locator('button:has-text("Confirm Sell")');
+  await assertVisible(card1ConfirmSell, 'card1ConfirmSell');
   console.log('Card 1 transitioned to transit.');
   
   // Card 2 → Transit → Executed
@@ -1040,10 +1084,18 @@ async function runTests() {
   await card2ConfirmBuy.click();
   const card2Dialog = page.locator('.MuiDialog-root');
   await assertVisible(card2Dialog, 'card2Dialog');
-  const card2ConfirmLoad = card2Dialog.locator('button:has-text("Confirm & Load")');
+  const card2ConfirmLoad = card2Dialog.locator('button:has-text("Confirm Buy")');
   const card2ConfirmResp = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
   await card2ConfirmLoad.click();
   await card2ConfirmResp;
+  await sleep(500);
+
+  // Transition card 2 from secured to transit
+  const card2CargoLoaded = card2.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(card2CargoLoaded, 'card2CargoLoaded');
+  const card2LoadResponse = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await card2CargoLoaded.click();
+  await card2LoadResponse;
   await sleep(500);
   
   // Execute card 2
@@ -1207,10 +1259,18 @@ async function runTests() {
   await seqConfirmBuy.click();
   const seqDialog = page.locator('.MuiDialog-root');
   await assertVisible(seqDialog, 'seqDialog');
-  const seqConfirmLoad = seqDialog.locator('button:has-text("Confirm & Load")');
+  const seqConfirmLoad = seqDialog.locator('button:has-text("Confirm Buy")');
   const seqConfirmResp = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
   await seqConfirmLoad.click();
   await seqConfirmResp;
+  await sleep(500);
+
+  // Transition seq from secured to transit
+  const seqCargoLoaded = seqPinnedCard.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(seqCargoLoaded, 'seqCargoLoaded');
+  const seqLoadResponse = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
+  await seqCargoLoaded.click();
+  await seqLoadResponse;
   await sleep(500);
   
   // Verify transit
@@ -1333,7 +1393,7 @@ async function runTests() {
     dangerSteps: [],
     attractivity: 50,
     attractivitySteps: [],
-    status: 'planned',
+    status: 'planning',
   };
   
   // Inject the courier into localStorage and reload
@@ -1416,10 +1476,18 @@ async function runTests() {
   console.log(`  Warning icon after secure: ${warningAfterSecure > 0}`);
   console.log('  PASSED: 19B — Secured courier has blue border (not green!) after accepting unavailable contract.');
   
+  // Verify "Cargo Loaded" button is visible
+  const cargoLoadedBtn19 = courierCard.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(cargoLoadedBtn19, 'cargoLoadedBtn19');
+  
+  // Click "Cargo Loaded" to move to transit stage
+  await cargoLoadedBtn19.click();
+  await sleep(1000); // Wait for React re-render
+
   // Verify "Confirm Deliver" button is now visible
   const confirmDeliverBtn = courierCard.locator('button:has-text("Confirm Deliver")');
   await assertVisible(confirmDeliverBtn, 'confirmDeliverBtn');
-  console.log('  Verified: "Confirm Deliver" button is visible in secured stage.');
+  console.log('  Verified: "Confirm Deliver" button is visible in transit stage.');
   
   // 19C: Click "Confirm Deliver" → transitions to EXECUTED → BLUE border
   await confirmDeliverBtn.click();
@@ -1531,8 +1599,24 @@ async function runTests() {
       window.triggerHaulingRefresh();
     }
   });
-  await refreshResp;
+  const res20 = await refreshResp;
+  try {
+    const json20 = await res20.json();
+    console.log(`  DEBUG Test 20 refresh response total:`, json20.total);
+    console.log(`  DEBUG Test 20 refresh response items:`, JSON.stringify(json20.items, null, 2));
+  } catch (err) {
+    console.log(`  DEBUG Test 20 refresh response parse error:`, err.message);
+  }
   await sleep(1000);
+
+  // Debug: print all card IDs currently in the DOM
+  const cards20 = page.locator('[id^="card-"]');
+  const cardCount20 = await cards20.count();
+  console.log(`  DEBUG Test 20: found ${cardCount20} cards in the DOM:`);
+  for (let i = 0; i < cardCount20; i++) {
+    const id = await cards20.nth(i).getAttribute('id');
+    console.log(`    Card ${i}: id="${id}"`);
+  }
 
   // 20A: Verify available package card renders in grid
   const pkgCard = page.locator('#card-pkg\\:888888001');
@@ -1565,10 +1649,20 @@ async function runTests() {
   await pkgBuyResponsePromise;
   await sleep(500);
 
+  // Transition from secured to transit
+  const pkgCargoLoadedBtn = pinnedPkgCard.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(pkgCargoLoadedBtn, 'pkgCargoLoadedBtn');
+  const pkgLoadResponsePromise = page.waitForResponse(response =>
+    response.url().includes('/api/hauling') && response.status() === 200
+  );
+  await pkgCargoLoadedBtn.click();
+  await pkgLoadResponsePromise;
+  await sleep(500);
+
   // Verify transition to transit
   const transitPkgCard = page.locator('#card-pp\\:888888001');
   const pkgConfirmSellBtn = transitPkgCard.locator('button:has-text("Confirm Sell")');
-  const pkgSellElsewhereBtn = transitPkgCard.locator('button:has-text("Sell Elsewhere")');
+  const pkgSellElsewhereBtn = transitPkgCard.locator('button:has([data-testid="AltRouteIcon"])');
   await assertVisible(pkgConfirmSellBtn, 'pkgConfirmSellBtn');
   await assertVisible(pkgSellElsewhereBtn, 'pkgSellElsewhereBtn');
   
@@ -2080,15 +2174,18 @@ async function runTests() {
   await pinBtn21E.click();
   await sleep(500);
 
-  // Click "Confirm Buy" to move it to transit
+  // Click "Confirm Buy" to move it to secured
   const confirmBuyBtn21E = card21C.locator('button:has-text("Confirm Buy")');
+  const securedResponsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
   await confirmBuyBtn21E.click();
+  await securedResponsePromise;
   await sleep(500);
 
-  // Click "Acquire" in the modal
-  const dialogConfirmBtn = page.locator('button:has-text("Confirm Buy")').nth(1);
+  // Click "Cargo Loaded" to move it to transit
+  const cargoLoadedBtn21E = card21C.locator('button:has-text("Cargo Loaded")');
+  await assertVisible(cargoLoadedBtn21E, 'cargoLoadedBtn21E');
   const transitResponsePromise = page.waitForResponse(r => r.url().includes('/api/hauling') && r.status() === 200);
-  await dialogConfirmBtn.click();
+  await cargoLoadedBtn21E.click();
   await transitResponsePromise;
   await sleep(500);
 
@@ -2123,7 +2220,7 @@ async function runTests() {
   }
 
   // Click "Sell Elsewhere"
-  const sellElsewhereBtn21 = transitCard21.locator('button:has-text("Sell Elsewhere")');
+  const sellElsewhereBtn21 = transitCard21.locator('button:has([data-testid="AltRouteIcon"])');
   await sellElsewhereBtn21.click();
   await sleep(500);
 
