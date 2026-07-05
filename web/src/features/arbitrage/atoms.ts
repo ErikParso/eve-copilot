@@ -97,33 +97,6 @@ export const isCourierPinnedAtom = atom((get) => (id: number) => {
 });
 
 /**
- * Total volume physically loaded in the ship: only `transit` pins (cargo aboard).
- * `secured` items are bought/accepted but still in the source hangar, so they
- * don't occupy the hold yet.
- */
-export const cargoHoldVolumeAtom = atom<number>((get) => {
-  const pinnedHauls = get(pinnedHaulsAtom);
-  const pinnedCouriers = get(pinnedCouriersAtom);
-
-  const arbitrageVol = pinnedHauls.reduce((sum, h) => {
-    if (h.status === 'transit') {
-      const qty = h.boughtQuantity ?? h.quantity;
-      return sum + qty * h.unitVolume;
-    }
-    return sum;
-  }, 0);
-
-  const courierVol = pinnedCouriers.reduce((sum, c) => {
-    if (c.status === 'transit') {
-      return sum + c.volume;
-    }
-    return sum;
-  }, 0);
-
-  return arbitrageVol + courierVol;
-});
-
-/**
  * Helper atom to check if an opportunity is pinned.
  */
 export const isPinnedAtom = atom((get) => (id: string) => {
