@@ -149,29 +149,38 @@ export function securityBand(security: number): SecurityBand {
   return 'null';
 }
 
-// EVE in-game security-status colour ramp, sampled directly from a route
-// planner screenshot (pixel-extracted), keyed by security rounded to one
-// decimal. 0.3 and 0.2 are interpolated (that route had no such systems);
-// everything else is measured. Null-sec (≤ 0.0) is the deepest red.
+// Official current EVE security-status colour ramp, keyed by security rounded
+// to one decimal. Values are CCP's own, from the System Security developer
+// docs (developers.eveonline.com/docs/guides/system-security). Note the modern
+// Photon-era palette: high-sec is blue (not the old cyan/green), and null-sec
+// is purple (#8D3163) rather than the legacy deep red.
 const SECURITY_COLORS: Record<string, string> = {
-  '1.0': '#33CCFF',
-  '0.9': '#5EB3AC',
-  '0.8': '#84BD73',
-  '0.7': '#8CC462',
-  '0.6': '#9CCE6D',
-  '0.5': '#F1FF34',
-  '0.4': '#FFB43B',
-  '0.3': '#E68A33', // interpolated 0.4 → 0.1
-  '0.2': '#CC562D', // interpolated 0.4 → 0.1
-  '0.1': '#BD3528',
-  '0.0': '#B62426',
+  '1.0': '#2C75E1',
+  '0.9': '#399AEB',
+  '0.8': '#4ECEF8',
+  '0.7': '#60DBA3',
+  '0.6': '#71E754',
+  '0.5': '#F5FF83',
+  '0.4': '#DC6C06',
+  '0.3': '#CE440F',
+  '0.2': '#BB1116',
+  '0.1': '#731F1F',
+  '0.0': '#8D3163',
 };
 
-/** Colour for a security status using EVE's ramp; null-sec (≤0) is deep red. */
+/**
+ * Colour for a security status using EVE's official ramp. Mirrors the game's
+ * display rounding so it stays consistent with {@link securityBand}: only true
+ * null-sec (≤ 0) is purple, while any positive truesec that would round to 0.0
+ * (e.g. 0.04) clamps up to 0.1 low-sec — EVE never shows a 0.0 for a low-sec
+ * system.
+ */
 export function securityColor(security: number): string {
-  const clamped = Math.max(0, Math.min(1, security));
-  const key = (Math.round(clamped * 10) / 10).toFixed(1);
-  return SECURITY_COLORS[key] ?? '#F00000';
+  if (security <= 0) return SECURITY_COLORS['0.0'];
+  const clamped = Math.min(1, security);
+  const step = Math.max(1, Math.round(clamped * 10)); // positive sec floors at 0.1
+  const key = (step / 10).toFixed(1);
+  return SECURITY_COLORS[key] ?? SECURITY_COLORS['0.0'];
 }
 
 /**
