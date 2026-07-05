@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
-import { loadSde, getStation } from './sde.js';
-import { startContractsRefresh } from './contracts.js';
+import { loadSde } from './sde.js';
+import { startContractsRefresh, resolvePinnedCouriersStatus } from './contracts.js';
 import { startPackagesService, resolvePinnedPackagesStatus, resolvePackageSellDestinations, getPackagesFreshness } from './packages.js';
 import { startMarketScheduler, onMarketRefresh, getMarketFreshness } from './market.js';
 import { startPricesRefresh } from './prices.js';
@@ -15,6 +15,7 @@ import {
   attractivityWeightsSchema,
   pinnedHaulsRequestSchema,
   pinnedPackagesRequestSchema,
+  pinnedCouriersRequestSchema,
   packageStatusLinesSchema,
 } from './schemas.js';
 
@@ -29,7 +30,7 @@ process.on('uncaughtException', (err) => {
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
-const DEFAULT_SHIP_LIMIT = 48; // how many top-attractivity hauls to ship (the FE shows them all, no paging)
+const HAULING_PAGE_SIZE = 48; // attractivity-ranked hauls per page (routes materialised only for the shipped page)
 
 function parseRouteType(value: unknown): RouteType {
   return value === 'shortest' ? 'shortest' : 'safest';
@@ -374,7 +375,8 @@ async function main() {
         taxPct,
         weights,
         kinds: parseHaulingKinds(req.query.types),
-        limit: parseOptionalNumber(req.query.limit) ?? DEFAULT_SHIP_LIMIT,
+        page: parseOptionalNumber(req.query.page) ?? 1,
+        pageSize: parseOptionalNumber(req.query.pageSize) ?? HAULING_PAGE_SIZE,
       });
       // Pins are re-optimized against the SAME cargo/wallet/tax as the grid, so a
       // pinned planning haul reflects exactly what the matching opportunity would.
@@ -397,7 +399,14 @@ async function main() {
         routeType,
         kills,
       });
-      res.json({ ...result, pinnedStatuses, pinnedPackageStatuses });
+      // Pinned couriers revalidated in the SAME cycle, against the FULL contract
+      // feed (not the paged/filtered grid): existence + fresh route/danger.
+      const pinnedCourierStatuses = resolvePinnedCouriersStatus(pinnedCouriersRequestSchema.parse(req.body?.couriers), {
+        origin,
+        routeType,
+        kills,
+      });
+      res.json({ ...result, pinnedStatuses, pinnedPackageStatuses, pinnedCourierStatuses });
     } catch (err) {
       console.error('POST /api/hauling failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });

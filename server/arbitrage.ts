@@ -549,7 +549,11 @@ export function resolvePinnedHaulsStatus(
       let approachIds: number[] | null = null;
       let deliveryIds: number[] | null = null;
 
-      if (h.status === 'planning') {
+      // Routing decision is independent of the economics decision below: the
+      // pickup leg is shown until the cargo is physically loaded, i.e. for both
+      // planning AND secured (bought, but still sitting in the source hangar).
+      // Only transit (loaded in ship) drops the pickup leg.
+      if (h.status !== 'transit') {
         deliveryIds = getRoute(buySystem, destSystem, opts.routeType);
         if (opts.origin !== null) {
           approachIds = getRoute(opts.origin, buySystem, opts.routeType);

@@ -25,7 +25,8 @@ async function test() {
     taxPct: 4.5,
     weights: { income: 5, totalJumps: 5, danger: 5 },
     kinds: [],
-    limit: 50
+    page: 1,
+    pageSize: 50
   });
 
   console.log(`Enriched hauling items returned: ${res.items.length}`);

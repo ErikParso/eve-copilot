@@ -62,8 +62,12 @@ export interface HaulingData {
   contractsAsOf: number | null;
   /** Market-crawl readiness + freshness from the API. */
   market: MarketMeta | null;
-  /** Total candidates the server scored before keeping the shipped top-N. */
+  /** Total candidates the server scored before paging (for the pager + count). */
   total: number;
+  /** 1-based page the shipped opportunities belong to. */
+  page: number;
+  /** Items per page the server used (for sizing the pager). */
+  pageSize: number;
 }
 
 export const haulingDataAtom = atom<HaulingData>({
@@ -72,45 +76,48 @@ export const haulingDataAtom = atom<HaulingData>({
   arbitrage: [],
   packages: [],
   total: 0,
+  page: 1,
+  pageSize: 48,
   error: null,
   contractsAsOf: null,
   market: null,
 });
 
 /**
- * The displayed cards. The available courier + arbitrage rows are already
- * filtered, scaled and SCORED on the server (one combined attractivity
- * normalisation), so the FE doesn't re-score them — it just wraps them as cards
- * and overlays the (client-only) pinned items. Recomputes when the server data
- * or the pinned set changes; the page sorts the result.
+ * 1-based current page of the opportunity grid. Server-side paging: changing this
+ * re-fetches that page (the controller reads it). Reset to 1 whenever a user
+ * action re-ranks the set (weights/route/cargo/tax/filter); background refreshes
+ * keep the current page. Pinned items are NOT paged — they render in their own
+ * always-visible section — so this only governs the available-opportunity grid.
  */
-export const haulingRowsAtom = atom<ResultCard[]>((get) => {
-  const data = get(haulingDataAtom);
-  // Only render cards once we have a successful result. While loading (a user
-  // action cleared us to 'loading') the page shows a full skeleton grid INSTEAD
-  // of any cards — pinned items included — so nothing stale lingers next to the
-  // skeletons. Automatic reloads keep status 'success', so they never blank.
-  if (data.status !== 'success') return [];
-  // Available rows arrive already filtered + scaled + scored from the server.
-  const courierRows = data.courier;
-  const arbRows = data.arbitrage;
-  const packageRows = data.packages;
+export const haulingPageAtom = atom<number>(1);
 
-  const prefs = get(preferencesAtom);
+/**
+ * Pinned cards (courier + arbitrage + package), hydrated with live transit/secured
+ * routes from the cache. These are the user's ACTIVE hauls and are shown in their
+ * own always-visible section (unpaged, above the opportunity grid), so they're
+ * split out from the server-paged available rows below. Carry no attractivity
+ * (they're not ranked against the menu). Empty until we have a successful load.
+ */
+export const pinnedRowsAtom = atom<ResultCard[]>((get) => {
+  // Pins are the user's ACTIVE work and come from client-side storage, so they
+  // render regardless of the fetch status — including during a user-invoked
+  // reload. They live in their own section above the grid (not among the
+  // skeletons), so there's no stale-next-to-skeleton concern that blanks them.
   const origin = get(characterStatusAtom)?.systemId ?? null;
-  const routeType = prefs.routeType;
+  const routeType = get(preferencesAtom).routeType;
   const routesCache = get(pinnedRoutesAtom);
 
   const pinnedCouriers = get(pinnedCouriersAtom);
-  const liveCourierIds = new Set(data.courier.map((c) => c.id));
   const updatedPinnedCouriers = pinnedCouriers.map((c) => {
-    const isSecured = c.status === 'secured';
-    const isUnavailable = c.status === 'planned' && data.status === 'success' && !liveCourierIds.has(c.id);
-    let item = {
-      ...c,
-      unavailable: isUnavailable,
-    };
-    if (isSecured && origin !== null && c.dropoff?.systemId) {
+    // Only `transit` (cargo loaded) uses the delivery-only override; secured still
+    // shows the full origin→pickup→dropoff route from the server revalidation.
+    const isTransit = c.status === 'transit';
+    // `unavailable` is now set by the same-cycle server revalidation against the
+    // FULL contract feed (updatePinnedCourierStatusesAtom), not derived from the
+    // paged/filtered opportunity grid — so filters/weights/paging can't false-flag it.
+    let item = { ...c };
+    if (isTransit && origin !== null && c.dropoff?.systemId) {
       const cacheKey = `${origin}-${c.dropoff.systemId}-${routeType}`;
       const cached = routesCache[cacheKey];
       if (cached) {
@@ -127,8 +134,6 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
     }
     return item;
   });
-  const pinnedCourierIds = new Set(pinnedCouriers.map((c) => c.id));
-  const filteredCourierRows = courierRows.filter((c) => !pinnedCourierIds.has(c.id));
 
   const pinnedHauls = get(pinnedHaulsAtom);
   const updatedPinnedHauls = pinnedHauls.map((h) => {
@@ -151,8 +156,6 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
     }
     return item;
   });
-  const pinnedIds = new Set(pinnedHauls.map((h) => h.id));
-  const filteredArbRows = arbRows.filter((a) => !pinnedIds.has(a.id));
 
   const pinnedPackages = get(pinnedPackagesAtom);
   const updatedPinnedPackages = pinnedPackages.map((p) => {
@@ -175,12 +178,8 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
     }
     return item;
   });
-  const pinnedPackageIds = new Set(pinnedPackages.map((p) => p.id));
-  const filteredPackageRows = packageRows.filter((p) => !pinnedPackageIds.has(p.id));
 
-  // Wrap as cards. Available rows carry their server attractivity; pinned items
-  // carry no score (shown first regardless) and no breakdown.
-  const cards: ResultCard[] = [
+  return [
     ...updatedPinnedCouriers.map((c) => ({
       kind: 'pinned-courier' as const,
       key: `pc:${c.id}`,
@@ -196,21 +195,36 @@ export const haulingRowsAtom = atom<ResultCard[]>((get) => {
       key: `pp:${p.id}`,
       row: { ...p, attractivity: 0, attractivitySteps: [] },
     })),
-    ...filteredCourierRows.map((c) => ({
-      kind: 'courier' as const,
-      key: `c:${c.id}`,
-      row: { ...c, attractivitySteps: [] },
-    })),
-    ...filteredArbRows.map((a) => ({
-      kind: 'arbitrage' as const,
-      key: `a:${a.id}`,
-      row: { ...a, attractivitySteps: [] },
-    })),
-    ...filteredPackageRows.map((p) => ({
-      kind: 'package' as const,
-      key: `pkg:${p.id}`,
-      row: { ...p, attractivitySteps: [] },
-    })),
   ];
-  return cards;
+});
+
+/**
+ * Available opportunity cards for the CURRENT server page. These arrive already
+ * filtered, scaled and SCORED on the server, so the FE just wraps them as cards
+ * (no re-score). Pinned ids are excluded so an active haul doesn't also appear in
+ * the ranked grid. The server handles paging, so this is exactly one page's worth.
+ */
+export const availableRowsAtom = atom<ResultCard[]>((get) => {
+  const data = get(haulingDataAtom);
+  // Only render cards once we have a successful result. While loading (a user
+  // action cleared us to 'loading') the page shows a full skeleton grid INSTEAD
+  // of any cards, so nothing stale lingers next to the skeletons. Automatic
+  // reloads keep status 'success', so they never blank.
+  if (data.status !== 'success') return [];
+
+  const pinnedCourierIds = new Set(get(pinnedCouriersAtom).map((c) => c.id));
+  const pinnedIds = new Set(get(pinnedHaulsAtom).map((h) => h.id));
+  const pinnedPackageIds = new Set(get(pinnedPackagesAtom).map((p) => p.id));
+
+  return [
+    ...data.courier
+      .filter((c) => !pinnedCourierIds.has(c.id))
+      .map((c) => ({ kind: 'courier' as const, key: `c:${c.id}`, row: { ...c, attractivitySteps: [] } })),
+    ...data.arbitrage
+      .filter((a) => !pinnedIds.has(a.id))
+      .map((a) => ({ kind: 'arbitrage' as const, key: `a:${a.id}`, row: { ...a, attractivitySteps: [] } })),
+    ...data.packages
+      .filter((p) => !pinnedPackageIds.has(p.id))
+      .map((p) => ({ kind: 'package' as const, key: `pkg:${p.id}`, row: { ...p, attractivitySteps: [] } })),
+  ];
 });

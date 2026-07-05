@@ -3,6 +3,8 @@ import { useAtom, useAtomValue } from 'jotai';
 import {
   Alert,
   Box,
+  Divider,
+  Pagination,
   Stack,
   TextField,
   Typography,
@@ -17,8 +19,12 @@ import {
 import BubbleChartIcon from '@mui/icons-material/BubbleChart';
 import CloseIcon from '@mui/icons-material/Close';
 import { HaulingBubbleChart } from './components/HaulingBubbleChart';
-import { haulingDataAtom, haulingRowsAtom } from './atoms';
+import { haulingDataAtom, haulingPageAtom, pinnedRowsAtom, availableRowsAtom } from './atoms';
 import { sortCombined } from './combined';
+
+// Hard ceiling on how deep the ranked set can be paged — mirrors the server's
+// MAX_PAGEABLE (server/hauling.ts). Keep the two in sync.
+const MAX_PAGEABLE = 1000;
 import { CombinedGrid } from './components/CombinedGrid';
 import { preferencesAtom } from '@/features/preferences/atoms';
 import { RouteTypeSelect } from './components/RouteTypeSelect';
@@ -77,8 +83,10 @@ function NumberPrefField({
 export function CourierContractsPage() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const { status, error, total } = useAtomValue(haulingDataAtom);
-  const rows = useAtomValue(haulingRowsAtom);
+  const { status, error, total, pageSize } = useAtomValue(haulingDataAtom);
+  const pinnedRows = useAtomValue(pinnedRowsAtom);
+  const availableRows = useAtomValue(availableRowsAtom);
+  const [page, setPage] = useAtom(haulingPageAtom);
   const [prefs, setPrefs] = useAtom(preferencesAtom);
 
   const [showChart, setShowChart] = useState(false);
@@ -127,28 +135,13 @@ export function CourierContractsPage() {
     }
   }, []);
 
-  // Sort live by attractivity always
-  const sortedRows = useMemo(() => sortCombined(rows, 'attractivity'), [rows]);
+  // The server ships one page already ranked, but the FE splits it back into kinds
+  // (losing the cross-kind order), so re-sort the page by attractivity for display.
+  // Pinned rows render in their own section above and are NOT paged/re-sorted here.
+  const sortedRows = useMemo(() => sortCombined(availableRows, 'attractivity'), [availableRows]);
 
-  const [visibleCount, setVisibleCount] = useState(12);
-
-  const visibleRows = useMemo(() => {
-    return sortedRows.slice(0, visibleCount);
-  }, [sortedRows, visibleCount]);
-
-  // Courier vs arbitrage split of the shown menu (pinned excluded — those are
-  // your active hauls, not part of the server's "best N of total" pick).
-  const counts = useMemo(() => {
-    let courier = 0;
-    let arbitrage = 0;
-    let packages = 0;
-    for (const r of rows) {
-      if (r.kind === 'courier') courier += 1;
-      else if (r.kind === 'arbitrage') arbitrage += 1;
-      else if (r.kind === 'package') packages += 1;
-    }
-    return { courier, arbitrage, packages, shown: courier + arbitrage + packages };
-  }, [rows]);
+  // Pager: cap navigation at MAX_PAGEABLE even if the server scored more.
+  const pageCount = Math.max(1, Math.ceil(Math.min(total, MAX_PAGEABLE) / Math.max(1, pageSize)));
 
   return (
     <Stack spacing={3}>
@@ -160,8 +153,6 @@ export function CourierContractsPage() {
           Find the most profitable courier contracts and arbitrage routes using real-time market data analysis.
         </Typography>
       </Box>
-
-      {/* Pinned Hauls Section */}
 
       <Stack spacing={2}>
         {status === 'error' && <Alert severity="error">Could not load the data: {error}</Alert>}
@@ -217,24 +208,41 @@ export function CourierContractsPage() {
           </Box>
         </Paper>
 
+        {/* Pinned hauls: the user's active work, always visible (never paged, and
+            not hidden during a reload) and split from the ranked grid by a divider. */}
+        {pinnedRows.length > 0 && (
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem', mt: 2, mb: 1.5 }}>
+              Pinned Hauls
+            </Typography>
+            <CombinedGrid rows={pinnedRows} highlightedKey={highlightedKey} />
+            <Divider sx={{ mt: 3 }} />
+          </Box>
+        )}
+
         {/* Available Opportunities Header (always visible as title, but dynamic count when loaded) */}
         <Box
           sx={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'baseline',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            columnGap: 2,
+            rowGap: 0.5,
             mt: 2,
             mb: 1.5,
           }}
         >
-          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem', whiteSpace: 'nowrap' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
             Available Opportunities
           </Typography>
           {!loading && status === 'success' && (
-            <Typography variant="body2" color="text.secondary">
-              {total > counts.shown
-                ? `Top ${counts.shown} of ${total.toLocaleString()} by attractivity`
-                : `${counts.shown} ${counts.shown === 1 ? 'opportunity' : 'opportunities'}`}
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+              {total > MAX_PAGEABLE
+                ? `Top ${MAX_PAGEABLE.toLocaleString()} of ${total.toLocaleString()} · page ${page} of ${pageCount}`
+                : pageCount > 1
+                  ? `${total.toLocaleString()} opportunities · page ${page} of ${pageCount}`
+                  : `${total.toLocaleString()} ${total === 1 ? 'opportunity' : 'opportunities'}`}
             </Typography>
           )}
         </Box>
@@ -242,7 +250,7 @@ export function CourierContractsPage() {
         {(loading || status === 'success') && (
           <>
             {/* Show chart if bubble chart FAB is toggled and rows exist */}
-            {rows.length > 0 && (
+            {sortedRows.length > 0 && (
               <>
                 <Slide direction="up" in={showChart}>
                   <Paper
@@ -264,7 +272,7 @@ export function CourierContractsPage() {
                       pt: 2.5, // leaves room for the overlapping FAB centered on the top border
                     })}
                   >
-                    <HaulingBubbleChart rows={visibleRows} onBubbleClick={handleBubbleClick} />
+                    <HaulingBubbleChart rows={sortedRows} onBubbleClick={handleBubbleClick} />
                   </Paper>
                 </Slide>
 
@@ -309,14 +317,28 @@ export function CourierContractsPage() {
               </>
             )}
 
-            {rows.length > 0 || loading ? (
-              <CombinedGrid
-                rows={visibleRows}
-                highlightedKey={highlightedKey}
-                showSkeletons={loading}
-                hasMore={sortedRows.length > visibleCount}
-                onShowMore={() => setVisibleCount((prev) => prev + 12)}
-              />
+            {sortedRows.length > 0 || loading ? (
+              <>
+                <CombinedGrid
+                  rows={sortedRows}
+                  highlightedKey={highlightedKey}
+                  showSkeletons={loading}
+                />
+                {!loading && pageCount > 1 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', mt: 4, mb: 2 }}>
+                    <Pagination
+                      count={pageCount}
+                      page={page}
+                      onChange={(_e, value) => setPage(value)}
+                      color="primary"
+                      shape="rounded"
+                      size={isMobile ? 'small' : 'medium'}
+                      siblingCount={isMobile ? 0 : 1}
+                      boundaryCount={1}
+                    />
+                  </Box>
+                )}
+              </>
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
                 Nothing matches. Widen the cargo / ISK / contract-type limits in Preferences.

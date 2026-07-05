@@ -299,7 +299,7 @@ export interface PackageStatusLine {
 export interface PinnedPackageStatusRequest {
   id: string;
   contractId: number;
-  status: 'planning' | 'transit';
+  status: 'planning' | 'secured' | 'transit';
   /** Fixed package price (the sunk/at-risk cost). */
   price: number;
   lines: PackageStatusLine[];
@@ -351,7 +351,7 @@ export interface PinnedHaulStatusRequest {
   source: number;
   dest: number;
   quantity: number;
-  status: 'planning' | 'transit';
+  status: 'planning' | 'secured' | 'transit';
   boughtPrice?: number;
   /**
    * Per-unit cargo volume (m³). Used to re-optimize a planning haul to the

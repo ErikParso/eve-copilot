@@ -26,8 +26,14 @@ export interface HaulingParams {
   weights: AttractivityWeights;
   /** Opportunity kinds to include; empty = no filter (all kinds). */
   kinds: HaulingKind[];
-  limit: number;
+  /** 1-based page of the attractivity-ranked set to ship. */
+  page: number;
+  /** Items per page (routes are materialised only for this page's slice). */
+  pageSize: number;
 }
+
+/** Hard ceiling on how deep the ranked set can be paged (perf + UI sanity). */
+export const MAX_PAGEABLE = 1000;
 
 // Every shipped item carries its route danger index + breakdown (computed here);
 // the FE renders these directly and computes no danger of its own.
@@ -41,9 +47,13 @@ export interface HaulingResponse {
   meta: MarketMeta;
   /** Courier snapshot freshness (epoch ms), for the FE's "as of" display. */
   contractsAsOf: number | null;
-  /** Total candidates scored before the top-N truncation (so the FE can say
-   *  "top N of total"). */
+  /** Total candidates scored before paging (so the FE can size the pager). Capped
+   *  for navigation at MAX_PAGEABLE, but reported in full here for the count label. */
   total: number;
+  /** 1-based page actually shipped (clamped to the available range). */
+  page: number;
+  /** Items per page used for this response. */
+  pageSize: number;
 }
 
 /** jumps + danger (index + steps) over a contract's routes. */
@@ -106,7 +116,17 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
   ];
   tagged.sort((a, b) => b.attractivity - a.attractivity);
 
-  const items: HaulingItem[] = tagged.slice(0, params.limit).map((t) => {
+  // Page window over the ranked set. The whole set is scored/sorted above (cheap:
+  // routes + danger are already on every candidate); only THIS page's items get
+  // their display route materialised below. Navigation is capped at MAX_PAGEABLE.
+  const pageSize = Math.max(1, params.pageSize);
+  const pageable = Math.min(tagged.length, MAX_PAGEABLE);
+  const lastPage = Math.max(1, Math.ceil(pageable / pageSize));
+  const page = Math.min(Math.max(1, params.page), lastPage);
+  const start = (page - 1) * pageSize;
+  const window = tagged.slice(start, Math.min(start + pageSize, pageable));
+
+  const items: HaulingItem[] = window.map((t) => {
     if (t.kind === 'courier') {
       return {
         kind: 'courier',
@@ -134,5 +154,5 @@ export async function getEnrichedHauling(params: HaulingParams): Promise<Hauling
     };
   });
 
-  return { items, meta, contractsAsOf: contracts.lastModifiedAt, total: courier.length + arb.length + pkg.length };
+  return { items, meta, contractsAsOf: contracts.lastModifiedAt, total: courier.length + arb.length + pkg.length, page, pageSize };
 }

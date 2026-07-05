@@ -3,7 +3,7 @@
 // union and provides a sort that works across both, reusing the courier sort
 // options (the only filters on the page).
 // Attractivity is now computed once on the server (see server/hauling.ts); the
-// FE only wraps the scored rows as cards (haulingRowsAtom) and sorts them here.
+// FE only wraps the scored rows as cards (availableRowsAtom) and sorts them here.
 import type { CourierRow, SortOptionId } from './types';
 import { SORT_OPTIONS } from './sortContracts';
 import type { ArbitrageRow } from '@/features/arbitrage/types';
