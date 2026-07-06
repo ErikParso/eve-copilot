@@ -29,10 +29,10 @@ export function useCompanion(): void {
   const store = useStore();
   const queue = useRef<CompanionEvent[]>([]);
   const running = useRef(false);
+  // Persists across StrictMode's mount→unmount→remount so we greet exactly once.
+  const greeted = useRef(false);
 
   useEffect(() => {
-    let disposed = false;
-
     const handle = async (event: CompanionEvent) => {
       const debug = store.get(companionDebugAtom);
       // Merge the always-present base context with this action's own data. The
@@ -49,7 +49,6 @@ export function useCompanion(): void {
         if (debug) console.debug('[companion] request failed (offline?)', err);
         return;
       }
-      if (disposed) return;
 
       const client = cleanLine(raw);
       if (debug) {
@@ -76,7 +75,7 @@ export function useCompanion(): void {
       if (running.current) return;
       running.current = true;
       try {
-        while (queue.current.length && !disposed) {
+        while (queue.current.length) {
           await handle(queue.current.shift()!);
         }
       } finally {
@@ -89,12 +88,12 @@ export function useCompanion(): void {
       void drain();
     });
 
-    // Greet on load (once per mount).
-    dispatchCompanionEvent({ action: 'app-load' });
+    // Greet on load — guarded so StrictMode's double-mount greets only once.
+    if (!greeted.current) {
+      greeted.current = true;
+      dispatchCompanionEvent({ action: 'app-load' });
+    }
 
-    return () => {
-      disposed = true;
-      unsub();
-    };
+    return unsub;
   }, [store]);
 }
