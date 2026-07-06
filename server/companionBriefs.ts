@@ -29,7 +29,7 @@ export function isCompanionAction(value: unknown): value is CompanionActionId {
 
 export const BRIEFS: Record<CompanionActionId, string> = {
   'app-load':
-    'The pilot just opened the tool at the start of a session. Greet them briefly and signal you are ready — use their name if present in DATA. No action-specific DATA. RESPONSE: one short greeting, about 5-12 words.',
+    'The pilot just opened the tool at the start of a session. Greet them with a greeting that fits the time of day, inferred from DATA.clientTime (local time HH:MM). Use their name (DATA.pilotName) if present, and signal you are ready. No action-specific DATA. RESPONSE: one short greeting, about 5-12 words.',
 
   'set-waypoint-pickup':
     'The pilot set an in-game autopilot waypoint to the PICKUP / BUY location of an opportunity — where they collect or buy the cargo. Action DATA: { target } is the destination system or station. Acknowledge the pickup destination; a brief navigational remark is welcome. RESPONSE: one sentence, about 6-14 words.',
