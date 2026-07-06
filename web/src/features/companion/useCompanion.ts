@@ -3,7 +3,8 @@ import { useStore } from 'jotai';
 import { requestReaction } from './api';
 import { dispatchCompanionEvent, subscribeCompanionEvents } from './events';
 import { buildBaseContext } from './context';
-import { companionDebugAtom, companionMessagesAtom, MSG_CAP } from './atoms';
+import { playVoice } from './voice';
+import { companionDebugAtom, companionMutedAtom } from './atoms';
 import type { CompanionEvent } from './types';
 
 /** Tidy the model's plain-text reply into a single clean line: first non-empty
@@ -18,12 +19,10 @@ function cleanLine(text: string): string | null {
   return stripped || null;
 }
 
-const cap = <T>(arr: T[], max: number): T[] => (arr.length > max ? arr.slice(arr.length - max) : arr);
-
 /**
  * Mount once (in Layout). Subscribes to companion events, processes them one at a
- * time (the model is single and slow), and appends each response to the panel
- * feed in localStorage. Also fires the one-time `app-load` greeting.
+ * time (the model is single and slow), and speaks each response (voice-only — no
+ * UI). Also fires the one-time `app-load` greeting.
  */
 export function useCompanion(): void {
   const store = useStore();
@@ -41,34 +40,27 @@ export function useCompanion(): void {
 
       if (debug) console.debug('[companion] request', { action: event.action, payload });
 
-      let raw: string;
+      let reaction: Awaited<ReturnType<typeof requestReaction>>;
       try {
-        raw = await requestReaction(event.action, payload);
+        reaction = await requestReaction(event.action, payload);
       } catch (err) {
-        // Model offline / unreachable — stay quiet, panel shows its idle state.
+        // Model offline / unreachable — stay quiet.
         if (debug) console.debug('[companion] request failed (offline?)', err);
         return;
       }
 
-      const client = cleanLine(raw);
+      const client = cleanLine(reaction.text);
       if (debug) {
         (window as typeof window & { __companion?: unknown }).__companion = {
-          messages: store.get(companionMessagesAtom),
           lastPayload: payload,
-          lastRaw: raw,
+          lastText: reaction.text,
+          hasAudio: reaction.audio !== null,
           lastClient: client,
         };
       }
       if (!client) return;
 
-      const now = new Date().toISOString();
-      store.set(
-        companionMessagesAtom,
-        cap(
-          [...store.get(companionMessagesAtom), { id: crypto.randomUUID(), ts: now, action: event.action, text: client }],
-          MSG_CAP,
-        ),
-      );
+      if (!store.get(companionMutedAtom)) playVoice(client, reaction.audio);
     };
 
     const drain = async () => {

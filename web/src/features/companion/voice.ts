@@ -1,20 +1,56 @@
-// Browser text-to-speech for the companion's lines. No dependencies — the Web
-// Speech API ships in all target browsers. Best-effort: silently no-ops where
-// SpeechSynthesis is unavailable.
+// Companion voice. The reaction request already returns the spoken audio (natural
+// Kokoro voice, base64 WAV) alongside the text, so we just play it via <audio> —
+// which, unlike speechSynthesis, keeps playing in background / unfocused tabs.
+// Fallback: the browser's built-in speechSynthesis when no audio was returned
+// (TTS disabled server-side or synthesis failed).
 
-// Name fragments that identify a female voice across Windows / macOS / Chrome.
-// (Voice names are not standardised, so we match on the known ones.)
+let currentAudio: HTMLAudioElement | null = null;
+
+/** Speak the companion's line: prefer the server-provided audio, else the browser. */
+export function playVoice(text: string, audioBase64: string | null): void {
+  stopSpeaking();
+  if (audioBase64) {
+    try {
+      const audio = new Audio(`data:audio/wav;base64,${audioBase64}`);
+      currentAudio = audio;
+      const done = () => {
+        if (currentAudio === audio) currentAudio = null;
+      };
+      audio.onended = done;
+      audio.onerror = () => {
+        done();
+        speakViaBrowser(text);
+      };
+      void audio.play().catch(() => speakViaBrowser(text));
+      return;
+    } catch {
+      /* fall through to the browser voice */
+    }
+  }
+  speakViaBrowser(text);
+}
+
+export function stopSpeaking(): void {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+// ── Browser speechSynthesis fallback ─────────────────────────────────────────
+
 const FEMALE_HINTS = [
   'female',
-  'zira', 'hazel', 'susan', 'linda', 'heera', 'catherine', // Windows
-  'samantha', 'victoria', 'karen', 'moira', 'tessa', 'fiona', 'veena', // macOS
+  'zira', 'hazel', 'susan', 'linda', 'heera', 'catherine',
+  'samantha', 'victoria', 'karen', 'moira', 'tessa', 'fiona', 'veena',
   'google us english', 'google uk english female', 'jenny', 'aria', 'michelle', 'eva',
 ];
 
 let cachedVoice: SpeechSynthesisVoice | null = null;
 
-/** Choose an English female voice if one is available, else any female voice,
- * else the first voice. Returns null while the voice list is still loading. */
 function pickFemaleVoice(): SpeechSynthesisVoice | null {
   const synth = window.speechSynthesis;
   const voices = synth.getVoices();
@@ -26,8 +62,6 @@ function pickFemaleVoice(): SpeechSynthesisVoice | null {
   return female ?? pool[0] ?? null;
 }
 
-// Voices load asynchronously in some browsers — resolve once now and refresh when
-// the list arrives.
 if (typeof window !== 'undefined' && window.speechSynthesis) {
   cachedVoice = pickFemaleVoice();
   window.speechSynthesis.addEventListener('voiceschanged', () => {
@@ -35,11 +69,9 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
   });
 }
 
-export function speak(text: string): void {
+function speakViaBrowser(text: string): void {
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
   if (!synth) return;
-  // Drop anything queued/in-flight so voice never lags behind the panel when
-  // reactions arrive back-to-back.
   synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = cachedVoice ?? pickFemaleVoice();
@@ -50,10 +82,4 @@ export function speak(text: string): void {
   utterance.rate = 1.0;
   utterance.pitch = 1.0;
   synth.speak(utterance);
-}
-
-export function stopSpeaking(): void {
-  if (typeof window !== 'undefined' && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
 }

@@ -19,11 +19,3 @@ export interface CompanionEvent {
   action: CompanionActionId;
   data?: Record<string, unknown>;
 }
-
-/** A line shown in the panel — the companion's response to an action. */
-export interface CompanionMessage {
-  id: string;
-  ts: string;
-  action: CompanionActionId;
-  text: string;
-}

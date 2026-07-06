@@ -12,6 +12,7 @@ import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
 import { generateReaction, buildReactionPrompt } from './companion.js';
 import { isCompanionAction } from './companionBriefs.js';
+import { synthesize, isTtsEnabled } from './tts.js';
 import {
   sellDestinationsSchema,
   attractivityWeightsSchema,
@@ -442,6 +443,10 @@ async function main() {
   // builds `system`/`user` from its own (browser-stored) memory; we just relay to
   // Ollama and hand back the parsed JSON reaction. 502 if the model is unreachable
   // so the panel can quietly show an "offline" state instead of erroring loudly.
+  // AI companion: one call returns both the text reaction and its spoken audio.
+  // The LLM writes the line, then (if TTS is enabled) Kokoro synthesizes it to a
+  // WAV returned as base64. TTS is best-effort — if it's disabled or fails, we
+  // still return the text (audio: null) and the FE falls back to the browser voice.
   app.post('/api/companion/react', async (req, res) => {
     const { action, payload } = (req.body ?? {}) as Record<string, unknown>;
     if (!isCompanionAction(action)) {
@@ -451,7 +456,17 @@ async function main() {
     try {
       const { system, user } = buildReactionPrompt(action, data);
       const text = await generateReaction(system, user);
-      res.json({ text });
+
+      let audio: string | null = null;
+      if (isTtsEnabled() && text) {
+        try {
+          const wav = await synthesize(text);
+          audio = wav.toString('base64');
+        } catch (err) {
+          console.error('[companion] TTS failed (text still returned)', err);
+        }
+      }
+      res.json({ text, audio });
     } catch (err) {
       console.error('POST /api/companion/react failed', err);
       res.status(502).json({ error: err instanceof Error ? err.message : 'Companion error' });
