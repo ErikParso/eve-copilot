@@ -5,6 +5,7 @@ import NearMeIcon from '@mui/icons-material/NearMe';
 import { activeCharacterAtom } from '@/features/auth/atoms';
 import { ensureAccessToken } from '@/features/auth/tokenManager';
 import { setWaypoint } from '@/api/ui';
+import { dispatchCompanionEvent } from '@/features/companion/events';
 import type { ContractEndpoint } from '@/features/courierContracts/types';
 
 interface WaypointButtonProps {
@@ -46,6 +47,11 @@ export function WaypointButton({ endpoint, add = false }: WaypointButtonProps) {
     try {
       const token = await ensureAccessToken(store, active.characterId);
       await setWaypoint(destId, token, { add: shouldAdd });
+      dispatchCompanionEvent({
+        type: 'eve-action',
+        action: 'set-waypoint',
+        target: endpoint.systemName ?? endpoint.name,
+      });
     } catch (err) {
       // Best-effort UI action; nothing to recover.
       console.error('Failed to set in-game waypoint:', err);

@@ -10,6 +10,7 @@ import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
+import { generateReaction } from './companion.js';
 import {
   sellDestinationsSchema,
   attractivityWeightsSchema,
@@ -433,6 +434,24 @@ async function main() {
     } catch (err) {
       console.error('GET /api/kills/gates failed', err);
       res.status(500).json({ error: err instanceof Error ? err.message : 'Internal error' });
+    }
+  });
+
+  // AI companion: proxy an assembled prompt to the local Ollama model. The client
+  // builds `system`/`user` from its own (browser-stored) memory; we just relay to
+  // Ollama and hand back the parsed JSON reaction. 502 if the model is unreachable
+  // so the panel can quietly show an "offline" state instead of erroring loudly.
+  app.post('/api/companion/react', async (req, res) => {
+    const { system, user, format } = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof system !== 'string' || typeof user !== 'string') {
+      return res.status(400).json({ error: 'system and user strings are required' });
+    }
+    try {
+      const json = await generateReaction(system, user, format ?? 'json');
+      res.json({ json });
+    } catch (err) {
+      console.error('POST /api/companion/react failed', err);
+      res.status(502).json({ error: err instanceof Error ? err.message : 'Companion error' });
     }
   });
 

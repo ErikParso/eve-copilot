@@ -21,6 +21,8 @@ import { AuthControls } from '@/features/auth/AuthControls';
 import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoller';
 import { useCharacterWalletPoller } from '@/features/auth/useCharacterWalletPoller';
 import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
+import { useCompanion } from '@/features/companion/useCompanion';
+import { CompanionPanel } from '@/features/companion/components/CompanionPanel';
 import { AdSenseScriptLoader } from './AdSenseScriptLoader';
 
 interface NavItem {
@@ -42,6 +44,7 @@ export function Layout() {
   useCharacterStatusPoller();
   useCharacterWalletPoller();
   useHaulingSearchController();
+  useCompanion();
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -147,6 +150,8 @@ export function Layout() {
       >
         <Outlet />
       </Container>
+
+      <CompanionPanel />
     </Box>
   );
 }
