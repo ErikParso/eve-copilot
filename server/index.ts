@@ -10,7 +10,8 @@ import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
-import { generateReaction } from './companion.js';
+import { generateReaction, buildReactionPrompt } from './companion.js';
+import { isCompanionAction } from './companionBriefs.js';
 import {
   sellDestinationsSchema,
   attractivityWeightsSchema,
@@ -442,11 +443,13 @@ async function main() {
   // Ollama and hand back the parsed JSON reaction. 502 if the model is unreachable
   // so the panel can quietly show an "offline" state instead of erroring loudly.
   app.post('/api/companion/react', async (req, res) => {
-    const { system, user } = (req.body ?? {}) as Record<string, unknown>;
-    if (typeof system !== 'string' || typeof user !== 'string') {
-      return res.status(400).json({ error: 'system and user strings are required' });
+    const { action, payload } = (req.body ?? {}) as Record<string, unknown>;
+    if (!isCompanionAction(action)) {
+      return res.status(400).json({ error: 'unknown or missing action' });
     }
+    const data = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
     try {
+      const { system, user } = buildReactionPrompt(action, data);
       const text = await generateReaction(system, user);
       res.json({ text });
     } catch (err) {

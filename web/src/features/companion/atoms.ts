@@ -1,9 +1,10 @@
+import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { CompanionMessage } from './types';
 
-// The companion's output feed persists in the browser (no server disk), capped on
-// write (see useCompanion) so localStorage never overflows.
-export const companionMessagesAtom = atomWithStorage<CompanionMessage[]>('companion.messages', []);
+// The companion's output feed is in-memory only — it starts empty on every reload
+// (no persistence), capped on write (see useCompanion) so it never grows unbounded.
+export const companionMessagesAtom = atom<CompanionMessage[]>([]);
 
 /** Flip to true (in the console or via `localStorage`) to log every assembled
  * context + token estimate and expose live state on `window.__companion`. */

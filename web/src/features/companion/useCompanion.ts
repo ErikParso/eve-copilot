@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useStore } from 'jotai';
 import { requestReaction } from './api';
 import { dispatchCompanionEvent, subscribeCompanionEvents } from './events';
-import { buildReactionPrompt } from './prompts';
+import { buildBaseContext } from './context';
 import { companionDebugAtom, companionMessagesAtom, MSG_CAP } from './atoms';
 import type { CompanionEvent } from './types';
 
@@ -35,20 +35,15 @@ export function useCompanion(): void {
 
     const handle = async (event: CompanionEvent) => {
       const debug = store.get(companionDebugAtom);
-      const { system, user } = buildReactionPrompt(event);
+      // Merge the always-present base context with this action's own data. The
+      // server turns this whole object into the DATA payload of the prompt.
+      const payload = { ...buildBaseContext(store), ...(event.data ?? {}) };
 
-      if (debug) {
-        console.debug('[companion] context', {
-          action: event.action,
-          system,
-          user,
-          estTokens: Math.ceil((system + user).length / 4),
-        });
-      }
+      if (debug) console.debug('[companion] request', { action: event.action, payload });
 
       let raw: string;
       try {
-        raw = await requestReaction(system, user);
+        raw = await requestReaction(event.action, payload);
       } catch (err) {
         // Model offline / unreachable — stay quiet, panel shows its idle state.
         if (debug) console.debug('[companion] request failed (offline?)', err);
@@ -60,7 +55,7 @@ export function useCompanion(): void {
       if (debug) {
         (window as typeof window & { __companion?: unknown }).__companion = {
           messages: store.get(companionMessagesAtom),
-          lastContext: { system, user },
+          lastPayload: payload,
           lastRaw: raw,
           lastClient: client,
         };

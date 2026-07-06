@@ -10,6 +10,23 @@
 
 // Use 127.0.0.1, not `localhost`: on Windows, Node resolves `localhost` to IPv6
 // (::1) first, but Ollama binds IPv4 only — `localhost` there gives ECONNREFUSED.
+import { GLOBAL_CONTEXT } from './companionPersona.js';
+import { BRIEFS, type CompanionActionId } from './companionBriefs.js';
+
+/**
+ * Assemble the model prompt for one action. `system` is the global persona; `user`
+ * is the action's brief (which includes the required response shape) followed by
+ * the DATA payload — the ambient pilot context plus this action's specific facts,
+ * merged client-side. This is where all prompt logic now lives (moved off the FE).
+ */
+export function buildReactionPrompt(
+  action: CompanionActionId,
+  payload: Record<string, unknown>,
+): { system: string; user: string } {
+  const user = `BRIEF: ${BRIEFS[action]}\nDATA: ${JSON.stringify(payload)}`;
+  return { system: GLOBAL_CONTEXT, user };
+}
+
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 const COMPANION_MODEL = process.env.COMPANION_MODEL ?? 'qwen2.5:1.5b';
 

@@ -1,12 +1,19 @@
-// FE → server proxy → Ollama. We send the fully-assembled prompt; the server
-// relays to the local model and returns the plain-text reaction (one sentence).
+// FE → server. We send only the action + its payload (base context merged with
+// the action's data). The server owns the persona, briefs and prompt assembly, and
+// returns the plain-text reaction (one line).
+import type { CompanionActionId } from './types';
+
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
-export async function requestReaction(system: string, user: string, signal?: AbortSignal): Promise<string> {
+export async function requestReaction(
+  action: CompanionActionId,
+  payload: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<string> {
   const res = await fetch(`${API_BASE}/api/companion/react`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system, user }),
+    body: JSON.stringify({ action, payload }),
     signal,
   });
   if (!res.ok) {
