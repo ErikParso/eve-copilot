@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   Alert,
   Box,
@@ -27,6 +27,7 @@ import { sortCombined } from './combined';
 const MAX_PAGEABLE = 1000;
 import { CombinedGrid } from './components/CombinedGrid';
 import { preferencesAtom } from '@/features/preferences/atoms';
+import { companionBottomOffsetAtom } from '@/features/companion/atoms';
 import { RouteTypeSelect } from './components/RouteTypeSelect';
 import { ContractTypeSelect } from './components/ContractTypeSelect';
 import { AttractivityWeightsControl } from './components/AttractivityWeightsControl';
@@ -139,6 +140,26 @@ export function CourierContractsPage() {
   // (losing the cross-kind order), so re-sort the page by attractivity for display.
   // Pinned rows render in their own section above and are NOT paged/re-sorted here.
   const sortedRows = useMemo(() => sortCombined(availableRows, 'attractivity'), [availableRows]);
+
+  const setBottomOffset = useSetAtom(companionBottomOffsetAtom);
+
+  useEffect(() => {
+    if (sortedRows.length > 0) {
+      if (showChart) {
+        setBottomOffset('expanded');
+      } else {
+        setBottomOffset('fab');
+      }
+    } else {
+      setBottomOffset('default');
+    }
+  }, [sortedRows.length, showChart, setBottomOffset]);
+
+  useEffect(() => {
+    return () => {
+      setBottomOffset('default');
+    };
+  }, [setBottomOffset]);
 
   // Pager: cap navigation at MAX_PAGEABLE even if the server scored more.
   const pageCount = Math.max(1, Math.ceil(Math.min(total, MAX_PAGEABLE) / Math.max(1, pageSize)));

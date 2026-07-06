@@ -12,3 +12,7 @@ export const companionDebugAtom = atomWithStorage<boolean>('companion.debug', fa
 /** Whether the companion voice is muted (persisted; no UI toggle — set via
  * `localStorage['companion.muted']`). */
 export const companionMutedAtom = atomWithStorage<boolean>('companion.muted', false);
+
+/** Bottom offset state for the companion orb to position it relative to other page components. */
+export const companionBottomOffsetAtom = atom<'default' | 'fab' | 'expanded'>('default');
+
