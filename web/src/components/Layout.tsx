@@ -22,6 +22,7 @@ import { useCharacterStatusPoller } from '@/features/auth/useCharacterStatusPoll
 import { useCharacterWalletPoller } from '@/features/auth/useCharacterWalletPoller';
 import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
 import { useCompanion } from '@/features/companion/useCompanion';
+import { CompanionOrb } from '@/features/companion/components/CompanionOrb';
 import { AdSenseScriptLoader } from './AdSenseScriptLoader';
 
 interface NavItem {
@@ -149,6 +150,8 @@ export function Layout() {
       >
         <Outlet />
       </Container>
+
+      <CompanionOrb />
     </Box>
   );
 }

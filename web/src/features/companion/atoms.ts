@@ -1,4 +1,9 @@
+import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
+
+/** True while a reaction request is in flight (LLM + TTS) — drives the orb's
+ * "thinking" state. In-memory. */
+export const companionBusyAtom = atom(false);
 
 /** Flip to true (in the console or via `localStorage`) to log each reaction request
  * and expose live state on `window.__companion`. */

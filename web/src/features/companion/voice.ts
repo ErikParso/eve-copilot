@@ -3,8 +3,35 @@
 // which, unlike speechSynthesis, keeps playing in background / unfocused tabs.
 // Fallback: the browser's built-in speechSynthesis when no audio was returned
 // (TTS disabled server-side or synthesis failed).
+//
+// We also expose a "speaking" signal (pub/sub) so UI — the reactor orb — can
+// animate a talking state.
 
 let currentAudio: HTMLAudioElement | null = null;
+
+// ── Speaking state (for the orb) ─────────────────────────────────────────────
+type SpeakingListener = (speaking: boolean) => void;
+const speakingListeners = new Set<SpeakingListener>();
+let speaking = false;
+
+function setSpeaking(value: boolean): void {
+  if (speaking === value) return;
+  speaking = value;
+  for (const l of speakingListeners) l(value);
+}
+
+export function isSpeaking(): boolean {
+  return speaking;
+}
+
+/** Subscribe to talking on/off. Fires immediately with the current value. */
+export function onSpeakingChange(listener: SpeakingListener): () => void {
+  speakingListeners.add(listener);
+  listener(speaking);
+  return () => speakingListeners.delete(listener);
+}
+
+// ── Playback ─────────────────────────────────────────────────────────────────
 
 /** Speak the companion's line: prefer the server-provided audio, else the browser. */
 export function playVoice(text: string, audioBase64: string | null): void {
@@ -15,13 +42,18 @@ export function playVoice(text: string, audioBase64: string | null): void {
       currentAudio = audio;
       const done = () => {
         if (currentAudio === audio) currentAudio = null;
+        setSpeaking(false);
       };
+      audio.onplay = () => setSpeaking(true);
       audio.onended = done;
       audio.onerror = () => {
         done();
         speakViaBrowser(text);
       };
-      void audio.play().catch(() => speakViaBrowser(text));
+      void audio.play().catch(() => {
+        setSpeaking(false);
+        speakViaBrowser(text);
+      });
       return;
     } catch {
       /* fall through to the browser voice */
@@ -38,6 +70,7 @@ export function stopSpeaking(): void {
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
+  setSpeaking(false);
 }
 
 // ── Browser speechSynthesis fallback ─────────────────────────────────────────
@@ -81,5 +114,8 @@ function speakViaBrowser(text: string): void {
   }
   utterance.rate = 1.0;
   utterance.pitch = 1.0;
+  utterance.onstart = () => setSpeaking(true);
+  utterance.onend = () => setSpeaking(false);
+  utterance.onerror = () => setSpeaking(false);
   synth.speak(utterance);
 }

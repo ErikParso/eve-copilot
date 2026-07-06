@@ -4,7 +4,7 @@ import { requestReaction } from './api';
 import { dispatchCompanionEvent, subscribeCompanionEvents } from './events';
 import { buildBaseContext } from './context';
 import { playVoice } from './voice';
-import { companionDebugAtom, companionMutedAtom } from './atoms';
+import { companionBusyAtom, companionDebugAtom, companionMutedAtom } from './atoms';
 import type { CompanionEvent } from './types';
 
 /** Tidy the model's plain-text reply into a single clean line: first non-empty
@@ -40,14 +40,18 @@ export function useCompanion(): void {
 
       if (debug) console.debug('[companion] request', { action: event.action, payload });
 
+      // "thinking" while the request is in flight (drives the orb).
+      store.set(companionBusyAtom, true);
       let reaction: Awaited<ReturnType<typeof requestReaction>>;
       try {
         reaction = await requestReaction(event.action, payload);
       } catch (err) {
         // Model offline / unreachable — stay quiet.
+        store.set(companionBusyAtom, false);
         if (debug) console.debug('[companion] request failed (offline?)', err);
         return;
       }
+      store.set(companionBusyAtom, false);
 
       const client = cleanLine(reaction.text);
       if (debug) {
