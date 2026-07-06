@@ -50,7 +50,7 @@ class Particle {
     this.pg = pg;
     this.progress = Math.random();
     this.speed = 0.002 + Math.random() * 0.003;
-    this.sz = 1.2 + Math.random() * 1;
+    this.sz = 2.0 + Math.random() * 1.5;
     this.el = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     this.el.setAttribute('r', this.sz.toString());
     this.el.setAttribute('fill', 'var(--cy-b)');
@@ -95,6 +95,10 @@ const naF = keyframes`0% { opacity: 0.12; } 100% { opacity: 0.55; }`;
 const rP = keyframes`0%, 100% { opacity: 0.12; } 50% { opacity: 0.35; }`;
 const eM = keyframes`0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -20; }`;
 const vExp = keyframes`0% { r: 16px; opacity: 0.65; stroke-width: 1.8px; } 100% { r: 52px; opacity: 0; stroke-width: 0.3px; }`;
+const coreHalo = keyframes`
+  0%, 100% { transform: scale(0.85); opacity: 0.35; }
+  50% { transform: scale(1.35); opacity: 0.9; }
+`;
 
 const Svg = styled('svg')`
   --cy: #00e5ff;
@@ -135,6 +139,13 @@ const Svg = styled('svg')`
   & .pad {
     transition: fill 0.8s ease;
   }
+  & .nd-core-halo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: ${coreHalo} 2s ease-in-out infinite;
+    stroke: var(--cy);
+    transition: stroke 0.8s ease, opacity 0.8s ease;
+  }
 
   /* === DISABLED === */
   &[data-state="disabled"] {
@@ -153,6 +164,7 @@ const Svg = styled('svg')`
     & .bg-gl { opacity: 0; }
     & .pad { fill: var(--off-nd); }
     & .align-dot { fill: #192430; }
+    & .nd-core-halo { animation: none; stroke: var(--off-tr); opacity: 0.4; }
   }
 
   /* === STANDBY === */
@@ -172,6 +184,7 @@ const Svg = styled('svg')`
     & .bg-gl { opacity: 0.25; animation: ${sPulse} 4s ease-in-out infinite; }
     & .pad { fill: var(--cy-d); }
     & .align-dot { fill: #0a2830; }
+    & .nd-core-halo { animation-duration: 3s; stroke: var(--cy-m); }
   }
 
   /* === THINKING === */
@@ -191,6 +204,7 @@ const Svg = styled('svg')`
     & .bg-gl { opacity: 0.45; animation: ${tPulse} 1.4s ease-in-out infinite; }
     & .pad { fill: var(--cy-m); }
     & .align-dot { fill: var(--cy-d); }
+    & .nd-core-halo { animation-duration: 1.5s; stroke: var(--cy); }
   }
 
   /* === TALKING === */
@@ -211,6 +225,7 @@ const Svg = styled('svg')`
     & .vw { animation: ${vExp} 0.7s ease-out infinite; }
     & .pad { fill: var(--cy); }
     & .align-dot { fill: var(--cy-d); }
+    & .nd-core-halo { animation-duration: 0.8s; stroke: var(--cy-b); }
   }
 `;
 
@@ -427,18 +442,18 @@ export function CompanionOrb() {
               <path className="tr" d="M96,60 V22" strokeWidth=".55"/>
 
               {/* NNW sector */}
-              <path className="tr" d="M94,89 V66 L78,50 H52" strokeWidth="1"/>
+              <path className="tr" d="M94,89 V66 L78,50 H52" strokeWidth="3.5"/>
               <path className="tr" d="M78,50 V26" strokeWidth=".6"/>
               <path className="tr" d="M52,50 L38,36" strokeWidth=".45"/>
               <path className="tr" d="M36,30 H18" strokeWidth=".35"/>
 
               {/* NNE sector */}
-              <path className="tr" d="M106,89 V72 L122,56 V34" strokeWidth=".95"/>
+              <path className="tr" d="M106,89 V72 L122,56 V34" strokeWidth="3.5"/>
               <path className="tr" d="M122,56 H138" strokeWidth=".5"/>
               <path className="tr" d="M140,42 L152,30" strokeWidth=".4"/>
 
               {/* ENE sector */}
-              <path className="tr" d="M111,94 H134 V68 L148,54" strokeWidth=".9"/>
+              <path className="tr" d="M111,94 H134 V68 L148,54" strokeWidth="3.0"/>
               <path className="tr" d="M150,50 V34 H168" strokeWidth=".45"/>
 
               {/* E sector */}
@@ -447,12 +462,12 @@ export function CompanionOrb() {
               <path className="tr" d="M170,96 V80 H184" strokeWidth=".4"/>
 
               {/* ESE sector */}
-              <path className="tr" d="M111,106 H132 V130 H158 V152" strokeWidth=".8"/>
+              <path className="tr" d="M111,106 H132 V130 H158 V152" strokeWidth="3.0"/>
               <path className="tr" d="M162,132 V146 H176" strokeWidth=".42"/>
               <path className="tr" d="M174,140 H190" strokeWidth=".35"/>
 
               {/* SSE sector */}
-              <path className="tr" d="M106,111 V132 L122,148 V172" strokeWidth=".9"/>
+              <path className="tr" d="M106,111 V132 L122,148 V172" strokeWidth="3.0"/>
               <path className="tr" d="M126,154 H148" strokeWidth=".45"/>
 
               {/* S sector */}
@@ -460,13 +475,13 @@ export function CompanionOrb() {
               <path className="tr" d="M104,144 V180" strokeWidth=".55"/>
 
               {/* SSW sector */}
-              <path className="tr" d="M94,111 V138 H68 V162" strokeWidth="1"/>
+              <path className="tr" d="M94,111 V138 H68 V162" strokeWidth="3.5"/>
               <path className="tr" d="M80,138 V150" strokeWidth=".5"/>
               <path className="tr" d="M64,142 V168" strokeWidth=".45"/>
               <path className="tr" d="M42,164 L30,176" strokeWidth=".38"/>
 
               {/* WSW sector */}
-              <path className="tr" d="M89,106 H66 L50,122 H28" strokeWidth=".9"/>
+              <path className="tr" d="M89,106 H66 L50,122 H28" strokeWidth="3.0"/>
               <path className="tr" d="M66,112 H44" strokeWidth=".5"/>
               <path className="tr" d="M28,122 V148" strokeWidth=".4"/>
 
@@ -476,7 +491,7 @@ export function CompanionOrb() {
               <path className="tr" d="M54,92 H24" strokeWidth=".4"/>
 
               {/* WNW sector */}
-              <path className="tr" d="M89,94 H66 V72 H42 L28,58" strokeWidth="1"/>
+              <path className="tr" d="M89,94 H66 V72 H42 L28,58" strokeWidth="3.5"/>
               <path className="tr" d="M42,72 V54" strokeWidth=".5"/>
 
               {/* Energy Flow Overlays */}
@@ -484,10 +499,10 @@ export function CompanionOrb() {
               <path className="ef" d="M100,111 V186" stroke="var(--cy-b)" strokeWidth="1.6" strokeDasharray="4 16" filter="url(#gs)" style={{ animationDelay: '.15s' }}/>
               <path className="ef" d="M89,100 H12" stroke="var(--cy-b)" strokeWidth="1.6" strokeDasharray="4 16" filter="url(#gs)" style={{ animationDelay: '.35s' }}/>
               <path className="ef" d="M111,100 H188" stroke="var(--cy-b)" strokeWidth="1.6" strokeDasharray="4 16" filter="url(#gs)" style={{ animationDelay: '.5s' }}/>
-              <path className="ef" d="M94,89 V66 L78,50 H52" stroke="var(--cy-b)" strokeWidth="1.1" strokeDasharray="3 17" filter="url(#gs)" style={{ animationDelay: '.1s' }}/>
-              <path className="ef" d="M106,89 V72 L122,56 V34" stroke="var(--cy-b)" strokeWidth="1.1" strokeDasharray="3 17" filter="url(#gs)" style={{ animationDelay: '.25s' }}/>
-              <path className="ef" d="M89,106 H66 L50,122 H28" stroke="var(--cy-b)" strokeWidth="1" strokeDasharray="3 17" filter="url(#gs)" style={{ animationDelay: '.4s' }}/>
-              <path className="ef" d="M111,94 H134 V68 L148,54" stroke="var(--cy-b)" strokeWidth="1" strokeDasharray="3 17" filter="url(#gs)" style={{ animationDelay: '.55s' }}/>
+              <path className="ef" d="M94,89 V66 L78,50 H52" stroke="var(--cy-b)" strokeWidth="3.5" strokeDasharray="10 30" filter="url(#gs)" style={{ animationDelay: '.1s' }}/>
+              <path className="ef" d="M106,89 V72 L122,56 V34" stroke="var(--cy-b)" strokeWidth="3.5" strokeDasharray="10 30" filter="url(#gs)" style={{ animationDelay: '.25s' }}/>
+              <path className="ef" d="M89,106 H66 L50,122 H28" stroke="var(--cy-b)" strokeWidth="3.0" strokeDasharray="10 30" filter="url(#gs)" style={{ animationDelay: '.4s' }}/>
+              <path className="ef" d="M111,94 H134 V68 L148,54" stroke="var(--cy-b)" strokeWidth="3.0" strokeDasharray="10 30" filter="url(#gs)" style={{ animationDelay: '.55s' }}/>
             </g>
 
             {/* Neural Arcs */}
@@ -508,9 +523,13 @@ export function CompanionOrb() {
             <g filter="url(#gs)">
               {/* Vias */}
               <circle className="nd" cx="94"  cy="66"  r="2.8"/>
-              <circle className="nd" cx="78"  cy="50"  r="2.6"/>
+              {/* Core Node 1: Upper-Left Junction */}
+              <circle className="nd-core-halo" cx="78" cy="50" r="11.0" fill="none" strokeWidth="1.8" />
+              <circle className="nd" cx="78"  cy="50"  r="5.5"/>
               <circle className="nd" cx="106" cy="72"  r="2.5"/>
-              <circle className="nd" cx="122" cy="56"  r="2.6"/>
+              {/* Core Node 2: Upper-Right Junction */}
+              <circle className="nd-core-halo" cx="122" cy="56" r="11.0" fill="none" strokeWidth="1.8" />
+              <circle className="nd" cx="122" cy="56"  r="5.5"/>
               <circle className="nd" cx="66"  cy="94"  r="2.8"/>
               <circle className="nd" cx="66"  cy="72"  r="2.5"/>
               <circle className="nd" cx="42"  cy="72"  r="2.4"/>
@@ -519,7 +538,9 @@ export function CompanionOrb() {
               <circle className="nd" cx="66"  cy="106" r="2.5"/>
               <circle className="nd" cx="50"  cy="122" r="2.6"/>
               <circle className="nd" cx="132" cy="106" r="2.4"/>
-              <circle className="nd" cx="132" cy="130" r="2.5"/>
+              {/* Core Node 3: Lower-Right Junction */}
+              <circle className="nd-core-halo" cx="132" cy="130" r="11.0" fill="none" strokeWidth="1.8" />
+              <circle className="nd" cx="132" cy="130" r="5.5"/>
               <circle className="nd" cx="158" cy="130" r="2.4"/>
               <circle className="nd" cx="94"  cy="138" r="2.6"/>
               <circle className="nd" cx="68"  cy="138" r="2.5"/>
@@ -590,9 +611,9 @@ export function CompanionOrb() {
               <line className="pin-s" x1="89"  y1="94" x2="86"  y2="94" strokeWidth=".8"/>
               <line className="pin-s" x1="89"  y1="100" x2="86"  y2="100" strokeWidth=".8"/>
               <line className="pin-s" x1="89"  y1="106" x2="86"  y2="106" strokeWidth=".8"/>
-              <line className="pin-s" x1="111" y1="94" x2="114" y2="94" strokeWidth=".8"/>
-              <line className="pin-s" x1="111" y1="100" x2="114" y2="100" strokeWidth=".8"/>
-              <line className="pin-s" x1="111" y1="106" x2="114" y2="106" strokeWidth=".8"/>
+              <line className="pin-s" x1="111" y1="94" x2="114"  y2="94" strokeWidth=".8"/>
+              <line className="pin-s" x1="111" y1="100" x2="114"  y2="100" strokeWidth=".8"/>
+              <line className="pin-s" x1="111" y1="106" x2="114"  y2="106" strokeWidth=".8"/>
 
               {/* Inner pattern */}
               <rect className="core-die" x="92" y="92" width="16" height="16" rx=".5" strokeWidth=".4"/>
