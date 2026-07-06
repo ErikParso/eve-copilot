@@ -94,7 +94,7 @@ const nGlowF = keyframes`0%, 100% { opacity: 0.55; } 50% { opacity: 1; }`;
 const naF = keyframes`0% { opacity: 0.12; } 100% { opacity: 0.55; }`;
 const rP = keyframes`0%, 100% { opacity: 0.12; } 50% { opacity: 0.35; }`;
 const eM = keyframes`0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -20; }`;
-const vExp = keyframes`0% { r: 16px; opacity: 0.65; stroke-width: 1.8px; } 100% { r: 52px; opacity: 0; stroke-width: 0.3px; }`;
+const vExp = keyframes`0% { r: 16px; opacity: 0.95; stroke-width: 10px; } 100% { r: 92px; opacity: 0; stroke-width: 1px; }`;
 const coreHalo = keyframes`
   0%, 100% { transform: scale(0.85); opacity: 0.35; }
   50% { transform: scale(1.35); opacity: 0.9; }
