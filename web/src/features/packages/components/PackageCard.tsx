@@ -291,7 +291,7 @@ export const PackageCard = memo(function PackageCard({
 							</Typography>
 						</Box>
 					) : (
-						<Endpoint label="Buy" endpoint={row.source} action={<WaypointButton endpoint={row.source} add={false} />} />
+						<Endpoint label="Buy" endpoint={row.source} action={<WaypointButton endpoint={row.source} add={false} waypointFor="pickup" />} />
 					)}
 					<Endpoint
 						label="Sell"
@@ -305,7 +305,7 @@ export const PackageCard = memo(function PackageCard({
 										</IconButton>
 									</Tooltip>
 								)}
-								<WaypointButton endpoint={row.dest} add={true} />
+								<WaypointButton endpoint={row.dest} add={true} waypointFor="dropoff" />
 							</Box>
 						}
 					/>

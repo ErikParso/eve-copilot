@@ -16,9 +16,11 @@ interface WaypointButtonProps {
    * In either case, holding Shift will perform the opposite action.
    */
   add?: boolean;
+  /** Which leg of the journey this endpoint is — selects the companion action. */
+  waypointFor: 'pickup' | 'dropoff';
 }
 
-export function WaypointButton({ endpoint, add = false }: WaypointButtonProps) {
+export function WaypointButton({ endpoint, add = false, waypointFor }: WaypointButtonProps) {
   const store = useStore();
   const active = useAtomValue(activeCharacterAtom);
   const [busy, setBusy] = useState(false);
@@ -48,9 +50,8 @@ export function WaypointButton({ endpoint, add = false }: WaypointButtonProps) {
       const token = await ensureAccessToken(store, active.characterId);
       await setWaypoint(destId, token, { add: shouldAdd });
       dispatchCompanionEvent({
-        type: 'eve-action',
-        action: 'set-waypoint',
-        target: endpoint.systemName ?? endpoint.name,
+        action: waypointFor === 'pickup' ? 'set-waypoint-pickup' : 'set-waypoint-dropoff',
+        data: { target: endpoint.systemName ?? endpoint.name },
       });
     } catch (err) {
       // Best-effort UI action; nothing to recover.

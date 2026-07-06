@@ -1,30 +1,29 @@
-// AI companion — shared types. The companion reacts to what the pilot does with a
-// single spoken line. Character development (memory, self-summary, reflection) is
-// intentionally out for now — this is the minimal action→response pipe.
+// AI companion — shared types. The companion reacts to a pilot ACTION with a single
+// spoken line. Each action is its own id (no merging) with its own brief (briefs.ts);
+// the global identity lives in persona.ts. Character development (memory, reflection)
+// is intentionally out for now — this is the minimal action→response pipe.
 
-/** The events the companion reacts to. Only `app-load` and `eve-action` are wired
- * in the prototype; the rest are declared so the taxonomy is stable as we add
- * them. Two eventual classes: intent (pilot did something → always responds) and
- * ambient (`items-updated` → may stay silent). */
-export type CompanionEventType =
+/** Every action the companion can react to. Add one here + a brief in briefs.ts +
+ * a dispatch site, and it's wired. Kept flat and separate on purpose. */
+export type CompanionActionId =
   | 'app-load'
-  | 'items-updated'
-  | 'opportunity-pinned'
-  | 'stage-changed'
-  | 'rerouted'
-  | 'eve-action';
+  | 'set-waypoint-pickup'
+  | 'set-waypoint-dropoff'
+  | 'open-market'
+  | 'open-contract'
+  | 'open-bundle';
 
-export type EveAction = 'set-waypoint' | 'open-market' | 'open-contract';
+/** A dispatched event: which action + its flat DATA facts (item/system names,
+ * numbers). `data` shape is per-action, described in that action's brief. */
+export interface CompanionEvent {
+  action: CompanionActionId;
+  data?: Record<string, unknown>;
+}
 
-/** A discriminated union of every event shape. Grows as we wire more events. */
-export type CompanionEvent =
-  | { type: 'app-load' }
-  | { type: 'eve-action'; action: EveAction; target: string };
-
-/** A line shown in the panel — the companion's response to an event. */
+/** A line shown in the panel — the companion's response to an action. */
 export interface CompanionMessage {
   id: string;
   ts: string;
-  eventType: CompanionEventType;
+  action: CompanionActionId;
   text: string;
 }

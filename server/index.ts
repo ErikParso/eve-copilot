@@ -442,13 +442,13 @@ async function main() {
   // Ollama and hand back the parsed JSON reaction. 502 if the model is unreachable
   // so the panel can quietly show an "offline" state instead of erroring loudly.
   app.post('/api/companion/react', async (req, res) => {
-    const { system, user, format } = (req.body ?? {}) as Record<string, unknown>;
+    const { system, user } = (req.body ?? {}) as Record<string, unknown>;
     if (typeof system !== 'string' || typeof user !== 'string') {
       return res.status(400).json({ error: 'system and user strings are required' });
     }
     try {
-      const json = await generateReaction(system, user, format ?? 'json');
-      res.json({ json });
+      const text = await generateReaction(system, user);
+      res.json({ text });
     } catch (err) {
       console.error('POST /api/companion/react failed', err);
       res.status(502).json({ error: err instanceof Error ? err.message : 'Companion error' });

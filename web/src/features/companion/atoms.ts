@@ -9,5 +9,8 @@ export const companionMessagesAtom = atomWithStorage<CompanionMessage[]>('compan
  * context + token estimate and expose live state on `window.__companion`. */
 export const companionDebugAtom = atomWithStorage<boolean>('companion.debug', false);
 
+/** Whether text-to-speech is muted (persisted across sessions). */
+export const companionMutedAtom = atomWithStorage<boolean>('companion.muted', false);
+
 /** Max stored panel messages. */
 export const MSG_CAP = 50;

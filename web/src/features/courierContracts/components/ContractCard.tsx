@@ -257,13 +257,13 @@ export const ContractCard = memo(function ContractCard({
           <Endpoint
             label="From"
             endpoint={row.pickup}
-            action={<WaypointButton endpoint={row.pickup} add={false} />}
+            action={<WaypointButton endpoint={row.pickup} add={false} waypointFor="pickup" />}
           />
         )}
         <Endpoint
           label="To"
           endpoint={row.dropoff}
-          action={<WaypointButton endpoint={row.dropoff} add={true} />}
+          action={<WaypointButton endpoint={row.dropoff} add={true} waypointFor="dropoff" />}
         />
 
         <RouteCell row={row} trailing={<DangerText score={row.danger} steps={row.dangerSteps} />} />

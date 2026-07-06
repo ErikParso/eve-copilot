@@ -2,16 +2,20 @@ import { useEffect, useRef } from 'react';
 import { useStore } from 'jotai';
 import { requestReaction } from './api';
 import { dispatchCompanionEvent, subscribeCompanionEvents } from './events';
-import { buildReactionPrompt, REACTION_SCHEMA } from './prompts';
+import { buildReactionPrompt } from './prompts';
 import { companionDebugAtom, companionMessagesAtom, MSG_CAP } from './atoms';
 import type { CompanionEvent } from './types';
 
-/** Pull the spoken line out of the model's JSON. A tiny model can emit an odd
- * shape; anything unusable becomes a silent no-op. */
-function parseClient(raw: unknown): string | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const client = (raw as Record<string, unknown>).client;
-  return typeof client === 'string' && client.trim() ? client.trim() : null;
+/** Tidy the model's plain-text reply into a single clean line: first non-empty
+ * line, stripped of wrapping quotes / stray label. Empty → silent no-op. */
+function cleanLine(text: string): string | null {
+  const first = text
+    .split('\n')
+    .map((s) => s.trim())
+    .find(Boolean);
+  if (!first) return null;
+  const stripped = first.replace(/^["'`]+|["'`]+$/g, '').trim();
+  return stripped || null;
 }
 
 const cap = <T>(arr: T[], max: number): T[] => (arr.length > max ? arr.slice(arr.length - max) : arr);
@@ -35,16 +39,16 @@ export function useCompanion(): void {
 
       if (debug) {
         console.debug('[companion] context', {
-          event: event.type,
+          action: event.action,
           system,
           user,
           estTokens: Math.ceil((system + user).length / 4),
         });
       }
 
-      let raw: unknown;
+      let raw: string;
       try {
-        raw = await requestReaction(system, user, REACTION_SCHEMA);
+        raw = await requestReaction(system, user);
       } catch (err) {
         // Model offline / unreachable — stay quiet, panel shows its idle state.
         if (debug) console.debug('[companion] request failed (offline?)', err);
@@ -52,7 +56,7 @@ export function useCompanion(): void {
       }
       if (disposed) return;
 
-      const client = parseClient(raw);
+      const client = cleanLine(raw);
       if (debug) {
         (window as typeof window & { __companion?: unknown }).__companion = {
           messages: store.get(companionMessagesAtom),
@@ -67,7 +71,7 @@ export function useCompanion(): void {
       store.set(
         companionMessagesAtom,
         cap(
-          [...store.get(companionMessagesAtom), { id: crypto.randomUUID(), ts: now, eventType: event.type, text: client }],
+          [...store.get(companionMessagesAtom), { id: crypto.randomUUID(), ts: now, action: event.action, text: client }],
           MSG_CAP,
         ),
       );
@@ -91,7 +95,7 @@ export function useCompanion(): void {
     });
 
     // Greet on load (once per mount).
-    dispatchCompanionEvent({ type: 'app-load' });
+    dispatchCompanionEvent({ action: 'app-load' });
 
     return () => {
       disposed = true;
