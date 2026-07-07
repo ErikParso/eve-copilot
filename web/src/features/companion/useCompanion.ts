@@ -21,14 +21,16 @@ function cleanLine(text: string): string | null {
 }
 
 /**
- * Mount once (in Layout). Subscribes to companion events, processes them one at a
- * time (the model is single and slow), and speaks each response (voice-only — no
- * UI). Also fires the one-time `app-load` greeting.
+ * Mount once (in Layout). Subscribes to companion events and fires ONE request per
+ * event. Concurrency is enforced on the SERVER (single-flight): while a reaction is
+ * generating, the server replies "occupied" (429) and the FE ignores it — so rapid
+ * clicks produce at most one reaction. Speaks each response (voice-only). Also fires
+ * the one-time `app-load` greeting.
  */
 export function useCompanion(): void {
   const store = useStore();
-  const queue = useRef<CompanionEvent[]>([]);
-  const running = useRef(false);
+  // Count of in-flight requests, to drive the orb's "thinking" state.
+  const inFlight = useRef(0);
   // Persists across StrictMode's mount→unmount→remount so we greet exactly once.
   const greeted = useRef(false);
 
@@ -43,18 +45,20 @@ export function useCompanion(): void {
 
       if (debug) console.debug('[companion] request', { action: event.action, payload });
 
-      // "thinking" while the request is in flight (drives the orb).
+      // "thinking" while any request is in flight (drives the orb).
+      inFlight.current += 1;
       store.set(companionBusyAtom, true);
       let reaction: Awaited<ReturnType<typeof requestReaction>>;
       try {
         reaction = await requestReaction(event.action, payload);
       } catch (err) {
         // Model offline / unreachable — stay quiet.
-        store.set(companionBusyAtom, false);
         if (debug) console.debug('[companion] request failed (offline?)', err);
         return;
+      } finally {
+        inFlight.current -= 1;
+        if (inFlight.current === 0) store.set(companionBusyAtom, false);
       }
-      store.set(companionBusyAtom, false);
 
       // Server busy or timed out → skip quietly (no voice this time).
       if (reaction.skipped) {
@@ -76,21 +80,10 @@ export function useCompanion(): void {
       if (!store.get(companionMutedAtom)) playVoice(client, reaction.audio);
     };
 
-    const drain = async () => {
-      if (running.current) return;
-      running.current = true;
-      try {
-        while (queue.current.length) {
-          await handle(queue.current.shift()!);
-        }
-      } finally {
-        running.current = false;
-      }
-    };
-
+    // Fire a request per event immediately. If one is already generating, the
+    // server replies "occupied" and handle() ignores it.
     const unsub = subscribeCompanionEvents((event) => {
-      queue.current.push(event);
-      void drain();
+      void handle(event);
     });
 
     // Greet on load — guarded so StrictMode's double-mount greets only once.
