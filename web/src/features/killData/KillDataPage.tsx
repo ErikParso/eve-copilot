@@ -58,6 +58,13 @@ export function KillDataPage() {
 
   useEffect(() => {
     document.title = 'EVE Copilot — Kill Data';
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute(
+        'content',
+        'Check recent gate camp kills, system security status, and find the safest path for your EVE Online hauling runs.'
+      );
+    }
   }, []);
 
   useEffect(() => {

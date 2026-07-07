@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AppBar,
   Box,
@@ -41,6 +41,52 @@ const NAV_ITEMS: NavItem[] = [
 export function Layout() {
   const { pathname } = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Dynamic SEO metadata updates (canonical url, Open Graph, and Twitter tags)
+  useEffect(() => {
+    const baseDomain = 'https://eve-online-copilot.hf.space';
+    
+    // Normalize path (in case of '/' redirecting to '/couriers')
+    const normalizedPath = pathname === '/' ? '/couriers' : pathname;
+    const currentUrl = `${baseDomain}${normalizedPath}`;
+
+    // 1. Update/create canonical link tag
+    let canonicalLink = document.querySelector('link[rel="canonical"]');
+    if (!canonicalLink) {
+      canonicalLink = document.createElement('link');
+      canonicalLink.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonicalLink);
+    }
+    canonicalLink.setAttribute('href', currentUrl);
+
+    // 2. Update Open Graph and Twitter URL tags
+    const ogUrlMeta = document.querySelector('meta[property="og:url"]');
+    if (ogUrlMeta) ogUrlMeta.setAttribute('content', currentUrl);
+    const twUrlMeta = document.querySelector('meta[property="twitter:url"]');
+    if (twUrlMeta) twUrlMeta.setAttribute('content', currentUrl);
+
+    // 3. Sync Open Graph and Twitter title and description from the current page state.
+    // We wrap this in requestAnimationFrame to ensure the child route's own useEffect
+    // has run and updated document.title and description.
+    const handle = requestAnimationFrame(() => {
+      const title = document.title;
+      const ogTitleMeta = document.querySelector('meta[property="og:title"]');
+      if (ogTitleMeta) ogTitleMeta.setAttribute('content', title);
+      const twTitleMeta = document.querySelector('meta[property="twitter:title"]');
+      if (twTitleMeta) twTitleMeta.setAttribute('content', title);
+
+      const descMeta = document.querySelector('meta[name="description"]');
+      const description = descMeta ? descMeta.getAttribute('content') : '';
+      if (description) {
+        const ogDescMeta = document.querySelector('meta[property="og:description"]');
+        if (ogDescMeta) ogDescMeta.setAttribute('content', description);
+        const twDescMeta = document.querySelector('meta[property="twitter:description"]');
+        if (twDescMeta) twDescMeta.setAttribute('content', description);
+      }
+    });
+
+    return () => cancelAnimationFrame(handle);
+  }, [pathname]);
   
   useCharacterStatusPoller();
   useCharacterWalletPoller();
