@@ -69,7 +69,7 @@ export function useCompanion(): void {
       }
       if (!client) return;
 
-      if (!store.get(companionMutedAtom)) playVoice(reaction.audio);
+      if (!store.get(companionMutedAtom)) playVoice(reaction.audio, reaction.mime);
     };
 
     // Fire a request per event immediately.

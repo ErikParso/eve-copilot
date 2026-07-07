@@ -11,6 +11,8 @@ const COMPANION_BASE = import.meta.env.VITE_COMPANION_URL ?? '';
 export interface Reaction {
   text: string;
   audio: string | null;
+  /** MIME type of `audio` (server TTS may return WAV, FLAC, or MP3). */
+  mime: string;
 }
 
 export async function requestReaction(
@@ -28,10 +30,11 @@ export async function requestReaction(
   const data = (await res.json()) as {
     text?: string;
     audio?: string | null;
+    audioMime?: string;
     timings?: { llm: number; tts: number; total: number };
   };
   if (data.timings) {
     console.log(`[Companion] ${action} timings: LLM ${data.timings.llm}ms, TTS ${data.timings.tts}ms, total ${data.timings.total}ms`);
   }
-  return { text: (data.text ?? '').trim(), audio: data.audio ?? null };
+  return { text: (data.text ?? '').trim(), audio: data.audio ?? null, mime: data.audioMime ?? 'audio/wav' };
 }

@@ -32,12 +32,12 @@ export function onSpeakingChange(listener: SpeakingListener): () => void {
 
 // ── Playback ─────────────────────────────────────────────────────────────────
 
-/** Speak the companion's line: play the server-provided Kokoro audio. */
-export function playVoice(audioBase64: string | null): void {
+/** Speak the companion's line: play the server-provided audio (WAV/FLAC/MP3). */
+export function playVoice(audioBase64: string | null, mime = 'audio/wav'): void {
   stopSpeaking();
   if (audioBase64) {
     try {
-      const audio = new Audio(`data:audio/wav;base64,${audioBase64}`);
+      const audio = new Audio(`data:${mime};base64,${audioBase64}`);
       currentAudio = audio;
       const done = () => {
         if (currentAudio === audio) currentAudio = null;
