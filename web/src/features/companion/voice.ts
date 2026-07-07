@@ -33,7 +33,7 @@ export function onSpeakingChange(listener: SpeakingListener): () => void {
 // ── Playback ─────────────────────────────────────────────────────────────────
 
 /** Speak the companion's line: play the server-provided Kokoro audio. */
-export function playVoice(text: string, audioBase64: string | null): void {
+export function playVoice(audioBase64: string | null): void {
   stopSpeaking();
   if (audioBase64) {
     try {
