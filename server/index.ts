@@ -18,6 +18,9 @@ import {
   pinnedCouriersRequestSchema,
   packageStatusLinesSchema,
 } from './schemas.js';
+import { generateReaction, buildReactionPrompt, warmModel } from './companion.js';
+import { isCompanionAction } from './companionBriefs.js';
+import { synthesizeSpeech, isTtsEnabled, warmTts } from './companionTts.js';
 
 // Last-resort backstop: a stray rejected promise or thrown error in any
 // background crawl must never take the whole server down (a transient ESI 504
@@ -147,6 +150,42 @@ async function main() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
+  });
+
+  // AI companion: one call returns both the text reaction and its spoken audio
+  // (base64 MP3). The LLM (Groq) and TTS (Edge) both run off-box, so this never
+  // contends with the market crawler for CPU. No concurrency guard, no timeout —
+  // reactions run to completion; a provider rate-limit just fails one quietly.
+  app.post('/api/companion/react', async (req, res) => {
+    const { action, payload } = (req.body ?? {}) as Record<string, unknown>;
+    if (!isCompanionAction(action)) {
+      return res.status(400).json({ error: 'unknown or missing action' });
+    }
+    const data = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+    const t0 = Date.now();
+    try {
+      const { system, user } = buildReactionPrompt(action, data);
+      const text = await generateReaction(system, user);
+      const tLlm = Date.now();
+
+      let audio: string | null = null;
+      let audioMime = 'audio/wav';
+      if (isTtsEnabled() && text) {
+        try {
+          const speech = await synthesizeSpeech(text);
+          audio = speech.buffer.toString('base64');
+          audioMime = speech.mime;
+        } catch (err) {
+          console.error('[Companion] TTS failed (text still returned)', err);
+        }
+      }
+      const tTts = Date.now();
+      console.log(`[Companion] ${action}: LLM ${tLlm - t0}ms, TTS ${tTts - tLlm}ms, total ${tTts - t0}ms`);
+      res.json({ text, audio, audioMime, timings: { llm: tLlm - t0, tts: tTts - tLlm, total: tTts - t0 } });
+    } catch (err) {
+      console.error('POST /api/companion/react failed', err);
+      res.status(502).json({ error: err instanceof Error ? err.message : 'Companion error' });
+    }
   });
 
   // Test mutation route for E2E browser tests
@@ -460,6 +499,12 @@ async function main() {
 
   app.listen(PORT, () => {
     console.log(`API listening on http://localhost:${PORT}`);
+    // Warm the companion models (Groq LLM + Edge TTS) so the first reaction is snappy.
+    // Skipped under OFFLINE (tests) to avoid outbound calls.
+    if (process.env.OFFLINE !== 'true') {
+      void warmModel();
+      void warmTts();
+    }
   });
 }
 

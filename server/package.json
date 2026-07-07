@@ -19,6 +19,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "msedge-tts": "^2.0.6",
     "zod": "^4.4.3"
   },
   "devDependencies": {

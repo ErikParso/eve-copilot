@@ -11,10 +11,8 @@ export default defineConfig({
     // switching to another port if 5177 is taken.
     port: 5177,
     strictPort: true,
-    // Proxy API calls in dev. Companion runs on its own server (7860); everything
-    // else on the main backend (4000). The companion rule must come first.
+    // Proxy all API calls (including the companion) to the main backend (4000).
     proxy: {
-      '/api/companion': 'http://localhost:7860',
       '/api': 'http://localhost:4000',
     },
   },

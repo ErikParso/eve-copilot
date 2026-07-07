@@ -17,18 +17,16 @@ RUN npm run build
 WORKDIR /app/web
 RUN npm ci
 
-# Build the frontend using the Hugging Face secret mounts. VITE_COMPANION_URL points
-# the AI companion at its own separate Space (empty = same origin).
+# Build the frontend using the Hugging Face secret mounts. The AI companion is now
+# served by this same backend (same origin), so VITE_COMPANION_URL is no longer needed.
 RUN --mount=type=secret,id=VITE_EVE_CLIENT_ID,mode=0444,required=true \
     --mount=type=secret,id=VITE_ADSENSE_CLIENT_ID,mode=0444,required=false \
     --mount=type=secret,id=VITE_ADSENSE_DESKTOP_SLOT_ID,mode=0444,required=false \
     --mount=type=secret,id=VITE_ADSENSE_MOBILE_SLOT_ID,mode=0444,required=false \
-    --mount=type=secret,id=VITE_COMPANION_URL,mode=0444,required=false \
     VITE_EVE_CLIENT_ID=$(cat /run/secrets/VITE_EVE_CLIENT_ID) \
     VITE_ADSENSE_CLIENT_ID=$( [ -f /run/secrets/VITE_ADSENSE_CLIENT_ID ] && cat /run/secrets/VITE_ADSENSE_CLIENT_ID || echo "" ) \
     VITE_ADSENSE_DESKTOP_SLOT_ID=$( [ -f /run/secrets/VITE_ADSENSE_DESKTOP_SLOT_ID ] && cat /run/secrets/VITE_ADSENSE_DESKTOP_SLOT_ID || echo "" ) \
     VITE_ADSENSE_MOBILE_SLOT_ID=$( [ -f /run/secrets/VITE_ADSENSE_MOBILE_SLOT_ID ] && cat /run/secrets/VITE_ADSENSE_MOBILE_SLOT_ID || echo "" ) \
-    VITE_COMPANION_URL=$( [ -f /run/secrets/VITE_COMPANION_URL ] && cat /run/secrets/VITE_COMPANION_URL || echo "" ) \
     npm run build
 
 # Set up Nginx configuration
