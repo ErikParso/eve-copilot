@@ -1,7 +1,7 @@
 FROM node:20-slim
 
-# Nginx + curl (Ollama install & health check) + certs
-RUN apt-get update && apt-get install -y --no-install-recommends nginx curl ca-certificates \
+# Nginx + curl (Ollama install & health check) + certs + zstd (Ollama installer needs it)
+RUN apt-get update && apt-get install -y --no-install-recommends nginx curl ca-certificates zstd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Ollama (glibc binary — does not run on Alpine/musl, hence node:20-slim)
