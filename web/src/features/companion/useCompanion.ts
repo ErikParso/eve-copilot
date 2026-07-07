@@ -4,6 +4,7 @@ import { requestReaction } from './api';
 import { dispatchCompanionEvent, subscribeCompanionEvents } from './events';
 import { buildBaseContext } from './context';
 import { playVoice } from './voice';
+import { COMPANION_ENABLED } from './config';
 import { companionBusyAtom, companionDebugAtom, companionMutedAtom } from './atoms';
 import type { CompanionEvent } from './types';
 
@@ -32,6 +33,8 @@ export function useCompanion(): void {
   const greeted = useRef(false);
 
   useEffect(() => {
+    if (!COMPANION_ENABLED) return; // companion disabled → never subscribe or greet
+
     const handle = async (event: CompanionEvent) => {
       const debug = store.get(companionDebugAtom);
       // Merge the always-present base context with this action's own data. The

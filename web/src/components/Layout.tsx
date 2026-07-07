@@ -23,6 +23,7 @@ import { useCharacterWalletPoller } from '@/features/auth/useCharacterWalletPoll
 import { useHaulingSearchController } from '@/features/courierContracts/useHaulingSearchController';
 import { useCompanion } from '@/features/companion/useCompanion';
 import { CompanionOrb } from '@/features/companion/components/CompanionOrb';
+import { COMPANION_ENABLED } from '@/features/companion/config';
 import { AdSenseScriptLoader } from './AdSenseScriptLoader';
 
 interface NavItem {
@@ -151,7 +152,7 @@ export function Layout() {
         <Outlet />
       </Container>
 
-      <CompanionOrb />
+      {COMPANION_ENABLED && <CompanionOrb />}
     </Box>
   );
 }
