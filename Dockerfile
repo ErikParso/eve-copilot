@@ -1,7 +1,11 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-# Install Nginx
-RUN apk add --no-cache nginx
+# Nginx + curl (Ollama install & health check) + certs
+RUN apt-get update && apt-get install -y --no-install-recommends nginx curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama (glibc binary — does not run on Alpine/musl, hence node:20-slim)
+RUN curl -fsSL https://ollama.com/install.sh | sh
 
 WORKDIR /app
 
@@ -13,7 +17,7 @@ WORKDIR /app/server
 RUN npm ci
 RUN npm run build
 
-# Build the Frontend (Vite)
+# Build the Frontend (Vite). The AI companion is enabled by default — no flag needed.
 WORKDIR /app/web
 RUN npm ci
 
@@ -28,6 +32,21 @@ RUN --mount=type=secret,id=VITE_EVE_CLIENT_ID,mode=0444,required=true \
     VITE_ADSENSE_MOBILE_SLOT_ID=$( [ -f /run/secrets/VITE_ADSENSE_MOBILE_SLOT_ID ] && cat /run/secrets/VITE_ADSENSE_MOBILE_SLOT_ID || echo "" ) \
     npm run build
 
+# --- Bake the AI models into the image ---
+# The Space's disk is ephemeral, so a runtime download would repeat on every cold
+# start. Baking them makes boot fast and offline. Owned by UID 1000 via the chown below.
+ENV OLLAMA_MODELS=/app/.ollama/models
+ENV HF_HOME=/app/.cache/hf
+
+# Ollama LLM: start the daemon, wait for it, pull the model into OLLAMA_MODELS.
+RUN mkdir -p /app/.ollama/models
+RUN ollama serve & \
+    for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 1; done && \
+    ollama pull qwen2.5:1.5b
+
+# Kokoro TTS: dist/tts.js is already built; one synth downloads the ONNX model into HF_HOME.
+RUN cd /app/server && node -e "import('./dist/tts.js').then(m=>m.synthesize('warm up')).then(()=>console.log('kokoro baked')).catch(e=>{console.error(e);process.exit(1)})"
+
 # Set up Nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 
@@ -35,7 +54,8 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
-# Hugging Face Spaces runs as user 1000, so we make sure the app directory is writable
+# Hugging Face Spaces runs as user 1000, so we make sure the app directory (incl.
+# the baked models) is writable
 RUN chown -R 1000:1000 /app /var/lib/nginx /var/log/nginx
 
 # Run as non-root user (required by Hugging Face)

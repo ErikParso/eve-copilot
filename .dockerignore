@@ -1,0 +1,10 @@
+# Keep the build context small and avoid shipping stale/host-specific artifacts.
+# Dependencies are reinstalled in the image via `npm ci`; models are baked in-image.
+**/node_modules
+**/dist
+.git
+.gitignore
+*.wav
+graphify-out
+graphify-out/**
+**/*.log
