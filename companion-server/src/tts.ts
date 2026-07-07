@@ -1,14 +1,12 @@
 // Local neural text-to-speech with Kokoro (82M, ONNX) via kokoro-js. Runs on CPU,
-// offline, no API key. The model (~80MB at q8) is downloaded once on first use and
-// cached; we load it lazily so server startup and the model download only happen if
-// TTS is actually used. Returns a WAV buffer the browser plays via <audio>.
+// offline, no API key. The model is downloaded once and cached; loaded lazily.
+// Returns a WAV buffer the browser plays via <audio>.
 //
 // Config via env:
-//   COMPANION_TTS   set to "off" to disable (FE then uses the browser voice)
+//   COMPANION_TTS   set to "off" to disable
 //   KOKORO_MODEL    default onnx-community/Kokoro-82M-v1.0-ONNX
 //   KOKORO_VOICE    default af_heart (female, top-graded)
-//   KOKORO_DTYPE    default q4 (fp32|fp16|q8|q4|q4f16) — q4 is ~2x faster than q8
-//                   on CPU with only a small quality cost
+//   KOKORO_DTYPE    default q4 (fp32|fp16|q8|q4|q4f16) — q4 is ~2x faster than q8 on CPU
 import type { KokoroTTS } from 'kokoro-js';
 
 const MODEL_ID = process.env.KOKORO_MODEL ?? 'onnx-community/Kokoro-82M-v1.0-ONNX';
@@ -60,8 +58,8 @@ export async function synthesize(text: string): Promise<Buffer> {
   return Buffer.from(audio.toWav());
 }
 
-/** Load the Kokoro model at boot (a real synth, to fully warm it) so the first
- * user reaction doesn't pay the ~18s cold load. Best-effort; no-op when disabled. */
+/** Load the Kokoro model at boot (a real synth) so the first user reaction doesn't
+ * pay the cold load. Best-effort; no-op when disabled. */
 export async function warmTts(): Promise<void> {
   if (!isTtsEnabled()) return;
   try {

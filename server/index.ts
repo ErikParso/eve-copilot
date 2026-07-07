@@ -10,9 +10,6 @@ import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
-import { generateReaction, buildReactionPrompt, warmModel } from './companion.js';
-import { isCompanionAction } from './companionBriefs.js';
-import { synthesize, isTtsEnabled, warmTts } from './tts.js';
 import {
   sellDestinationsSchema,
   attractivityWeightsSchema,
@@ -33,12 +30,6 @@ process.on('uncaughtException', (err) => {
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
-
-// Companion resource limits — keep it from starving the rest of the app.
-const COMPANION_TIMEOUT_MS = Number(process.env.COMPANION_TIMEOUT_MS ?? 30_000);
-// Single-flight: at most one reaction generating at a time. Extra requests get
-// "occupied" instead of queuing (a queue is what let the LLM back up to ~10 min).
-let companionBusy = false;
 const HAULING_PAGE_SIZE = 48; // attractivity-ranked hauls per page (routes materialised only for the shipped page)
 
 function parseRouteType(value: unknown): RouteType {
@@ -445,68 +436,6 @@ async function main() {
     }
   });
 
-  // AI companion: proxy an assembled prompt to the local Ollama model. The client
-  // builds `system`/`user` from its own (browser-stored) memory; we just relay to
-  // Ollama and hand back the parsed JSON reaction. 502 if the model is unreachable
-  // so the panel can quietly show an "offline" state instead of erroring loudly.
-  // AI companion: one call returns both the text reaction and its spoken audio.
-  // The LLM writes the line, then (if TTS is enabled) Kokoro synthesizes it to a
-  // WAV returned as base64. TTS is best-effort — if it's disabled or fails, we
-  // still return the text (audio: null) and the FE falls back to the browser voice.
-  app.post('/api/companion/react', async (req, res) => {
-    const { action, payload } = (req.body ?? {}) as Record<string, unknown>;
-    if (!isCompanionAction(action)) {
-      return res.status(400).json({ error: 'unknown or missing action' });
-    }
-    // Reject concurrent reactions instead of queuing them (protects the main app).
-    if (companionBusy) {
-      console.log(`[Companion] occupied — rejecting ${action} (a reaction is already running)`);
-      return res.status(429).json({ status: 'occupied' });
-    }
-    companionBusy = true;
-
-    const data = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), COMPANION_TIMEOUT_MS);
-    const t0 = Date.now();
-    try {
-      const { system, user } = buildReactionPrompt(action, data);
-      const text = await generateReaction(system, user, controller.signal);
-      const tLlm = Date.now();
-
-      let audio: string | null = null;
-      if (isTtsEnabled() && text) {
-        // TTS can't be cancelled mid-synth, so don't even start it if we're already
-        // over budget — that keeps the 30s cap meaningful.
-        if (Date.now() - t0 >= COMPANION_TIMEOUT_MS) {
-          console.log(`[Companion] ${action}: over budget after LLM (${tLlm - t0}ms) — skipping TTS`);
-        } else {
-          try {
-            const wav = await synthesize(text);
-            audio = wav.toString('base64');
-          } catch (err) {
-            console.error('[companion] TTS failed (text still returned)', err);
-          }
-        }
-      }
-      const tTts = Date.now();
-      console.log(`[Companion] ${action}: LLM ${tLlm - t0}ms, TTS ${tTts - tLlm}ms, total ${tTts - t0}ms`);
-      res.json({ text, audio });
-    } catch (err) {
-      if (controller.signal.aborted) {
-        // Aborting the fetch cancels Ollama's running generation → CPU freed.
-        console.warn(`[Companion] ${action}: ABORTED after ${Date.now() - t0}ms (>${COMPANION_TIMEOUT_MS}ms) — generation stopped, resources freed`);
-        res.status(504).json({ status: 'aborted' });
-      } else {
-        console.error('POST /api/companion/react failed', err);
-        res.status(502).json({ error: err instanceof Error ? err.message : 'Companion error' });
-      }
-    } finally {
-      clearTimeout(timeout);
-      companionBusy = false;
-    }
-  });
-
   app.get('/api/route', async (req, res) => {
     try {
       const origin = parseOptionalNumber(req.query.origin);
@@ -532,11 +461,6 @@ async function main() {
   app.listen(PORT, () => {
     console.log(`API listening on http://localhost:${PORT}`);
   });
-
-  // Warm the companion models in the background so the first reaction isn't slowed
-  // by a cold model load (Kokoro ~18s, LLM ~seconds). Non-blocking.
-  void warmModel();
-  void warmTts();
 }
 
 main().catch((err) => {

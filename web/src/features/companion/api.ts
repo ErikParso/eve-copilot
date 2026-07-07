@@ -3,7 +3,10 @@
 // (base64 WAV from the local Kokoro model, or null when TTS is off/failed).
 import type { CompanionActionId } from './types';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+// The companion runs on its own server/Space. VITE_COMPANION_URL points at it
+// (e.g. https://<owner>-companion.hf.space). Empty = same origin — in dev the Vite
+// proxy forwards /api/companion → the local companion-server.
+const COMPANION_BASE = import.meta.env.VITE_COMPANION_URL ?? '';
 
 export interface Reaction {
   text: string;
@@ -18,7 +21,7 @@ export async function requestReaction(
   payload: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<Reaction> {
-  const res = await fetch(`${API_BASE}/api/companion/react`, {
+  const res = await fetch(`${COMPANION_BASE}/api/companion/react`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, payload }),
