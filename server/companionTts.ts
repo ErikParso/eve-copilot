@@ -37,13 +37,14 @@ export async function synthesizeSpeech(text: string): Promise<SpeechResult> {
   }
 }
 
-/** Best-effort warm ping at boot so the first real reaction is snappy. */
-export async function warmTts(): Promise<void> {
-  if (!isTtsEnabled()) return;
+/** Best-effort warm ping at boot so the first real reaction is snappy. Returns the
+ * voice label on success, or null if disabled/failed (the caller logs one warm line). */
+export async function warmTts(): Promise<string | null> {
+  if (!isTtsEnabled()) return null;
   try {
     await synthesizeSpeech('ready');
-    console.log(`[TTS] Edge TTS warm (${VOICE}).`);
-  } catch (err) {
-    console.warn('[TTS] warm ping failed (will retry on first reaction)', err);
+    return VOICE;
+  } catch {
+    return null;
   }
 }

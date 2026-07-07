@@ -53,9 +53,10 @@ export async function generateReaction(system: string, user: string): Promise<st
 }
 
 /**
- * Ping the LLM at boot so the first reaction is warm. Best-effort.
+ * Ping the LLM at boot so the first reaction is warm. Best-effort. Returns the model
+ * label on success, or null on failure (the caller logs one consolidated warm line).
  */
-export async function warmModel(): Promise<void> {
+export async function warmModel(): Promise<string | null> {
   try {
     const res = await fetch(GROQ_URL, {
       method: 'POST',
@@ -69,12 +70,8 @@ export async function warmModel(): Promise<void> {
         max_tokens: 1,
       }),
     });
-    if (res.ok) {
-      console.log(`[Companion] Groq LLM warm (${COMPANION_MODEL}).`);
-    } else {
-      console.warn(`[Companion] Groq LLM warm warning: ${res.status} ${res.statusText}`);
-    }
-  } catch (err) {
-    console.error('[Companion] Groq LLM warm failed', err);
+    return res.ok ? COMPANION_MODEL : null;
+  } catch {
+    return null;
   }
 }

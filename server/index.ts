@@ -180,7 +180,7 @@ async function main() {
         }
       }
       const tTts = Date.now();
-      console.log(`[Companion] ${action}: LLM ${tLlm - t0}ms, TTS ${tTts - tLlm}ms, total ${tTts - t0}ms`);
+      console.log(`[Companion] ${action} — llm ${tLlm - t0}ms · tts ${tTts - tLlm}ms · total ${tTts - t0}ms`);
       res.json({ text, audio, audioMime, timings: { llm: tLlm - t0, tts: tTts - tLlm, total: tTts - t0 } });
     } catch (err) {
       console.error('POST /api/companion/react failed', err);
@@ -499,11 +499,12 @@ async function main() {
 
   app.listen(PORT, () => {
     console.log(`API listening on http://localhost:${PORT}`);
-    // Warm the companion models (Groq LLM + Edge TTS) so the first reaction is snappy.
-    // Skipped under OFFLINE (tests) to avoid outbound calls.
+    // Warm the companion models (Groq LLM + Edge TTS) so the first reaction is snappy,
+    // then log ONE consolidated warm line. Skipped under OFFLINE (tests).
     if (process.env.OFFLINE !== 'true') {
-      void warmModel();
-      void warmTts();
+      void Promise.all([warmModel(), warmTts()]).then(([llm, tts]) => {
+        console.log(`[Companion] warm — llm ${llm ?? 'FAILED'} · tts ${tts ?? 'FAILED'}`);
+      });
     }
   });
 }
