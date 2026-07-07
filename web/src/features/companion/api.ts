@@ -34,6 +34,13 @@ export async function requestReaction(
   if (!res.ok) {
     throw new Error(`companion ${res.status}`);
   }
-  const data = (await res.json()) as { text?: string; audio?: string | null };
+  const data = (await res.json()) as {
+    text?: string;
+    audio?: string | null;
+    timings?: { llm: number; tts: number; total: number };
+  };
+  if (data.timings) {
+    console.log(`[Companion] ${action} timings: LLM ${data.timings.llm}ms, TTS ${data.timings.tts}ms, total ${data.timings.total}ms`);
+  }
   return { text: (data.text ?? '').trim(), audio: data.audio ?? null };
 }
