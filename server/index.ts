@@ -1,3 +1,4 @@
+import './loadEnv.js'; // load server/.env (dev secrets) before anything reads process.env
 import express from 'express';
 import cors from 'cors';
 import { loadSde } from './sde.js';

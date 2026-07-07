@@ -18,8 +18,12 @@ export function buildReactionPrompt(
 }
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const COMPANION_MODEL = process.env.COMPANION_MODEL ?? 'llama-3.1-8b-instant';
+
+// Read at call-time (not module-load) so the dev .env loader has run first.
+function authHeader(): string {
+  return `Bearer ${process.env.GROQ_API_KEY}`;
+}
 
 /**
  * Ask the model for one reaction. Plain-text reply, one sentence. Throws on
@@ -30,7 +34,7 @@ export async function generateReaction(system: string, user: string): Promise<st
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${GROQ_API_KEY}`,
+      Authorization: authHeader(),
     },
     body: JSON.stringify({
       model: COMPANION_MODEL,
@@ -62,7 +66,7 @@ export async function warmModel(): Promise<string | null> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${GROQ_API_KEY}`,
+        Authorization: authHeader(),
       },
       body: JSON.stringify({
         model: COMPANION_MODEL,

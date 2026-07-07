@@ -4,6 +4,9 @@
 **/dist
 .git
 .gitignore
+# Never bake local secrets into the image (dev-only; HF injects secrets at runtime)
+**/.env
+**/.env.*
 *.wav
 graphify-out
 graphify-out/**
