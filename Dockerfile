@@ -38,11 +38,15 @@ RUN --mount=type=secret,id=VITE_EVE_CLIENT_ID,mode=0444,required=true \
 ENV OLLAMA_MODELS=/app/.ollama/models
 ENV HF_HOME=/app/.cache/hf
 
-# Ollama LLM: start the daemon, wait for it, pull the model into OLLAMA_MODELS.
+# Ollama LLM: start the daemon, wait for it, pull the model into OLLAMA_MODELS,
+# then KILL the daemon — otherwise the backgrounded `ollama serve` keeps this RUN
+# step alive forever and the build hangs.
 RUN mkdir -p /app/.ollama/models
-RUN ollama serve & \
-    for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 1; done && \
-    ollama pull qwen2.5:1.5b
+RUN ollama serve & OLLAMA_PID=$!; \
+    until curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; do sleep 1; done; \
+    ollama pull qwen2.5:1.5b; STATUS=$?; \
+    kill "$OLLAMA_PID" 2>/dev/null; \
+    exit $STATUS
 
 # Kokoro TTS: dist/tts.js is already built; one synth downloads the ONNX model into HF_HOME.
 RUN cd /app/server && node -e "import('./dist/tts.js').then(m=>m.synthesize('warm up')).then(()=>console.log('kokoro baked')).catch(e=>{console.error(e);process.exit(1)})"
