@@ -21,11 +21,9 @@ function cleanLine(text: string): string | null {
 }
 
 /**
- * Mount once (in Layout). Subscribes to companion events and fires ONE request per
- * event. Concurrency is enforced on the SERVER (single-flight): while a reaction is
- * generating, the server replies "occupied" (429) and the FE ignores it — so rapid
- * clicks produce at most one reaction. Speaks each response (voice-only). Also fires
- * the one-time `app-load` greeting.
+ * Mount once (in Layout). Subscribes to companion events and fires one request per
+ * event — no concurrency limits on either side; every reaction runs to completion.
+ * Speaks each response (voice-only). Also fires the one-time `app-load` greeting.
  */
 export function useCompanion(): void {
   const store = useStore();
@@ -60,12 +58,6 @@ export function useCompanion(): void {
         if (inFlight.current === 0) store.set(companionBusyAtom, false);
       }
 
-      // Server busy or timed out → skip quietly (no voice this time).
-      if (reaction.skipped) {
-        if (debug) console.debug(`[companion] skipped (${reaction.skipped})`);
-        return;
-      }
-
       const client = cleanLine(reaction.text);
       if (debug) {
         (window as typeof window & { __companion?: unknown }).__companion = {
@@ -80,8 +72,7 @@ export function useCompanion(): void {
       if (!store.get(companionMutedAtom)) playVoice(reaction.audio);
     };
 
-    // Fire a request per event immediately. If one is already generating, the
-    // server replies "occupied" and handle() ignores it.
+    // Fire a request per event immediately.
     const unsub = subscribeCompanionEvents((event) => {
       void handle(event);
     });
