@@ -59,3 +59,15 @@ export async function synthesize(text: string): Promise<Buffer> {
   const audio = await tts.generate(text, { voice: VOICE });
   return Buffer.from(audio.toWav());
 }
+
+/** Load the Kokoro model at boot (a real synth, to fully warm it) so the first
+ * user reaction doesn't pay the ~18s cold load. Best-effort; no-op when disabled. */
+export async function warmTts(): Promise<void> {
+  if (!isTtsEnabled()) return;
+  try {
+    await synthesize('ready');
+    console.log('[TTS] Kokoro warm (loaded).');
+  } catch (err) {
+    console.error('[TTS] warm failed', err);
+  }
+}

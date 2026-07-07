@@ -43,6 +43,9 @@ export async function generateReaction(system: string, user: string): Promise<st
     body: JSON.stringify({
       model: COMPANION_MODEL,
       stream: false,
+      // keep_alive: -1 keeps the model resident in RAM forever, so it never pays a
+      // multi-second reload after an idle gap.
+      keep_alive: -1,
       // Small model, short reply: keep it tight and a touch creative.
       options: { temperature: 0.7, num_predict: 120 },
       messages: [
@@ -56,4 +59,19 @@ export async function generateReaction(system: string, user: string): Promise<st
   }
   const data = (await res.json()) as { message?: { content?: string } };
   return (data.message?.content ?? '').trim();
+}
+
+/** Load the LLM into memory at boot and pin it there, so the first real reaction
+ * isn't slowed by a cold model load. Best-effort. */
+export async function warmModel(): Promise<void> {
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: COMPANION_MODEL, prompt: 'hi', stream: false, keep_alive: -1, options: { num_predict: 1 } }),
+    });
+    if (res.ok) console.log(`[Companion] LLM warm (${COMPANION_MODEL}, kept resident).`);
+  } catch (err) {
+    console.error('[Companion] LLM warm failed', err);
+  }
 }

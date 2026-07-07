@@ -10,9 +10,9 @@ import { getEnrichedHauling, type HaulingKind } from './hauling.js';
 import { getRoute, type RouteType } from './routing.js';
 import { toRouteSystems } from './enrich.js';
 import { getGateKills, setTestKills, clearTestKills, startGateKillFeed, getGateKillReport } from './gateKills.js';
-import { generateReaction, buildReactionPrompt } from './companion.js';
+import { generateReaction, buildReactionPrompt, warmModel } from './companion.js';
 import { isCompanionAction } from './companionBriefs.js';
-import { synthesize, isTtsEnabled } from './tts.js';
+import { synthesize, isTtsEnabled, warmTts } from './tts.js';
 import {
   sellDestinationsSchema,
   attractivityWeightsSchema,
@@ -454,8 +454,10 @@ async function main() {
     }
     const data = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
     try {
+      const t0 = Date.now();
       const { system, user } = buildReactionPrompt(action, data);
       const text = await generateReaction(system, user);
+      const tLlm = Date.now();
 
       let audio: string | null = null;
       if (isTtsEnabled() && text) {
@@ -466,6 +468,8 @@ async function main() {
           console.error('[companion] TTS failed (text still returned)', err);
         }
       }
+      const tTts = Date.now();
+      console.log(`[Companion] ${action}: LLM ${tLlm - t0}ms, TTS ${tTts - tLlm}ms, total ${tTts - t0}ms`);
       res.json({ text, audio });
     } catch (err) {
       console.error('POST /api/companion/react failed', err);
@@ -498,6 +502,11 @@ async function main() {
   app.listen(PORT, () => {
     console.log(`API listening on http://localhost:${PORT}`);
   });
+
+  // Warm the companion models in the background so the first reaction isn't slowed
+  // by a cold model load (Kokoro ~18s, LLM ~seconds). Non-blocking.
+  void warmModel();
+  void warmTts();
 }
 
 main().catch((err) => {
