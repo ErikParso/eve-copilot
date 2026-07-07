@@ -23,18 +23,17 @@ export function isTtsEnabled(): boolean {
 
 let ttsPromise: Promise<KokoroTTS> | null = null;
 
-/** kokoro-js resolves its bundled voice files with `import.meta.dirname`, which is
- * undefined on Node < 20.11 (crashing generate() with a path.resolve error). Point
- * a global `__dirname` at the package's dist dir so `resolve(__dirname,
- * '../voices/*.bin')` works. Guarded + no-op on Node 20+ where dirname exists. */
+/** kokoro-js resolves its bundled voice files against a `__dirname` (falling back
+ * to `import.meta.dirname`), then reads `../voices/<voice>.bin`. That `__dirname`
+ * is wrong in two environments: undefined on Node < 20.11, and — worse — leaked as
+ * the CWD by `node -e` (our build-time bake), which resolves to a bogus
+ * `<cwd>/../voices`. So we OVERRIDE a global `__dirname` to point at the package's
+ * real dist dir every time, before kokoro-js is imported. */
 async function shimDirnameForKokoro(): Promise<void> {
-  const g = globalThis as { __dirname?: string };
-  if (g.__dirname !== undefined) return;
-  if ((import.meta as { dirname?: string }).dirname !== undefined) return;
   const { createRequire } = await import('module');
   const { dirname } = await import('path');
   const require = createRequire(import.meta.url);
-  g.__dirname = dirname(require.resolve('kokoro-js'));
+  (globalThis as { __dirname?: string }).__dirname = dirname(require.resolve('kokoro-js'));
 }
 
 function loadTts(): Promise<KokoroTTS> {
