@@ -56,6 +56,12 @@ export function useCompanion(): void {
       }
       store.set(companionBusyAtom, false);
 
+      // Server busy or timed out → skip quietly (no voice this time).
+      if (reaction.skipped) {
+        if (debug) console.debug(`[companion] skipped (${reaction.skipped})`);
+        return;
+      }
+
       const client = cleanLine(reaction.text);
       if (debug) {
         (window as typeof window & { __companion?: unknown }).__companion = {

@@ -8,6 +8,9 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 export interface Reaction {
   text: string;
   audio: string | null;
+  /** Server was already generating another reaction ('occupied'), or this one hit
+   * the server-side timeout and was aborted ('aborted'). Either way: no voice. */
+  skipped?: 'occupied' | 'aborted';
 }
 
 export async function requestReaction(
@@ -21,6 +24,10 @@ export async function requestReaction(
     body: JSON.stringify({ action, payload }),
     signal,
   });
+  // 429 = another reaction is in progress; 504 = it hit the server-side timeout.
+  // Both mean "no reaction this time" — handle quietly, don't throw.
+  if (res.status === 429) return { text: '', audio: null, skipped: 'occupied' };
+  if (res.status === 504) return { text: '', audio: null, skipped: 'aborted' };
   if (!res.ok) {
     throw new Error(`companion ${res.status}`);
   }

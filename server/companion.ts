@@ -36,10 +36,11 @@ const COMPANION_MODEL = process.env.COMPANION_MODEL ?? 'qwen2.5:1.5b';
  * so we ask for no structured format and return the raw content, trimmed. The
  * client does any final cleanup. Throws on transport failure.
  */
-export async function generateReaction(system: string, user: string): Promise<string> {
+export async function generateReaction(system: string, user: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       model: COMPANION_MODEL,
       stream: false,
