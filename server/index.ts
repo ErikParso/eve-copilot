@@ -1,3 +1,4 @@
+import './logColors.js'; // patch console to colorize logs by subsystem (import first)
 import './loadEnv.js'; // load server/.env (dev secrets) before anything reads process.env
 import express from 'express';
 import cors from 'cors';
