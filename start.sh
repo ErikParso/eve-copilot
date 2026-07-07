@@ -6,6 +6,7 @@ export OLLAMA_MODELS=/app/.ollama/models
 export HF_HOME=/app/.cache/hf
 export OLLAMA_URL=http://127.0.0.1:11434
 export OLLAMA_KEEP_ALIVE=-1
+export COMPANION_MODEL=llama3.2:1b
 export KOKORO_DTYPE=q4
 
 # Start Ollama in the background and wait until it answers.

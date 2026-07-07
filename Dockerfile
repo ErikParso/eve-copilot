@@ -44,7 +44,7 @@ ENV HF_HOME=/app/.cache/hf
 RUN mkdir -p /app/.ollama/models
 RUN ollama serve & OLLAMA_PID=$!; \
     until curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; do sleep 1; done; \
-    ollama pull qwen2.5:1.5b; STATUS=$?; \
+    ollama pull llama3.2:1b; STATUS=$?; \
     kill "$OLLAMA_PID" 2>/dev/null; \
     exit $STATUS
 

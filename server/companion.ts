@@ -28,7 +28,7 @@ export function buildReactionPrompt(
 }
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
-const COMPANION_MODEL = process.env.COMPANION_MODEL ?? 'qwen2.5:1.5b';
+const COMPANION_MODEL = process.env.COMPANION_MODEL ?? 'llama3.2:1b';
 
 /**
  * Ask the model for one reaction. `system` and `user` are fully assembled by the
